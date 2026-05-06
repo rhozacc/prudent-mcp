@@ -1,0 +1,63 @@
+{
+  "$ref": "#/definitions/Regulation",
+  "definitions": {
+    "Regulation": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^regulation:\\/\\/.+"
+        },
+        "framework": {
+          "type": "string"
+        },
+        "document_id": {
+          "type": "string"
+        },
+        "document_version": {
+          "type": "string"
+        },
+        "citation": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "commentary": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "last_updated": {
+                "type": "string",
+                "format": "date"
+              }
+            },
+            "required": [
+              "source",
+              "text"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "id",
+        "framework",
+        "document_id",
+        "document_version",
+        "citation",
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

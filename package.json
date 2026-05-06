@@ -1,0 +1,37 @@
+{
+  "name": "prudent-mcp",
+  "version": "0.4.0",
+  "description": "MCP server exposing the prudent IRB validation knowledge base",
+  "type": "module",
+  "module": "src/server.ts",
+  "main": "src/server.ts",
+  "bin": {
+    "prudent-mcp": "src/server.ts"
+  },
+  "exports": {
+    ".": "./src/server.ts",
+    "./schema": "./src/schema.ts",
+    "./adapters": "./src/adapters.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "demo": "bun run examples/inmemory-demo.ts",
+    "inspect": "bunx @modelcontextprotocol/inspector bun src/server.ts",
+    "inspect:demo": "bunx @modelcontextprotocol/inspector bun examples/inmemory-demo.ts",
+    "schemas": "bun run scripts/generate-schemas.ts"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.0",
+    "typescript": "^5.6.0",
+    "zod-to-json-schema": "^3.23.0"
+  }
+}

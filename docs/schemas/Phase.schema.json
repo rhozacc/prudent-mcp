@@ -1,0 +1,46 @@
+{
+  "$ref": "#/definitions/Phase",
+  "definitions": {
+    "Phase": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^regulation:\\/\\/.+"
+              },
+              {
+                "type": "string",
+                "pattern": "^test:\\/\\/.+"
+              },
+              {
+                "type": "string",
+                "pattern": "^check:\\/\\/.+"
+              },
+              {
+                "type": "string",
+                "pattern": "^playbook:\\/\\/.+"
+              }
+            ]
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

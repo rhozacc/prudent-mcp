@@ -1,0 +1,44 @@
+{
+  "$ref": "#/definitions/Referrers",
+  "definitions": {
+    "Referrers": {
+      "type": "object",
+      "properties": {
+        "regulation": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^regulation:\\/\\/.+"
+          },
+          "default": []
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^test:\\/\\/.+"
+          },
+          "default": []
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^check:\\/\\/.+"
+          },
+          "default": []
+        },
+        "playbooks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^playbook:\\/\\/.+"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}
