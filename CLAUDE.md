@@ -1,4 +1,4 @@
-# Claude Code: prudent-mcp v0.4
+# Claude Code: prudent-mcp v0.5
 
 This file is the working brief when extending the codebase. For human onboarding read `README.md` and `docs/CORPUS.md` first.
 
@@ -16,13 +16,14 @@ src/
 ├── schema.ts              zod schemas + template literal URI types
 ├── adapters.ts            interfaces per surface + empty defaults + handles
 ├── resources.ts           URI templates mirroring the schemes
-├── tools/                 meta + one file per surface
+├── tools/                 meta (incl. traversal tools) + one file per surface
 └── prompts/               three prompt scaffolds
 
 examples/inmemory-demo.ts  seeded in-memory server, runnable end-to-end
 scripts/generate-schemas.ts  zod → JSON Schema export
+scripts/list-all.ts          prints full corpus overview to stdout
 docs/                      architecture, corpus structure, generated schemas
-tests/smoke.test.ts        construction smoke test
+tests/smoke.test.ts        construction + traversal smoke tests
 ```
 
 Every tool, resource, and prompt has a description, a zod input schema, and a handler. In the open-source distribution the default adapters return empty results. The in-memory demo reassigns adapter handles to seed real content for development and inspection.
@@ -44,7 +45,8 @@ Bun. TypeScript strict. `@modelcontextprotocol/sdk` (TS-first). zod for runtime 
 ## Schema decisions worth understanding before extending
 
 - **Template literal URI types** — `Check.derived_from: RegulationId[]` rejects a `TestId` at compile time. Don't widen to `string[]`.
-- `Check.derived_from` + `Check.expectation` — traceability from supervisor expectations back to law. Without this, a Check is opinion.
+- `Check.derived_from` + `Check.expectation` + `Check.expected_evidence` — traceability from supervisor expectations back to law, plus the concrete artifacts a reviewer must gather. Without `derived_from`, a Check is opinion. Without `expected_evidence`, it's underspecified.
+- **Check URI shape** — `check://{area}/{topic}[/{specific}]` (e.g. `check://calibration/pd/lra-derived`). Hierarchical, consistent with `regulation://`. Don't flatten back to `check://slug`.
 - `Test.family` + `Test.aliases` + `Test.acceptance_criteria` — equivalence reasoning across bank-specific test variants.
 - `Regulation.commentary` — interpretive material (Q&A, supervisor letters), source-attributed.
 - `Playbook.phases` — structured walkthrough with mixed-surface references in each phase.
@@ -66,10 +68,12 @@ Bun. TypeScript strict. `@modelcontextprotocol/sdk` (TS-first). zod for runtime 
 - More reference adapters under `examples/`. The in-memory demo is the template; backend-specific adapters belong outside this repo.
 - More prompts beyond the existing three scaffolds.
 
-## Surface area target
+## Surface area
 
 ```
-Tools:       12   4 cross-cutting + (search + get) × 4 surfaces
+Tools:       14   6 cross-cutting + (search + get) × 4 surfaces
+                  cross-cutting: get_corpus_info · get_referrers · resolve_citation
+                                 list_review_areas · expand_playbook · get_area_overview
 Templates:    4   one per URI scheme
 Prompts:      3   validate_review_area · review_calibration · assess_findings
 Schemas:      9   Regulation · Test · Check · Playbook · CorpusInfo · Referrers

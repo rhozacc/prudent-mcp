@@ -20,10 +20,10 @@ The four surfaces:
 |---|---|---|
 | Regulation | `regulation://{framework}/{article}[/{paragraph}[/{point}]]` | Per source document — `get_regulation` accepts `as_of` for historical lookups |
 | Tests | `test://{test-id}` | Latest only |
-| Checks | `check://{check-id}` | Latest only |
+| Checks | `check://{area}/{topic}[/{specific}]` | Latest only |
 | Playbooks | `playbook://{area}[/{subarea}]` | Latest only |
 
-Plus four cross-cutting tools: `get_corpus_info`, `get_referrers`, `resolve_citation`, `list_review_areas`.
+Plus six cross-cutting tools: `get_corpus_info`, `get_referrers`, `resolve_citation`, `list_review_areas`, `expand_playbook`, `get_area_overview`.
 
 Plus three prompt scaffolds for guided review walkthroughs (`validate_review_area`, `review_calibration`, `assess_findings`).
 
@@ -108,10 +108,13 @@ This starts an in-memory server (`examples/inmemory-demo.ts`) seeded with a smal
 | `get_corpus_info` | counts and coverage |
 | `list_review_areas` | the taxonomy tree |
 | `search_regulation` `"long-run average"` | hits CRR 180/1/a and EBA GL para 78 |
-| `get_regulation` `"regulation://crr/178/1/b"` | latest text |
+| `get_regulation` `"regulation://crr/178/1/b"` | latest text + EBA commentary |
 | `get_regulation` with `as_of: "2018-01-01"` | the older 2013-vintage text |
-| `get_referrers` `"regulation://crr/180/1/a"` | the LRA check and the PD playbook |
+| `get_referrers` `"regulation://crr/180/1/a"` | check://calibration/pd/lra-derived + playbook://calibration/pd |
 | `get_playbook` `"playbook://calibration/pd"` | three phases with mixed-surface references |
+| `expand_playbook` `"playbook://calibration/pd"` | same, with every reference resolved inline |
+| `get_area_overview` `"calibration.pd"` | area node + expanded playbooks + deduplicated ID lists |
+| `get_check` `"check://calibration/pd/lra-derived"` | expectation + expected_evidence list |
 
 ### 5. Connect a real client
 
@@ -145,7 +148,8 @@ prudent-mcp/
 │   ├── inmemory-demo.ts         seeded in-memory server, runnable end-to-end
 │   └── README.md
 ├── scripts/
-│   └── generate-schemas.ts      zod → JSON Schema export
+│   ├── generate-schemas.ts      zod → JSON Schema export
+│   └── list-all.ts              print full corpus overview to stdout (bun run list)
 ├── tests/
 │   └── smoke.test.ts            construction smoke test
 ├── docs/
@@ -198,7 +202,12 @@ These are load-bearing. Don't relax them without discussion:
 
 ## Status
 
-v0.4. The schema, surface area, and adapter shape are stable. The in-memory demo exercises every code path.
+v0.5. Schema, surface area, and adapter shape are stable. The in-memory demo exercises every code path. New since v0.4:
+
+- `Check.expected_evidence` — machine-readable artifact list per check
+- Hierarchical check URIs — `check://area/topic/specific` consistent with `regulation://`
+- Traversal tools — `expand_playbook` (inline reference resolution) and `get_area_overview` (one-shot review entry point)
+- `bun run list` — full corpus overview to stdout
 
 ## Ecosystem
 
