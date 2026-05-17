@@ -200,6 +200,11 @@ const CHECKS: Record<CheckId, Check> = {
       "economic cycle, with a minimum of five years of default data. Where recent " +
       "observations are not representative of long-term performance, longer periods " +
       "or downturn-adjusted estimates are used and the choice is documented.",
+    expected_evidence: [
+      "default rate time series with vintage, date, and default flag per observation",
+      "economic cycle identification and justification of period length",
+      "reconciliation of historical default definition to currently applied definition",
+    ],
     last_updated: "2024-09-01",
   },
   "check://pd-segment-tested": {
@@ -210,6 +215,11 @@ const CHECKS: Record<CheckId, Check> = {
       "Calibration tests are performed at the level at which PDs are assigned " +
       "(rating grade or pool), not solely at portfolio level. Materially different " +
       "segments are tested separately and findings are documented per segment.",
+    expected_evidence: [
+      "per-grade or per-pool default counts and PD estimates for each test period",
+      "test statistics and p-values per material grade or pool",
+      "list of segments tested separately with materiality justification",
+    ],
     last_updated: "2024-09-01",
   },
   "check://default-definition-90dpd": {
@@ -220,6 +230,11 @@ const CHECKS: Record<CheckId, Check> = {
       "The applied default definition includes the 90-days-past-due trigger, with " +
       "materiality thresholds aligned to the relevant RTS and the treatment of " +
       "technical past-dues clearly documented.",
+    expected_evidence: [
+      "written default definition policy referencing the 90 DPD trigger",
+      "materiality threshold values with reference to the applicable RTS",
+      "treatment of technical past-dues documented in policy or methodology",
+    ],
     last_updated: "2024-09-01",
   },
   "check://default-definition-utp": {
@@ -232,6 +247,11 @@ const CHECKS: Record<CheckId, Check> = {
       "material credit-related economic loss, distressed restructuring, bankruptcy). " +
       "Any additional institution-specific UTP triggers are documented and applied " +
       "consistently across all portfolios and legal entities.",
+    expected_evidence: [
+      "written default definition policy listing UTP indicators applied",
+      "mapping of each mandatory EBA GL 2016/07 indicator to implementation",
+      "documentation of any institution-specific UTP triggers and consistency evidence",
+    ],
     last_updated: "2024-09-01",
   },
 };

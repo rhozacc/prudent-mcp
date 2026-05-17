@@ -68,6 +68,10 @@ async function main() {
     console.log(H2(`${c.name}  [${c.id}]`));
     console.log(`  derived_from: ${c.derived_from.join(", ")}`);
     console.log(`\n  expectation: ${c.expectation}`);
+    if (c.expected_evidence.length) {
+      console.log("\n  evidence:");
+      for (const e of c.expected_evidence) console.log(`    • ${e}`);
+    }
   }
 
   // ── Playbooks ─────────────────────────────────────────────────────────────

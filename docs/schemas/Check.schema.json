@@ -22,6 +22,13 @@
         "expectation": {
           "type": "string"
         },
+        "expected_evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
         "last_updated": {
           "type": "string",
           "format": "date"

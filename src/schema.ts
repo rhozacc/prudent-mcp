@@ -68,8 +68,9 @@ export type Test = z.infer<typeof TestSchema>;
 export const CheckSchema = z.object({
   id: checkIdSchema,
   name: z.string(),
-  derived_from: z.array(regulationIdSchema).default([]),  // traceability to law
-  expectation: z.string(),                                 // concrete bar in plain language
+  derived_from: z.array(regulationIdSchema).default([]),     // traceability to law
+  expectation: z.string(),                                    // concrete bar in plain language
+  expected_evidence: z.array(z.string()).default([]),         // artifacts the reviewer must gather
   last_updated: z.string().date(),
   // Future fields: severity_when_failed, references, applies_to, ...
 });

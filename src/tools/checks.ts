@@ -17,7 +17,8 @@ export function registerCheckTools(server: McpServer): void {
     {
       description:
         "Full-text search across the catalog of qualitative checks. Returns id, name, " +
-        "derived_from (RegulationId[] this check operationalises), and expectation. " +
+        "derived_from (RegulationId[] this check operationalises), expectation, and " +
+        "expected_evidence (artifacts the reviewer must gather). " +
         "Call get_check for the full record, or get_regulation on any derived_from id " +
         "to read the underlying law.",
       inputSchema: { query: z.string() },
@@ -29,9 +30,10 @@ export function registerCheckTools(server: McpServer): void {
     "get_check",
     {
       description:
-        "Fetch a check by ID. Returns name, expectation (concrete pass/fail bar in plain " +
-        "language), and derived_from — the RegulationId[] this check operationalises. " +
-        "Use get_regulation on any derived_from id to read the underlying law.",
+        "Fetch a check by ID. Returns name, expectation (concrete pass/fail bar), " +
+        "derived_from (RegulationId[] this check operationalises), and expected_evidence " +
+        "(list of artifacts the reviewer must gather). Use get_regulation on any " +
+        "derived_from id to read the underlying law.",
       inputSchema: { id: checkIdSchema },
     },
     async ({ id }) => asJson(await adapters.check.get(id)),
