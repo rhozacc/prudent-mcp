@@ -57,10 +57,15 @@ export function registerResources(server: McpServer): void {
 
   server.registerResource(
     "check",
-    new ResourceTemplate("check://{id}", { list: undefined }),
-    { title: "Check", description: "check://{check-id}" },
-    async (uri, { id }) => {
-      const fullId = `check://${String(id)}` as CheckId;
+    new ResourceTemplate("check://{+path}", { list: undefined }),
+    {
+      title: "Check",
+      description:
+        "check://{area}/{topic}[/{specific}] — " +
+        "e.g. check://calibration/pd/lra-derived",
+    },
+    async (uri, { path }) => {
+      const fullId = `check://${String(path)}` as CheckId;
       const c = await adapters.check.get(fullId);
       return {
         contents: [

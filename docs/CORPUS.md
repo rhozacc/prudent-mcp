@@ -30,9 +30,9 @@ test://{test-id}
   e.g. test://jeffreys
        test://hosmer-lemeshow
 
-check://{check-id}
-  e.g. check://dod-aligned
-       check://lra-pd-derived
+check://{area}/{topic}[/{specific}]
+  e.g. check://calibration/pd/lra-derived
+       check://default-definition/utp
 
 playbook://{area}[/{subarea}]
   e.g. playbook://calibration
@@ -148,7 +148,7 @@ A qualitative check with a concrete pass/fail expectation, traced back to law.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `id` | `CheckId` | yes | e.g. `check://lra-pd-derived` |
+| `id` | `CheckId` | yes | e.g. `check://calibration/pd/lra-derived` |
 | `name` | `string` | yes | Display name. |
 | `derived_from` | `RegulationId[]` | no, default `[]` | Regulation IDs this check operationalizes. |
 | `expectation` | `string` | yes | What "pass" looks like, in plain language. |
@@ -164,7 +164,7 @@ A Check can derive from multiple regulations (overlapping requirements are commo
 
 ```json
 {
-  "id": "check://lra-pd-derived",
+  "id": "check://calibration/pd/lra-derived",
   "name": "PD long-run average derived from sufficient history",
   "derived_from": [
     "regulation://crr/180/1/a",
@@ -212,7 +212,7 @@ A guided walkthrough for validating a review area. Structured as phases; each ph
       "references": [
         "regulation://crr/180/1/a",
         "regulation://eba/gl-2017-16/78",
-        "check://lra-pd-derived"
+        "check://calibration/pd/lra-derived"
       ]
     },
     {
@@ -222,7 +222,7 @@ A guided walkthrough for validating a review area. Structured as phases; each ph
         "test://jeffreys",
         "test://binomial",
         "test://hosmer-lemeshow",
-        "check://pd-segment-tested"
+        "check://calibration/pd/segment-tested"
       ]
     }
   ],

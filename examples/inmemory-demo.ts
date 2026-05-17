@@ -191,8 +191,8 @@ const TESTS: Record<TestId, Test> = {
 };
 
 const CHECKS: Record<CheckId, Check> = {
-  "check://lra-pd-derived": {
-    id: "check://lra-pd-derived",
+  "check://calibration/pd/lra-derived": {
+    id: "check://calibration/pd/lra-derived",
     name: "PD long-run average derived from sufficient history",
     derived_from: ["regulation://crr/180/1/a", "regulation://eba/gl-2017-16/78"],
     expectation:
@@ -207,8 +207,8 @@ const CHECKS: Record<CheckId, Check> = {
     ],
     last_updated: "2024-09-01",
   },
-  "check://pd-segment-tested": {
-    id: "check://pd-segment-tested",
+  "check://calibration/pd/segment-tested": {
+    id: "check://calibration/pd/segment-tested",
     name: "PD calibration tested per grade or pool",
     derived_from: ["regulation://crr/180"],
     expectation:
@@ -222,8 +222,8 @@ const CHECKS: Record<CheckId, Check> = {
     ],
     last_updated: "2024-09-01",
   },
-  "check://default-definition-90dpd": {
-    id: "check://default-definition-90dpd",
+  "check://default-definition/90dpd": {
+    id: "check://default-definition/90dpd",
     name: "Default definition includes 90 DPD backstop",
     derived_from: ["regulation://crr/178/1/b"],
     expectation:
@@ -237,8 +237,8 @@ const CHECKS: Record<CheckId, Check> = {
     ],
     last_updated: "2024-09-01",
   },
-  "check://default-definition-utp": {
-    id: "check://default-definition-utp",
+  "check://default-definition/utp": {
+    id: "check://default-definition/utp",
     name: "Default definition includes unlikely-to-pay (UTP) triggers",
     derived_from: ["regulation://crr/178/1/a"],
     expectation:
@@ -286,7 +286,7 @@ const PLAYBOOKS: Record<PlaybookId, Playbook> = {
         references: [
           "regulation://crr/180/1/a",
           "regulation://eba/gl-2017-16/78",
-          "check://lra-pd-derived",
+          "check://calibration/pd/lra-derived",
         ],
       },
       {
@@ -300,7 +300,7 @@ const PLAYBOOKS: Record<PlaybookId, Playbook> = {
           "test://jeffreys",
           "test://binomial",
           "test://hosmer-lemeshow",
-          "check://pd-segment-tested",
+          "check://calibration/pd/segment-tested",
         ],
       },
       {

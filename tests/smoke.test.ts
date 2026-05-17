@@ -25,7 +25,7 @@ describe("server registration", () => {
     // Wire the in-memory adapters (side effects in the demo module do the assignment).
     await import("../examples/inmemory-demo.ts");
     const result = await adapters.meta.referrers("regulation://crr/180/1/a");
-    expect(result.checks).toEqual(["check://lra-pd-derived"]);
+    expect(result.checks).toEqual(["check://calibration/pd/lra-derived"]);
     expect(result.playbooks).toEqual(["playbook://calibration/pd"]);
     expect(result.regulation).toEqual([]);
     expect(result.tests).toEqual([]);
@@ -59,7 +59,7 @@ describe("traversal tools", () => {
     expect(phase2.references[0]!.record).not.toBeNull();
     const phase1 = phases[0]!;
     expect(phase1.references[2]!.type).toBe("check");
-    expect(phase1.references[2]!.id).toBe("check://lra-pd-derived");
+    expect(phase1.references[2]!.id).toBe("check://calibration/pd/lra-derived");
     expect(phase1.references[2]!.record).not.toBeNull();
   });
 
@@ -101,7 +101,7 @@ describe("traversal tools", () => {
     expect(regulation_ids).toContain("regulation://crr/180/1/a");
     expect(regulation_ids).toContain("regulation://eba/gl-2017-16/78");
     expect(test_ids).toContain("test://jeffreys");
-    expect(check_ids).toContain("check://lra-pd-derived");
+    expect(check_ids).toContain("check://calibration/pd/lra-derived");
     // No duplicates
     expect(new Set(regulation_ids).size).toBe(regulation_ids.length);
     expect(new Set(test_ids).size).toBe(test_ids.length);
@@ -114,8 +114,8 @@ describe("traversal tools", () => {
     expect(areaNode).toBeUndefined();
   });
 
-  it("get_check returns expected_evidence for check://lra-pd-derived", async () => {
-    const check = await adapters.check.get("check://lra-pd-derived");
+  it("get_check returns expected_evidence for check://calibration/pd/lra-derived", async () => {
+    const check = await adapters.check.get("check://calibration/pd/lra-derived");
     expect(check).not.toBeNull();
     expect(Array.isArray(check!.expected_evidence)).toBe(true);
     expect(check!.expected_evidence.length).toBeGreaterThan(0);
