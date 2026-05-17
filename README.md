@@ -222,4 +222,4 @@ For substantial changes, please discuss in an issue before opening a PR.
 
 ## License
 
-[Apache-2.0](./LICENSE).
+[AGPL-3.0 license](./LICENSE).
