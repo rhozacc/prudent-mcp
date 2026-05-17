@@ -16,8 +16,10 @@ export function registerRegulationTools(server: McpServer): void {
     "search_regulation",
     {
       description:
-        "Search across all loaded regulatory frameworks. Latest versions only. " +
-        "For historical lookups, use get_regulation with as_of.",
+        "Full-text search across all loaded regulatory frameworks. Returns an array of " +
+        "Regulation records — each with id, citation, text, commentary. Latest versions only. " +
+        "Use get_referrers on any returned id to find the checks and playbooks that operationalise it. " +
+        "For historical versions, use get_regulation with as_of.",
       inputSchema: {
         query: z.string(),
       },
@@ -29,8 +31,11 @@ export function registerRegulationTools(server: McpServer): void {
     "get_regulation",
     {
       description:
-        "Latest by default. Pass as_of for historical (e.g. 'what did CRR say " +
-        "when this model was built in 2019').",
+        "Fetch a regulation paragraph by URI. Returns citation, verbatim text, and attached " +
+        "commentary (supervisor Q&A, interpretive letters). Latest version by default; pass " +
+        "as_of (ISO date) for the text in force on a given date — e.g. as_of: '2019-03-01' " +
+        "to see what CRR said when a model was built. Use get_referrers on the id to find " +
+        "which checks and playbooks operationalise this article.",
       inputSchema: {
         id: regulationIdSchema.describe("e.g. regulation://crr/178/1/a"),
         as_of: z.string().date().optional().describe("ISO date, e.g. 2019-03-01"),

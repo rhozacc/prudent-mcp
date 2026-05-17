@@ -15,7 +15,11 @@ export function registerTestTools(server: McpServer): void {
   server.registerTool(
     "search_tests",
     {
-      description: "Search the catalog of described statistical tests.",
+      description:
+        "Full-text search across the catalog of described statistical tests. Matches name, " +
+        "aliases, and purpose — useful for matching bank-specific test names to corpus entries. " +
+        "Returns id, name, family (equivalence group), aliases, purpose, acceptance_criteria. " +
+        "Call get_test for the full record.",
       inputSchema: { query: z.string() },
     },
     async ({ query }) => asJson(await adapters.test.search(query)),
@@ -25,8 +29,10 @@ export function registerTestTools(server: McpServer): void {
     "get_test",
     {
       description:
-        "Fetch a test by ID — what it measures, when to use it, how to read its output. " +
-        "Computation happens elsewhere; this server only describes.",
+        "Fetch a test by ID. Returns name, family (equivalence group across bank variants), " +
+        "aliases, purpose, and acceptance_criteria. Use family to reason about whether a " +
+        "bank-specific variant is acceptable. Computation happens elsewhere; this server only " +
+        "describes. Use get_referrers to find which playbooks reference this test.",
       inputSchema: { id: testIdSchema },
     },
     async ({ id }) => asJson(await adapters.test.get(id)),

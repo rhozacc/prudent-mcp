@@ -6,9 +6,9 @@
  * default-definition aside) so the server can be exercised end to end
  * without an external backend.
  *
- *   pnpm install
- *   pnpm run demo                            # starts the server on stdio
- *   pnpm run inspect:demo                    # opens the MCP Inspector
+ *   bun install
+ *   bun run demo                             # starts the server on stdio
+ *   bun run inspect:demo                     # opens the MCP Inspector
  */
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
@@ -45,9 +45,9 @@ const REGULATIONS: Record<RegulationId, Regulation> = {
     document_version: "2024-01-09",
     citation: "CRR Article 180",
     text:
-      "Sets the requirements for institution-specific estimates of PD. PDs must be derived " +
-      "from long-run averages of one-year default rates and supported by sufficient " +
-      "historical experience and empirical evidence.",
+      "Sets the requirements for institution-specific estimates of PD under the IRB Approach. " +
+      "PDs shall be estimated per obligor grade and be supported by sufficient historical " +
+      "experience and empirical evidence.",
     commentary: [],
   },
   "regulation://crr/180/1/a": {
@@ -77,10 +77,36 @@ const REGULATIONS: Record<RegulationId, Regulation> = {
     document_version: "2017-11-20",
     citation: "EBA GL 2017/16 paragraph 78",
     text:
-      "When calibrating PDs, institutions should ensure the historical observation " +
-      "period reflects the likely range of variability of one-year default rates, " +
-      "including downturn periods relevant to the portfolio.",
+      "When calibrating PDs, institutions should ensure that the long-run average default " +
+      "rate used as the calibration target reflects the likely range of variability of " +
+      "one-year default rates, including downturn periods relevant to the portfolio.",
     commentary: [],
+  },
+  "regulation://crr/178/1/a": {
+    id: "regulation://crr/178/1/a",
+    framework: "crr",
+    document_id: "crr",
+    document_version: "2024-01-09",
+    citation: "CRR Article 178(1)(a)",
+    text:
+      "A default shall be considered to have occurred when the institution considers " +
+      "that the obligor is unlikely to pay its credit obligations in full to the " +
+      "institution, the parent undertaking or any of its subsidiaries, without recourse " +
+      "by the institution to actions such as realising security.",
+    commentary: [
+      {
+        source: "EBA GL 2016/07 para 47",
+        text:
+          "Institutions should use objective indicators of unlikeliness to pay, " +
+          "including: the institution placing the obligation on non-accrued status, " +
+          "recognition of a credit-impairment or specific credit adjustment, sale of " +
+          "the credit obligation at a material credit-related economic loss, distressed " +
+          "restructuring, bankruptcy or similar protection, and any other indication " +
+          "deemed relevant by the institution. Each indicator should be documented and " +
+          "applied consistently across all portfolios.",
+        last_updated: "2016-09-28",
+      },
+    ],
   },
   "regulation://crr/178/1/b": {
     id: "regulation://crr/178/1/b",
@@ -194,6 +220,18 @@ const CHECKS: Record<CheckId, Check> = {
       "The applied default definition includes the 90-days-past-due trigger, with " +
       "materiality thresholds aligned to the relevant RTS and the treatment of " +
       "technical past-dues clearly documented.",
+    last_updated: "2024-09-01",
+  },
+  "check://default-definition-utp": {
+    id: "check://default-definition-utp",
+    name: "Default definition includes unlikely-to-pay (UTP) triggers",
+    derived_from: ["regulation://crr/178/1/a"],
+    expectation:
+      "The applied default definition includes at least the mandatory UTP indicators " +
+      "from EBA GL 2016/07 (non-accrued status, specific credit adjustment, sale at " +
+      "material credit-related economic loss, distressed restructuring, bankruptcy). " +
+      "Any additional institution-specific UTP triggers are documented and applied " +
+      "consistently across all portfolios and legal entities.",
     last_updated: "2024-09-01",
   },
 };
@@ -349,6 +387,7 @@ const inMemoryMeta: MetaAdapter = {
   },
   async resolveCitation(text) {
     const t = text.toLowerCase().replace(/\s/g, "");
+    if (t.includes("178") && t.includes("(1)(a)")) return REGULATIONS["regulation://crr/178/1/a"]!;
     if (t.includes("178") && t.includes("(1)(b)")) return REGULATIONS["regulation://crr/178/1/b"]!;
     if (t.includes("180") && t.includes("(1)(a)")) return REGULATIONS["regulation://crr/180/1/a"]!;
     if (t.includes("180") && t.includes("crr")) return REGULATIONS["regulation://crr/180"]!;

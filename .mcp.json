@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "prudent": {
+      "type": "stdio",
+      "command": "bun",
+      "args": [
+        "run",
+        "/Users/alenrozac/00_CodeProjects/prudent-mcp/examples/inmemory-demo.ts"
+      ],
+      "env": {}
+    }
+  }
+}

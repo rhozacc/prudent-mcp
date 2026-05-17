@@ -15,7 +15,9 @@ export function registerPlaybookTools(server: McpServer): void {
   server.registerTool(
     "search_playbooks",
     {
-      description: "Search the catalog of validation playbooks.",
+      description:
+        "Full-text search across the catalog of validation playbooks. Returns id, area, subarea. " +
+        "Use get_playbook for the full record — ordered phases with mixed-surface references.",
       inputSchema: { query: z.string() },
     },
     async ({ query }) => asJson(await adapters.playbook.search(query)),
@@ -24,7 +26,10 @@ export function registerPlaybookTools(server: McpServer): void {
   server.registerTool(
     "get_playbook",
     {
-      description: "Fetch a playbook by ID — area or area/subarea.",
+      description:
+        "Fetch a playbook by ID (area or area/subarea). Returns ordered phases, each with a " +
+        "description and references array containing mixed regulation://, test://, check:// IDs. " +
+        "Resolve each reference with get_regulation, get_test, or get_check.",
       inputSchema: { id: playbookIdSchema },
     },
     async ({ id }) => asJson(await adapters.playbook.get(id)),
