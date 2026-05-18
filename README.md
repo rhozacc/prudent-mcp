@@ -1,5 +1,7 @@
 # prudent-mcp
 
+[**Documentation**](https://rhozacc.github.io/prudent-mcp/)
+
 An [MCP](https://modelcontextprotocol.io) server that exposes a structured knowledge base for IRB credit-risk model validation — regulation, statistical tests, supervisor checks, and validation playbooks — to any LLM client that speaks MCP.
 
 The server is the **read-only knowledge layer**. It tells Claude what the regulation says, what a test measures, what a supervisor expects to see, and how to walk a review area. It does not run statistical tests, write to the corpus, or orchestrate workflows — those concerns live elsewhere.
