@@ -2,6 +2,9 @@
 layout: home
 hero:
   name: prudent-mcp
+  image:
+    src: /prudent-logo.png
+    alt: prudent-mcp
   text: IRB model validation knowledge layer
   tagline: Structured access to regulation, tests, checks, and playbooks — for any MCP client.
   actions:
