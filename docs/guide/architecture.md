@@ -1,4 +1,4 @@
-# prudent-mcp architecture
+# Architecture
 
 Two diagrams: schema relationships, and the request flow from MCP client through to adapter.
 
@@ -37,6 +37,7 @@ classDiagram
         +string name
         +RegulationId[] derived_from
         +string expectation
+        +string[] expected_evidence
         +string last_updated
     }
 

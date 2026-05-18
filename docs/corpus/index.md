@@ -1,3 +1,7 @@
+---
+title: Corpus Structure
+---
+
 # Corpus structure
 
 This document describes the records the corpus contains and how each surface is shaped. The MCP server defines the structure formally in `src/schema.ts`; this document explains the *why* behind each surface and field, with worked examples.
@@ -152,13 +156,14 @@ A qualitative check with a concrete pass/fail expectation, traced back to law.
 | `name` | `string` | yes | Display name. |
 | `derived_from` | `RegulationId[]` | no, default `[]` | Regulation IDs this check operationalizes. |
 | `expectation` | `string` | yes | What "pass" looks like, in plain language. |
+| `expected_evidence` | `string[]` | no, default `[]` | Artifacts the reviewer must gather to complete this check. |
 | `last_updated` | `string` (ISO date) | yes | |
 
 ### On `derived_from`
 
-This is the load-bearing field. Without it, a Check is just an opinion. With it, an analyst can ask "show me the law behind this check" and get a concrete trail back to CRR Article 180 (or wherever). Adapters must populate this carefully — the trace is what makes Checks defensible to a supervisor.
+This is the load-bearing field. Without it, a Check is just an opinion. With it, an analyst can ask "show me the law behind this check" and get a concrete trail back to CRR Article 180 (or wherever). The trace is what makes checks defensible to a supervisor.
 
-A Check can derive from multiple regulations (overlapping requirements are common — e.g. PD calibration touches CRR 180 and EBA GL para 78). It cannot derive from another check or from a test; that's why the type is `RegulationId[]` specifically.
+A check can derive from multiple regulations (overlapping requirements are common — e.g. PD calibration touches CRR 180 and EBA GL para 78). It cannot derive from another check or from a test; that's why the type is `RegulationId[]` specifically.
 
 ### Example
 
@@ -170,7 +175,12 @@ A Check can derive from multiple regulations (overlapping requirements are commo
     "regulation://crr/180/1/a",
     "regulation://eba/gl-2017-16/78"
   ],
-  "expectation": "PD long-run average is computed over a period containing at least one full economic cycle, with a minimum of five years of default data. Where recent observations are not representative of long-term performance, longer periods or downturn-adjusted estimates are used and the choice is documented.",
+  "expectation": "PD long-run average is computed over a period containing at least one full economic cycle, with a minimum of five years of default data.",
+  "expected_evidence": [
+    "Default rate time series covering the stated LRA period",
+    "Economic cycle justification (business cycle analysis or NCA guidance reference)",
+    "Reconciliation of historical default definition to currently applied definition"
+  ],
   "last_updated": "2024-09-01"
 }
 ```
@@ -217,7 +227,7 @@ A guided walkthrough for validating a review area. Structured as phases; each ph
     },
     {
       "name": "Test calibration at grade level",
-      "description": "Run grade-level calibration tests. Use a binomial-family test (Jeffreys or one-sided binomial) per grade; HL or equivalent at portfolio level. Bank-specific variants are acceptable if they belong to the same family and the acceptance criteria are met.",
+      "description": "Run grade-level calibration tests. Use a binomial-family test (Jeffreys or one-sided binomial) per grade; HL or equivalent at portfolio level.",
       "references": [
         "test://jeffreys",
         "test://binomial",
@@ -238,16 +248,16 @@ A guided walkthrough for validating a review area. Structured as phases; each ph
 
 ## ReviewArea
 
-The taxonomy of review areas. This is the canonical map from "what an analyst is doing" to "what's in the corpus." Without a stable taxonomy, every review invents its own structure.
+The taxonomy of review areas. This is the canonical map from "what an analyst is doing" to "what's in the corpus."
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `id` | `string` | yes | Dotted slug, e.g. `"calibration.pd"`. Distinct from the URI-style IDs of other surfaces — taxonomy is the only flat-namespace surface. |
+| `id` | `string` | yes | Dotted slug, e.g. `"calibration.pd"`. Distinct from the URI-style IDs of other surfaces. |
 | `name` | `string` | yes | Display name. |
 | `parent` | `string` | no | Parent area id. Null means top-level. |
 | `children` | `string[]` | no, default `[]` | Child area ids. Denormalized for query convenience. |
 
-The MCP exposes the full list via `list_review_areas`. The taxonomy owns the canonical structure; if a sub-area is added, both the parent's `children` and the child's `parent` need updating.
+The MCP exposes the full list via `list_review_areas`. If a sub-area is added, both the parent's `children` and the child's `parent` need updating.
 
 ### Example
 
@@ -278,8 +288,6 @@ These types exist in the schema but are computed at query time, not stored:
 | `Phase.references` | `(RegulationId \| TestId \| CheckId \| PlaybookId)[]` | Mixed by design. |
 | `ReviewArea.parent` / `.children` | `ReviewArea.id` | Inside the taxonomy only. |
 | `Playbook.area` / `.subarea` | `ReviewArea.id` | Soft link — not type-enforced, but the MCP relies on it being consistent. |
-
-Anything not listed here is purely text. Don't introduce cross-references the schema doesn't already model — open a discussion first.
 
 ---
 

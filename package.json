@@ -20,7 +20,10 @@
     "inspect": "bunx @modelcontextprotocol/inspector bun src/server.ts",
     "inspect:demo": "bunx @modelcontextprotocol/inspector bun examples/inmemory-demo.ts",
     "schemas": "bun run scripts/generate-schemas.ts",
-    "list": "bun run scripts/list-all.ts"
+    "list": "bun run scripts/list-all.ts",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "engines": {
     "bun": ">=1.1.0"
@@ -33,6 +36,7 @@
   "devDependencies": {
     "@types/bun": "^1.1.0",
     "typescript": "^5.6.0",
+    "vitepress": "^1.6.4",
     "zod-to-json-schema": "^3.23.0"
   }
 }

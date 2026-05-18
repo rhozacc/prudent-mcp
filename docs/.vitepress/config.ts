@@ -1,0 +1,49 @@
+import { defineConfig } from "vitepress";
+
+export default defineConfig({
+  title: "prudent-mcp",
+  description: "Structured regulatory knowledge for IRB credit-risk model validation",
+  base: "/prudent-mcp/",
+  themeConfig: {
+    nav: [
+      { text: "Guide",    link: "/guide/" },
+      { text: "Tools",    link: "/tools/" },
+      { text: "Corpus",   link: "/corpus/" },
+      { text: "Examples", link: "/examples/" },
+    ],
+    sidebar: [
+      {
+        text: "Guide",
+        items: [
+          { text: "Introduction",  link: "/guide/" },
+          { text: "Quickstart",    link: "/guide/quickstart" },
+          { text: "Architecture",  link: "/guide/architecture" },
+        ],
+      },
+      {
+        text: "Tools",
+        items: [
+          { text: "Overview",   link: "/tools/" },
+          { text: "Meta",       link: "/tools/meta" },
+          { text: "Regulation", link: "/tools/regulation" },
+          { text: "Tests",      link: "/tools/tests" },
+          { text: "Checks",     link: "/tools/checks" },
+          { text: "Playbooks",  link: "/tools/playbooks" },
+        ],
+      },
+      {
+        text: "Reference",
+        items: [
+          { text: "Corpus structure", link: "/corpus/" },
+          { text: "Prompts",          link: "/prompts/" },
+          { text: "Adapters",         link: "/adapters/" },
+        ],
+      },
+      { text: "Examples", link: "/examples/" },
+    ],
+    socialLinks: [
+      { icon: "github", link: "https://github.com/econlabsi/prudent-mcp" },
+    ],
+    search: { provider: "local" },
+  },
+});
