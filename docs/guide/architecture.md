@@ -14,6 +14,8 @@ classDiagram
         +string citation
         +string text
         +Commentary[] commentary
+        +RegulationId? parent
+        +RegulationId[] children
     }
 
     class Commentary {
@@ -48,6 +50,7 @@ classDiagram
         +string? subarea
         +Phase[] phases
         +string[] gates
+        +RegulationId[] regulatory_scope
         +string last_updated
     }
 
@@ -79,8 +82,10 @@ classDiagram
 
     Regulation "1" *-- "many" Commentary : carries
     Playbook "1" *-- "many" Phase : has
+    Regulation ..> Regulation : parent / children
     Check ..> Regulation : derived_from
     Test ..> Regulation : regulatory_basis
+    Playbook ..> Regulation : regulatory_scope
     Phase ..> Regulation : references
     Phase ..> Test : references
     Phase ..> Check : references

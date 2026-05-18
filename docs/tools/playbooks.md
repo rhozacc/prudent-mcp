@@ -47,7 +47,8 @@ type Playbook = {
   area: string;
   subarea?: string;
   phases: Phase[];
-  gates: string[];       // pass/fail conditions between phases
+  gates: string[];              // pass/fail conditions between phases
+  regulatory_scope: RegulationId[];  // high-level mandate — typically section-level IDs
   last_updated: string;
 }
 
@@ -76,5 +77,7 @@ get_playbook("playbook://calibration/pd")
     gates: ["LRA period covers a full economic cycle", "All material grades tested individually"]
   }
 ```
+
+**`regulatory_scope` vs `Phase.references`:** `regulatory_scope` states the broad regulatory mandate for the entire playbook (e.g., "EBA GL Section 4 governs PD calibration"). `Phase.references` are operational — the specific articles, tests, and checks that apply within a given phase. A section-level ID in `regulatory_scope` tells Claude what framework this playbook is answering to; the phase references tell it what to do.
 
 For inline resolution of all references in one call, use [`expand_playbook`](./meta#expand_playbook).

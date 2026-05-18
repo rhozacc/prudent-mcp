@@ -49,6 +49,7 @@ const REGULATIONS: Record<RegulationId, Regulation> = {
       "PDs shall be estimated per obligor grade and be supported by sufficient historical " +
       "experience and empirical evidence.",
     commentary: [],
+    children: ["regulation://crr/180/1/a"],
   },
   "regulation://crr/180/1/a": {
     id: "regulation://crr/180/1/a",
@@ -69,6 +70,20 @@ const REGULATIONS: Record<RegulationId, Regulation> = {
         last_updated: "2018-11-09",
       },
     ],
+    parent: "regulation://crr/180",
+    children: [],
+  },
+  "regulation://eba/gl-2017-16/s4": {
+    id: "regulation://eba/gl-2017-16/s4",
+    framework: "eba",
+    document_id: "eba-gl-2017-16",
+    document_version: "2017-11-20",
+    citation: "EBA GL 2017/16 Section 4 — Requirements related to PD estimation",
+    text:
+      "This section sets out the requirements for PD estimation under the IRB Approach, " +
+      "covering reference data sets, observation periods, and calibration methodology.",
+    commentary: [],
+    children: ["regulation://eba/gl-2017-16/78"],
   },
   "regulation://eba/gl-2017-16/78": {
     id: "regulation://eba/gl-2017-16/78",
@@ -81,6 +96,8 @@ const REGULATIONS: Record<RegulationId, Regulation> = {
       "rate used as the calibration target reflects the likely range of variability of " +
       "one-year default rates, including downturn periods relevant to the portfolio.",
     commentary: [],
+    parent: "regulation://eba/gl-2017-16/s4",
+    children: [],
   },
   "regulation://crr/178/1/a": {
     id: "regulation://crr/178/1/a",
@@ -107,6 +124,7 @@ const REGULATIONS: Record<RegulationId, Regulation> = {
         last_updated: "2016-09-28",
       },
     ],
+    children: [],
   },
   "regulation://crr/178/1/b": {
     id: "regulation://crr/178/1/b",
@@ -119,6 +137,7 @@ const REGULATIONS: Record<RegulationId, Regulation> = {
       "more than 90 days on any material credit obligation, with materiality assessed " +
       "against thresholds set in the relevant Commission Delegated Regulation.",
     commentary: [],
+    children: [],
   },
 };
 
@@ -138,6 +157,7 @@ const HISTORICAL_REGULATIONS: Partial<Record<RegulationId, Array<{ effectiveFrom
           "due more than 90 days on any material credit obligation. Materiality is " +
           "left to national competent authority discretion.",
         commentary: [],
+        children: [],
       },
     },
     {
@@ -263,6 +283,7 @@ const PLAYBOOKS: Record<PlaybookId, Playbook> = {
   "playbook://calibration": {
     id: "playbook://calibration",
     area: "calibration",
+    regulatory_scope: [],
     phases: [
       {
         name: "Identify component",
@@ -279,6 +300,7 @@ const PLAYBOOKS: Record<PlaybookId, Playbook> = {
     id: "playbook://calibration/pd",
     area: "calibration",
     subarea: "pd",
+    regulatory_scope: ["regulation://eba/gl-2017-16/s4", "regulation://crr/180"],
     phases: [
       {
         name: "Validate LRA derivation",

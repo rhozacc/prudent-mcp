@@ -46,6 +46,18 @@
             "additionalProperties": false
           },
           "default": []
+        },
+        "parent": {
+          "type": "string",
+          "pattern": "^regulation:\\/\\/.+"
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^regulation:\\/\\/.+"
+          },
+          "default": []
         }
       },
       "required": [

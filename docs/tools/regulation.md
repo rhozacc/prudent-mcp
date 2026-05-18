@@ -53,6 +53,8 @@ type Regulation = {
   citation: string;
   text: string;
   commentary: Commentary[];
+  parent?: RegulationId;      // set on paragraph records that belong to a section
+  children: RegulationId[];   // set on section records; empty on leaf paragraphs
 }
 ```
 

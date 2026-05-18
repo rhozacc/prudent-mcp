@@ -47,7 +47,9 @@ export const RegulationSchema = z.object({
   citation: z.string(),                 // human-readable
   text: z.string(),
   commentary: z.array(CommentarySchema).default([]),
-  // Future fields: parents, children, supersedes, last_amended, effective_from, ...
+  parent: regulationIdSchema.optional(),
+  children: z.array(regulationIdSchema).default([]),
+  // Future fields: supersedes, last_amended, effective_from, ...
 });
 export type Regulation = z.infer<typeof RegulationSchema>;
 
@@ -90,6 +92,7 @@ export const PlaybookSchema = z.object({
   subarea: z.string().optional(),
   phases: z.array(PhaseSchema).default([]),
   gates: z.array(z.string()).default([]),
+  regulatory_scope: z.array(regulationIdSchema).default([]),
   last_updated: z.string().date(),
   // Future fields: prerequisites, deliverables, ...
 });

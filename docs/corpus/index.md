@@ -79,6 +79,8 @@ A specific paragraph of a specific regulation, frozen to a document version.
 | `citation` | `string` | yes | Human-readable, e.g. `"CRR Article 178(1)(a)"` |
 | `text` | `string` | yes | The paragraph text. Verbatim from source. |
 | `commentary` | `Commentary[]` | no, default `[]` | Interpretive material attached to this paragraph (Q&A, supervisor letters). |
+| `parent` | `RegulationId` | no | Parent record — e.g. the section that contains this paragraph. |
+| `children` | `RegulationId[]` | no, default `[]` | Child records — e.g. the paragraphs within a section. Denormalized inverse of `parent`. |
 
 ### Commentary
 
@@ -91,6 +93,34 @@ Interpretive material is carried separately from the regulation text because ana
 | `last_updated` | `string` (ISO date) | no | When this commentary was last revised at source. |
 
 ### Example
+
+Section records sit alongside paragraph records and link to their children:
+
+```json
+{
+  "id": "regulation://eba/gl-2017-16/s4",
+  "framework": "eba",
+  "document_id": "eba-gl-2017-16",
+  "document_version": "2017-11-20",
+  "citation": "EBA GL 2017/16 Section 4 — Requirements related to PD estimation",
+  "text": "This section sets out the requirements for PD estimation under the IRB Approach...",
+  "commentary": [],
+  "children": ["regulation://eba/gl-2017-16/78"]
+}
+```
+
+A paragraph record carries the reverse link:
+
+```json
+{
+  "id": "regulation://eba/gl-2017-16/78",
+  "parent": "regulation://eba/gl-2017-16/s4",
+  "children": [],
+  ...
+}
+```
+
+**Section ID convention:** Use `s{N}` for top-level sections (`regulation://eba/gl-2017-16/s4`) and dotted sub-sections where they exist (`regulation://eba/gl-2017-16/s4.1`). The schema doesn't enforce a format below the framework level — the `children` array is the authoritative source of what a section covers.
 
 ```json
 {
@@ -200,6 +230,7 @@ A guided walkthrough for validating a review area. Structured as phases; each ph
 | `subarea` | `string` | no | e.g. `"pd"`, `"lgd"`, `"ead"`. Should match a `ReviewArea.id` of form `area.subarea`. |
 | `phases` | `Phase[]` | no, default `[]` | Ordered phases of the walkthrough. |
 | `gates` | `string[]` | no, default `[]` | Pass/fail gates between phases — free-text descriptions for now. |
+| `regulatory_scope` | `RegulationId[]` | no, default `[]` | High-level regulatory mandate for the entire playbook. Typically section-level IDs. Distinct from `Phase.references` which are operational per-phase. |
 | `last_updated` | `string` (ISO date) | yes | |
 
 ### Phase
@@ -286,7 +317,11 @@ These types exist in the schema but are computed at query time, not stored:
 
 | Field | Points to | Notes |
 |---|---|---|
+| `Regulation.parent` | `RegulationId?` | Section → paragraph hierarchy. Optional. |
+| `Regulation.children` | `RegulationId[]` | Inverse of parent — paragraphs within a section. |
 | `Check.derived_from` | `RegulationId[]` | Traceability to law. Type-enforced. |
+| `Test.regulatory_basis` | `RegulationId[]` | Regulations that reference or require this test family. |
+| `Playbook.regulatory_scope` | `RegulationId[]` | High-level mandate. Typically section-level IDs. |
 | `Phase.references` | `(RegulationId \| TestId \| CheckId \| PlaybookId)[]` | Mixed by design. |
 | `ReviewArea.parent` / `.children` | `ReviewArea.id` | Inside the taxonomy only. |
 | `Playbook.area` / `.subarea` | `ReviewArea.id` | Soft link — not type-enforced, but the MCP relies on it being consistent. |

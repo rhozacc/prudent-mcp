@@ -65,6 +65,14 @@
           },
           "default": []
         },
+        "regulatory_scope": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^regulation:\\/\\/.+"
+          },
+          "default": []
+        },
         "last_updated": {
           "type": "string",
           "format": "date"
