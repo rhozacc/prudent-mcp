@@ -27,6 +27,14 @@
         "acceptance_criteria": {
           "type": "string"
         },
+        "regulatory_basis": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^regulation:\\/\\/.+"
+          },
+          "default": []
+        },
         "last_updated": {
           "type": "string",
           "format": "date"

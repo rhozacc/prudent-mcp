@@ -60,8 +60,9 @@ export const TestSchema = z.object({
   family: z.string().optional(),         // equivalence group, e.g. "calibration-binomial"
   purpose: z.string(),
   acceptance_criteria: z.string().optional(),
+  regulatory_basis: z.array(regulationIdSchema).default([]),  // regulations that reference or require this test family
   last_updated: z.string().date(),
-  // Future fields: inputs, outputs, applies_to, references, interpretation, ...
+  // Future fields: inputs, outputs, applies_to, interpretation, ...
 });
 export type Test = z.infer<typeof TestSchema>;
 

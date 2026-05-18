@@ -48,6 +48,7 @@ type Test = {
   family?: string;              // equivalence group — e.g. "calibration-binomial"
   purpose: string;
   acceptance_criteria?: string;
+  regulatory_basis: RegulationId[];  // regulations that reference or require this test family
   last_updated: string;
 }
 ```

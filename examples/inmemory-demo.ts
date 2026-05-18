@@ -160,6 +160,7 @@ const TESTS: Record<TestId, Test> = {
     acceptance_criteria:
       "Posterior probability that the true PD exceeds the estimate is below the " +
       "chosen significance level (typically one-sided 95%).",
+    regulatory_basis: ["regulation://crr/180/1/a", "regulation://eba/gl-2017-16/78"],
     last_updated: "2024-06-01",
   },
   "test://binomial": {
@@ -173,6 +174,7 @@ const TESTS: Record<TestId, Test> = {
       "under a binomial assumption.",
     acceptance_criteria:
       "p-value > α (typically 0.05 one-sided) indicates calibration is not rejected at the grade.",
+    regulatory_basis: ["regulation://crr/180/1/a", "regulation://eba/gl-2017-16/78"],
     last_updated: "2024-06-01",
   },
   "test://hosmer-lemeshow": {
@@ -186,6 +188,7 @@ const TESTS: Record<TestId, Test> = {
     acceptance_criteria:
       "Chi-squared statistic with g-2 degrees of freedom (g = number of groups). " +
       "p-value > α (typically 0.05) indicates calibration is not rejected at portfolio level.",
+    regulatory_basis: ["regulation://crr/180/1/a", "regulation://eba/gl-2017-16/78"],
     last_updated: "2024-06-01",
   },
 };

@@ -29,6 +29,7 @@ classDiagram
         +string? family
         +string purpose
         +string? acceptance_criteria
+        +RegulationId[] regulatory_basis
         +string last_updated
     }
 
@@ -79,6 +80,7 @@ classDiagram
     Regulation "1" *-- "many" Commentary : carries
     Playbook "1" *-- "many" Phase : has
     Check ..> Regulation : derived_from
+    Test ..> Regulation : regulatory_basis
     Phase ..> Regulation : references
     Phase ..> Test : references
     Phase ..> Check : references

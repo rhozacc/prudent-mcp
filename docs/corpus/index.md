@@ -124,6 +124,7 @@ A statistical test described, not executed. The corpus tells Claude *what the te
 | `family` | `string` | no | Equivalence group, e.g. `"calibration-binomial"`. Different banks run variants of the same test; family enables Claude to recognize them as members of one bucket. |
 | `purpose` | `string` | yes | What the test measures and when to use it. |
 | `acceptance_criteria` | `string` | no | Concrete pass/fail bar in plain language. Optional because some tests are diagnostic-only. |
+| `regulatory_basis` | `RegulationId[]` | no, default `[]` | Regulations that reference or require this test family. Softer than `Check.derived_from` — "referenced by" rather than "derived from." |
 | `last_updated` | `string` (ISO date) | yes | |
 
 ### On aliases and family
@@ -140,6 +141,7 @@ These exist because **the same test goes by different names in different banks**
   "family": "calibration-binomial",
   "purpose": "Bayesian test for PD calibration at the rating grade or pool level. Compares observed default rate against the PD estimate using a Jeffreys prior on the default probability.",
   "acceptance_criteria": "Posterior probability that the true PD exceeds the estimate is below the chosen significance level (typically one-sided 95%).",
+  "regulatory_basis": ["regulation://crr/180/1/a", "regulation://eba/gl-2017-16/78"],
   "last_updated": "2024-06-01"
 }
 ```
