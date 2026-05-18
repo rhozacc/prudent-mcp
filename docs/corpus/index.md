@@ -43,6 +43,43 @@ playbook://{area}[/{subarea}]
        playbook://calibration/lgd
 ```
 
+### URI anatomy
+
+The four schemes share the same shape: scheme name → typed path segments. A regulation URI decomposes like this:
+
+<svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;color:var(--vp-c-text-1);">
+  <style>
+    .uri    { fill: currentColor; font: 600 22px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .bracket{ stroke: currentColor; stroke-width: 1.4; fill: none; opacity: 0.7; }
+    .lead   { stroke: currentColor; stroke-width: 1; fill: none; opacity: 0.4; }
+    .tag    { fill: currentColor; font: 600 12px ui-sans-serif, system-ui, sans-serif; }
+    .desc   { fill: currentColor; font: 400 11px ui-sans-serif, system-ui, sans-serif; opacity: 0.7; }
+  </style>
+  <text class="uri" x="60" y="60">regulation://crr/178/1/a</text>
+  <path class="bracket" d="M58,75  Q58,82 65,82  L168,82 Q175,82 175,75"/>
+  <path class="bracket" d="M185,75 Q185,82 192,82 L222,82 Q229,82 229,75"/>
+  <path class="bracket" d="M239,75 Q239,82 246,82 L274,82 Q281,82 281,75"/>
+  <path class="bracket" d="M291,75 Q291,82 298,82 L312,82 Q319,82 319,75"/>
+  <path class="bracket" d="M329,75 Q329,82 336,82 L352,82 Q359,82 359,75"/>
+  <path class="lead" d="M117,82  L117,108"/>
+  <path class="lead" d="M207,82  L207,128"/>
+  <path class="lead" d="M260,82  L260,148"/>
+  <path class="lead" d="M305,82  L305,168"/>
+  <path class="lead" d="M344,82  L344,188"/>
+  <text class="tag"  x="135" y="113">scheme</text>
+  <text class="desc" x="135" y="129">surface name; one of four</text>
+  <text class="tag"  x="225" y="133">framework</text>
+  <text class="desc" x="225" y="149">crr, eba, ecb, …</text>
+  <text class="tag"  x="278" y="153">article</text>
+  <text class="desc" x="278" y="169">e.g. 178</text>
+  <text class="tag"  x="323" y="173">paragraph</text>
+  <text class="desc" x="323" y="189">optional</text>
+  <text class="tag"  x="362" y="193">point</text>
+  <text class="desc" x="362" y="209">optional</text>
+</svg>
+
+URIs truncate meaningfully: `regulation://crr/178` is the whole article, `regulation://crr/178/1` is paragraph 1, `regulation://crr/178/1/a` is point (a). The same principle applies across the other three schemes — segments map to the natural hierarchy of the underlying domain.
+
 IDs are stable. Once published, an ID points to that record forever. Renames are deletions plus inserts — handle them as such.
 
 The TypeScript types segregate IDs at compile time (see `src/schema.ts`):
@@ -301,6 +338,45 @@ The MCP exposes the full list via `list_review_areas`. If a sub-area is added, b
   { "id": "calibration.lgd", "name": "LGD Calibration", "parent": "calibration", "children": [] }
 ]
 ```
+
+A representative slice of the taxonomy, visualised:
+
+<svg viewBox="0 0 720 320" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;color:var(--vp-c-text-1);">
+  <style>
+    .node { fill: var(--vp-c-bg-soft); stroke: currentColor; stroke-width: 1.4; }
+    .root { fill: var(--vp-c-bg-alt);  stroke: currentColor; stroke-width: 1.6; }
+    .ntxt { fill: currentColor; font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .edge { stroke: currentColor; stroke-width: 1.2; fill: none; opacity: 0.55; }
+  </style>
+  <rect class="root" x="280" y="20"  width="160" height="38" rx="6"/>
+  <text class="ntxt" x="360" y="44" text-anchor="middle">(top level)</text>
+  <rect class="node" x="20"  y="100" width="160" height="38" rx="6"/>
+  <text class="ntxt" x="100" y="124" text-anchor="middle">default-definition</text>
+  <rect class="node" x="200" y="100" width="160" height="38" rx="6"/>
+  <text class="ntxt" x="280" y="124" text-anchor="middle">calibration</text>
+  <rect class="node" x="380" y="100" width="160" height="38" rx="6"/>
+  <text class="ntxt" x="460" y="124" text-anchor="middle">rating-assignment</text>
+  <rect class="node" x="560" y="100" width="140" height="38" rx="6"/>
+  <text class="ntxt" x="630" y="124" text-anchor="middle">monitoring</text>
+  <rect class="node" x="120" y="200" width="160" height="38" rx="6"/>
+  <text class="ntxt" x="200" y="224" text-anchor="middle">calibration.pd</text>
+  <rect class="node" x="300" y="200" width="160" height="38" rx="6"/>
+  <text class="ntxt" x="380" y="224" text-anchor="middle">calibration.lgd</text>
+  <rect class="node" x="480" y="200" width="220" height="38" rx="6"/>
+  <text class="ntxt" x="590" y="224" text-anchor="middle">rating-assignment.overrides</text>
+  <rect class="node" x="510" y="260" width="180" height="38" rx="6"/>
+  <text class="ntxt" x="600" y="284" text-anchor="middle">monitoring.discrimination</text>
+  <path class="edge" d="M360,58 L100,100"/>
+  <path class="edge" d="M360,58 L280,100"/>
+  <path class="edge" d="M360,58 L460,100"/>
+  <path class="edge" d="M360,58 L630,100"/>
+  <path class="edge" d="M280,138 L200,200"/>
+  <path class="edge" d="M280,138 L380,200"/>
+  <path class="edge" d="M460,138 L590,200"/>
+  <path class="edge" d="M630,138 L600,260"/>
+</svg>
+
+Top-level slugs are bare (`calibration`), child slugs are dotted (`calibration.pd`). The dotted form is intentional — it makes the parent-child relationship visible from the ID alone, the way URI segments do for the other surfaces.
 
 ---
 
