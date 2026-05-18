@@ -10,14 +10,18 @@ export default defineConfig({
       { text: "Tools",    link: "/tools/" },
       { text: "Corpus",   link: "/corpus/" },
       { text: "Examples", link: "/examples/" },
+      { text: "FAQ",      link: "/guide/faq" },
     ],
     sidebar: [
       {
         text: "Guide",
         items: [
           { text: "Introduction",  link: "/guide/" },
+          { text: "Concepts",      link: "/guide/concepts" },
           { text: "Quickstart",    link: "/guide/quickstart" },
           { text: "Architecture",  link: "/guide/architecture" },
+          { text: "Clients",       link: "/guide/clients" },
+          { text: "FAQ",           link: "/guide/faq" },
         ],
       },
       {
@@ -42,7 +46,7 @@ export default defineConfig({
       { text: "Examples", link: "/examples/" },
     ],
     socialLinks: [
-      { icon: "github", link: "https://github.com/econlabsi/prudent-mcp" },
+      { icon: "github", link: "https://github.com/rhozacc/prudent-mcp" },
     ],
     search: { provider: "local" },
   },
