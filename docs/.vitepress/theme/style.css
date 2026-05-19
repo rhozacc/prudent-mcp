@@ -1,0 +1,178 @@
+/* prudent-mcp brand theme
+ * ─ Prudent Blue  #3A58FF
+ * ─ Graphite      #3A3A3A
+ * ─ White         #FFFFFF
+ * ─ Display serif: Cormorant Garamond (Caslon-style)
+ * ─ Sans:         Inter (Neo Grotesque)
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+:root {
+  /* Brand palette */
+  --prudent-blue:        #3A58FF;
+  --prudent-blue-hover:  #2541E0;
+  --prudent-blue-soft:   #EEF1FF;
+  --prudent-graphite:    #3A3A3A;
+  --prudent-white:       #FFFFFF;
+  --prudent-paper:       #F7F8FB;
+
+  /* Typography */
+  --vp-font-family-base:    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --vp-font-family-mono:    "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --prudent-font-display:   "Cormorant Garamond", "Big Caslon", "Hoefler Text", Georgia, serif;
+
+  /* Map brand to VitePress tokens */
+  --vp-c-brand-1:        var(--prudent-blue);
+  --vp-c-brand-2:        var(--prudent-blue-hover);
+  --vp-c-brand-3:        var(--prudent-blue-hover);
+  --vp-c-brand-soft:     var(--prudent-blue-soft);
+  --vp-c-brand:          var(--prudent-blue);
+  --vp-c-brand-light:    #5C77FF;
+  --vp-c-brand-lighter:  #8197FF;
+  --vp-c-brand-dark:     var(--prudent-blue-hover);
+
+  --vp-c-text-1:         var(--prudent-graphite);
+  --vp-c-bg:             var(--prudent-white);
+  --vp-c-bg-alt:         var(--prudent-paper);
+
+  /* Home hero gradient ─ subtle Prudent Blue wash */
+  --vp-home-hero-name-color: var(--prudent-blue);
+  --vp-home-hero-name-background: none;
+  --vp-home-hero-image-background-image: radial-gradient(
+    circle at 35% 35%,
+    rgba(58, 88, 255, 0.10),
+    rgba(58, 88, 255, 0) 65%
+  );
+  --vp-home-hero-image-filter: blur(60px);
+
+  /* Buttons */
+  --vp-button-brand-bg:          var(--prudent-blue);
+  --vp-button-brand-hover-bg:    var(--prudent-blue-hover);
+  --vp-button-brand-active-bg:   var(--prudent-blue-hover);
+  --vp-button-brand-border:      var(--prudent-blue);
+  --vp-button-brand-hover-border: var(--prudent-blue-hover);
+  --vp-button-brand-text:        var(--prudent-white);
+  --vp-button-brand-hover-text:  var(--prudent-white);
+}
+
+.dark {
+  --vp-c-bg:        #0E1116;
+  --vp-c-bg-alt:    #15191F;
+  --vp-c-text-1:    #ECECEC;
+  --vp-c-brand-1:   #6E86FF;
+  --vp-c-brand-2:   #8197FF;
+  --vp-c-brand-3:   #8197FF;
+  --vp-c-brand-soft: rgba(58, 88, 255, 0.18);
+
+  --vp-home-hero-name-color: #8197FF;
+  --vp-home-hero-image-background-image: radial-gradient(
+    circle at 30% 30%,
+    rgba(110, 134, 255, 0.28),
+    rgba(110, 134, 255, 0) 60%
+  );
+}
+
+/* ─── Display typography ─────────────────────────────────────────────────── */
+
+.VPHero .name,
+.VPHero .text {
+  font-family: var(--prudent-font-display);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+}
+
+.VPHero .name {
+  font-size: clamp(2.4rem, 4.5vw, 4rem);
+}
+
+.VPHero .text {
+  font-size: clamp(2rem, 3.6vw, 3.2rem);
+  color: var(--vp-c-text-1);
+}
+
+.VPHero .tagline {
+  font-family: var(--vp-font-family-base);
+  font-weight: 400;
+  font-size: 1.05rem;
+  line-height: 1.55;
+  max-width: 36rem;
+  color: var(--vp-c-text-2);
+}
+
+/* Page H1s pick up the editorial serif too */
+.vp-doc h1 {
+  font-family: var(--prudent-font-display);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  font-size: clamp(2rem, 3.2vw, 2.6rem);
+}
+
+/* H2/H3 stay in the sans for scanability, with brand accent */
+.vp-doc h2 {
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  border-top: 1px solid var(--vp-c-divider);
+  padding-top: 1.5rem;
+  margin-top: 2.5rem;
+}
+
+/* ─── Brand accents ─────────────────────────────────────────────────────── */
+
+.VPNavBarTitle .title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--prudent-blue);
+}
+.dark .VPNavBarTitle .title { color: #8197FF; }
+
+/* Brand-colored hero action button */
+.VPButton.brand {
+  border-radius: 6px;
+  font-weight: 500;
+  letter-spacing: 0.005em;
+}
+
+/* Inline code + links carry brand color */
+.vp-doc a {
+  color: var(--prudent-blue);
+  text-decoration-color: rgba(58, 88, 255, 0.35);
+  text-underline-offset: 3px;
+}
+.vp-doc a:hover { color: var(--prudent-blue-hover); }
+.dark .vp-doc a { color: #8197FF; }
+
+.vp-doc :not(pre) > code {
+  color: var(--prudent-blue);
+  background-color: var(--prudent-blue-soft);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.88em;
+}
+.dark .vp-doc :not(pre) > code {
+  color: #8197FF;
+  background-color: rgba(58, 88, 255, 0.14);
+}
+
+/* Feature cards on the home page ─ flatter, editorial */
+.VPFeature {
+  border-radius: 8px;
+  border: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-bg);
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.VPFeature:hover {
+  border-color: var(--prudent-blue);
+  transform: translateY(-2px);
+}
+.VPFeature .title {
+  font-family: var(--vp-font-family-base);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+/* Hero logo: trim shadow, keep it crisp on the gradient wash */
+.VPHero .VPImage {
+  filter: drop-shadow(0 8px 24px rgba(58, 88, 255, 0.18));
+}

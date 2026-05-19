@@ -1,4 +1,4 @@
-![prudent-mcp](./prudent-logo.png)
+[![prudent-mcp documentation](./docs/public/docs-hero.png)](https://rhozacc.github.io/prudent-mcp/)
 
 An [MCP](https://modelcontextprotocol.io) server that gives any LLM client structured access to the IRB credit-risk model validation knowledge base — regulation, statistical tests, supervisor checks, and validation playbooks.
 
