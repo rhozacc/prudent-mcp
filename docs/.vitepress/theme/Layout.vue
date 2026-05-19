@@ -7,7 +7,7 @@ const { Layout } = DefaultTheme;
 
 <template>
   <Layout>
-    <template #home-hero-image>
+    <template #home-hero-before>
       <PrudentMetal />
     </template>
   </Layout>

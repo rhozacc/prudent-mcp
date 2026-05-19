@@ -1,94 +1,89 @@
 <template>
-  <div class="prudent-metal" aria-hidden="true">
-    <svg viewBox="0 0 600 700" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+  <div class="prudent-bg" aria-hidden="true">
+    <svg
+      class="prudent-svg"
+      viewBox="0 0 1600 900"
+      preserveAspectRatio="xMidYMax slice"
+      xmlns="http://www.w3.org/2000/svg"
+    >
       <defs>
-        <!-- Chrome banding ACROSS the stream's width.
-             Sharp light/dark bands are what reads as polished metal. -->
-        <linearGradient id="pm-chrome" x1="0" y1="0.5" x2="1" y2="0.5">
+        <!-- Chrome banding gradient ─ sharp bright/dark transitions read as metal.
+             Direction is roughly perpendicular to the ribbon (top-right ↘ bottom-left). -->
+        <linearGradient id="pm-chrome" gradientUnits="userSpaceOnUse"
+                        x1="1400" y1="200" x2="200" y2="900">
           <stop offset="0%"   stop-color="#0A1245"/>
-          <stop offset="10%"  stop-color="#1626A0"/>
-          <stop offset="22%"  stop-color="#5C77FF"/>
-          <stop offset="32%"  stop-color="#E8ECFF"/>
-          <stop offset="38%"  stop-color="#FFFFFF"/>
-          <stop offset="46%"  stop-color="#8AA0FF"/>
-          <stop offset="58%"  stop-color="#3A58FF"/>
-          <stop offset="72%"  stop-color="#1626A0"/>
-          <stop offset="84%"  stop-color="#3A58FF"/>
-          <stop offset="94%"  stop-color="#5C77FF"/>
+          <stop offset="8%"   stop-color="#1626A0"/>
+          <stop offset="18%"  stop-color="#5C77FF"/>
+          <stop offset="28%"  stop-color="#E8ECFF"/>
+          <stop offset="34%"  stop-color="#FFFFFF"/>
+          <stop offset="40%"  stop-color="#A4B6FF"/>
+          <stop offset="50%"  stop-color="#3A58FF"/>
+          <stop offset="64%"  stop-color="#1626A0"/>
+          <stop offset="78%"  stop-color="#3A58FF"/>
+          <stop offset="90%"  stop-color="#1A2A88"/>
           <stop offset="100%" stop-color="#0A1245"/>
         </linearGradient>
 
-        <!-- Wet specular highlight, ridden along the brightest edge -->
-        <linearGradient id="pm-spec" x1="0" y1="0.5" x2="1" y2="0.5">
-          <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0"/>
-          <stop offset="34%"  stop-color="#FFFFFF" stop-opacity="0"/>
-          <stop offset="40%"  stop-color="#FFFFFF" stop-opacity="0.95"/>
-          <stop offset="44%"  stop-color="#FFFFFF" stop-opacity="0"/>
-          <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
-        </linearGradient>
-
-        <!-- Subtle flow: gentle turbulence + small displacement so the stream
-             ripples instead of melts. Scale is intentionally low to preserve edges. -->
-        <filter id="pm-flow" x="-15%" y="-15%" width="130%" height="130%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.008 0.018" numOctaves="2" seed="9" result="noise">
+        <!-- Soft, slow turbulence — large region so distortion never touches a hard edge. -->
+        <filter id="pm-flow" x="-30%" y="-30%" width="160%" height="160%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.0045 0.012"
+                        numOctaves="2" seed="11" result="noise">
             <animate
               attributeName="baseFrequency"
-              dur="22s"
-              values="0.008 0.018; 0.012 0.014; 0.009 0.020; 0.008 0.018"
+              dur="28s"
+              values="0.0045 0.012; 0.006 0.009; 0.005 0.014; 0.0045 0.012"
               repeatCount="indefinite"/>
           </feTurbulence>
-          <feDisplacementMap in="SourceGraphic" in2="noise" scale="22">
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="60">
             <animate
               attributeName="scale"
-              dur="14s"
-              values="18; 30; 22; 18"
+              dur="18s"
+              values="50; 78; 60; 50"
               repeatCount="indefinite"/>
           </feDisplacementMap>
+          <feGaussianBlur stdDeviation="1"/>
         </filter>
 
-        <!-- Shared ribbon path: an S-curve that pours down and to the right.
-             Defined once so the fill, highlight, and rim share geometry. -->
+        <!-- The ribbon path: starts up high on the right ~38% across, curves
+             through the middle, exits off the bottom-left corner. Reused for
+             main fill, specular highlight, and glow. -->
         <path id="pm-stream"
-              d="M 340 -40
-                 C 220 100, 460 220, 320 340
-                 S 200 560, 380 740"/>
+              d="M 1700 80
+                 C 1450 240, 1250 200, 1100 420
+                 S 700 720, 480 820
+                 S 60 1060, -180 1100"/>
       </defs>
 
-      <g class="pm-drift" filter="url(#pm-flow)">
-        <!-- Soft outer glow rim -->
+      <g class="pm-drift">
+        <!-- Wide soft blue glow underlay -->
         <use href="#pm-stream"
              stroke="#3A58FF"
-             stroke-opacity="0.35"
-             stroke-width="200"
-             stroke-linecap="round"
-             fill="none"
-             filter="url(#pm-glow)"/>
-        <!-- Main chrome body -->
-        <use href="#pm-stream"
-             stroke="url(#pm-chrome)"
-             stroke-width="170"
-             stroke-linecap="round"
-             fill="none"/>
-        <!-- Sharp specular highlight rides the bright band -->
-        <use href="#pm-stream"
-             stroke="url(#pm-spec)"
-             stroke-width="170"
-             stroke-linecap="round"
-             fill="none"
-             class="pm-spec"/>
-        <!-- A thin crisp rim catches light on the silhouette edge -->
-        <use href="#pm-stream"
-             stroke="#E8ECFF"
              stroke-opacity="0.45"
-             stroke-width="2"
+             stroke-width="420"
              stroke-linecap="round"
-             fill="none"/>
+             fill="none"
+             filter="url(#pm-blur)"/>
+        <!-- Main chrome body, with fluid distortion -->
+        <g filter="url(#pm-flow)">
+          <use href="#pm-stream"
+               stroke="url(#pm-chrome)"
+               stroke-width="240"
+               stroke-linecap="round"
+               fill="none"/>
+          <!-- Inner bright highlight rides the brightest band -->
+          <use href="#pm-stream"
+               class="pm-spec"
+               stroke="#FFFFFF"
+               stroke-opacity="0.9"
+               stroke-width="14"
+               stroke-linecap="round"
+               fill="none"/>
+        </g>
       </g>
 
-      <!-- Outer glow filter (separate so it doesn't get displaced as hard) -->
       <defs>
-        <filter id="pm-glow" x="-30%" y="-30%" width="160%" height="160%">
-          <feGaussianBlur stdDeviation="22"/>
+        <filter id="pm-blur" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="60"/>
         </filter>
       </defs>
     </svg>
@@ -96,43 +91,69 @@
 </template>
 
 <style scoped>
-.prudent-metal {
-  width: 100%;
-  max-width: 540px;
-  aspect-ratio: 6 / 7;
-  margin: 0 auto;
-  filter: drop-shadow(0 22px 70px rgba(58, 88, 255, 0.35));
+/* Full-bleed behind the hero. The slot is rendered inside .VPHero, which is
+ * position:relative — so absolute inset:0 fills it. We mask softly with a
+ * radial gradient anchored bottom-left so the top-right ~1/3 is empty and
+ * the silhouette has no hard edges. */
+.prudent-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  /* CSS mask: opaque around bottom-left, fading to transparent toward the
+   * top-right; keeps the upper-right corner clean for the wordmark + text. */
+  -webkit-mask-image:
+    radial-gradient(
+      ellipse 130% 110% at 18% 95%,
+      black 0%,
+      black 38%,
+      rgba(0, 0, 0, 0.85) 52%,
+      rgba(0, 0, 0, 0.35) 70%,
+      transparent 86%
+    );
+          mask-image:
+    radial-gradient(
+      ellipse 130% 110% at 18% 95%,
+      black 0%,
+      black 38%,
+      rgba(0, 0, 0, 0.85) 52%,
+      rgba(0, 0, 0, 0.35) 70%,
+      transparent 86%
+    );
 }
-.prudent-metal svg {
-  width: 100%;
-  height: 100%;
+.prudent-svg {
+  position: absolute;
+  inset: -10% -5% -10% -5%;
+  width: 110%;
+  height: 120%;
   display: block;
 }
 
-/* Ambient drift + slow tilt — pairs with the turbulence flow */
+/* Slow ambient drift so the form moves even between filter animation cycles. */
 .pm-drift {
-  transform-origin: 300px 350px;
-  animation: pm-drift 26s ease-in-out infinite alternate;
+  transform-origin: 800px 600px;
+  animation: pm-drift 32s ease-in-out infinite alternate;
 }
 @keyframes pm-drift {
-  0%   { transform: translate(0, 0)     rotate(-2deg) scale(1); }
-  50%  { transform: translate(-6px, 4px) rotate(1.5deg) scale(1.015); }
-  100% { transform: translate(5px, -3px) rotate(-0.5deg) scale(0.99); }
+  0%   { transform: translate(0, 0)       rotate(-1deg)   scale(1); }
+  50%  { transform: translate(-30px, 14px) rotate(0.8deg) scale(1.02); }
+  100% { transform: translate(22px, -12px) rotate(-0.4deg) scale(0.99); }
 }
 
-/* The bright spec highlight shifts position to look like light travelling
-   across polished metal. Implemented by translating the spec gradient stroke. */
+/* Specular sheen travels along the ribbon, simulating light raking across metal. */
 .pm-spec {
-  animation: pm-spec 9s ease-in-out infinite alternate;
+  animation: pm-spec 11s ease-in-out infinite alternate;
 }
 @keyframes pm-spec {
-  0%   { transform: translateX(-10px); }
-  100% { transform: translateX(12px); }
+  0%   { transform: translate(-26px, 18px); opacity: 0.6; }
+  50%  { opacity: 1; }
+  100% { transform: translate(28px, -16px); opacity: 0.7; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .pm-drift,
   .pm-spec { animation: none; }
-  .prudent-metal svg animate { display: none; }
+  .prudent-svg animate { display: none; }
 }
 </style>
