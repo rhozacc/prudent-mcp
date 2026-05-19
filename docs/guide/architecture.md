@@ -4,6 +4,7 @@ Three views: the surface map (how the four kinds of record reference each other)
 
 ## Surface map
 
+<div class="diagram" v-pre>
 <svg viewBox="0 0 720 380" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;color:var(--vp-c-text-1);">
   <style>
     .surface { fill: var(--vp-c-bg-soft); stroke: currentColor; stroke-width: 1.5; }
@@ -62,6 +63,7 @@ Three views: the surface map (how the four kinds of record reference each other)
   <rect class="lblBg" x="324" y="272" width="72" height="14" rx="2"/>
   <text class="lbl" x="360" y="282" text-anchor="middle">references</text>
 </svg>
+</div>
 
 Solid arrows are typed cross-surface references. The dashed self-loop on Regulation is parent/children for section nesting. Every typed reference is enforced at compile time — `Check.derived_from: RegulationId[]` rejects a `TestId` before the program runs.
 
@@ -161,6 +163,7 @@ The dashed arrows are cross-surface references — the places where template lit
 
 A single `get_regulation` call, from client to corpus and back. The seam is the `adapters` object — defaults return empty, the in-memory demo seeds maps, a production deployment points at a real corpus.
 
+<div class="diagram" v-pre>
 <svg viewBox="0 0 880 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;color:var(--vp-c-text-1);">
   <style>
     .actor   { fill: var(--vp-c-bg-soft); stroke: currentColor; stroke-width: 1.5; }
@@ -213,6 +216,7 @@ A single `get_regulation` call, from client to corpus and back. The seam is the 
   <path class="ret" d="M260,345 L95,345"/>
   <text class="label" x="177" y="339" text-anchor="middle">JSON-RPC response</text>
 </svg>
+</div>
 
 ```mermaid
 flowchart LR

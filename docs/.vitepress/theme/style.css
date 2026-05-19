@@ -172,6 +172,30 @@
   letter-spacing: -0.005em;
 }
 
+/* Inline SVG diagrams in markdown ─ stable layout + safe fallback
+ * The wrapper is `<div class="diagram" v-pre>` so Vue doesn't hoist the
+ * SVG's inline <style> as a page-scoped style block. We also clip overflow
+ * and color any descendant <text> via currentColor so a still-loading or
+ * broken-style SVG never spills its label text outside the box. */
+.vp-doc .diagram {
+  margin: 1.5rem auto;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--vp-c-text-1);
+  contain: layout paint;
+}
+.vp-doc .diagram svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 480px;
+}
+/* If the SVG's inline <style> ever fails to apply, keep labels invisible
+ * rather than dumping a wall of position-less text into the page. */
+.vp-doc .diagram svg text:not([class]) {
+  visibility: hidden;
+}
+
 /* Hero logo: trim shadow, keep it crisp on the gradient wash */
 .VPHero .VPImage {
   filter: drop-shadow(0 8px 24px rgba(58, 88, 255, 0.18));
