@@ -40,7 +40,10 @@ Requires [Bun](https://bun.sh) ≥ 1.1. See [the quickstart guide](https://rhoza
   "mcpServers": {
     "prudent": {
       "command": "bun",
-      "args": ["run", "/absolute/path/to/prudent-mcp/examples/inmemory-demo.ts"]
+      "args": [
+        "run",
+        "/absolute/path/to/prudent-mcp/examples/inmemory-demo.ts"
+      ]
     }
   }
 }
