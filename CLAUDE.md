@@ -1,6 +1,6 @@
 # Claude Code: prudent-mcp v0.5
 
-This file is the working brief when extending the codebase. For human onboarding read `README.md` and `docs/CORPUS.md` first.
+This file is the working brief when extending the codebase. For human onboarding read `README.md` and `docs/corpus/index.md` first.
 
 ## What this is
 
@@ -36,7 +36,7 @@ Bun. TypeScript strict. `@modelcontextprotocol/sdk` (TS-first). zod for runtime 
 
 ## What to do when extending
 
-1. Read `src/schema.ts` and `docs/CORPUS.md` together — schema decisions all map to a use case.
+1. Read `src/schema.ts` and `docs/corpus/index.md` together — schema decisions all map to a use case.
 2. `bun install && bun run typecheck && bun test`.
 3. `bun run inspect:demo` — exercise the surface end-to-end.
 4. Make your change. Strict mode catches things; trust the type errors.

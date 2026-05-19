@@ -22,7 +22,7 @@
 
 ## Tests
 
-- Added test: registers expected surface area (12 tools, 4 resource templates, 3 prompts) — tripwire against accidental registration drift.
+- Added test: registers expected surface area (14 tools, 4 resource templates, 3 prompts) — tripwire against accidental registration drift.
 - Added test: `get_referrers("regulation://crr/180/1/a")` with in-memory adapters returns `checks: ["check://lra-pd-derived"]`, `playbooks: ["playbook://calibration/pd"]`, and empty regulation/tests arrays — exercises cross-reference logic end-to-end.
 
 ## NOT FIXED
