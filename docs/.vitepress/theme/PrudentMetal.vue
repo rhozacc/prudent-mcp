@@ -224,30 +224,60 @@
   top: 0;
   left: 0;
   right: 0;
-  /* Extends past VPHero so the metal sweeps through VPFeatures too. */
-  height: clamp(820px, 88vh, 1180px);
+  /* Tall enough to cover hero + feature cards, short enough to die before
+   * the "Why this exists" narrative starts. Clamped so it can't grow on
+   * tall viewports past where the narrative would be. */
+  height: clamp(560px, 62vh, 820px);
   pointer-events: none;
   z-index: 0;
+  /* Two intersected masks — both must be opaque for a pixel to show.
+   * 1) Radial focal point upper-left so the bulk of the metal reads there,
+   *    with a long gentle ramp to transparent in every direction.
+   * 2) Linear vertical fade that guarantees a soft cutoff at the bottom
+   *    even if the radial isn't aggressive enough on a particular aspect.
+   * No hard edges anywhere. */
   -webkit-mask-image:
     radial-gradient(
-      ellipse 125% 80% at 18% 48%,
+      ellipse 105% 78% at 20% 42%,
       black 0%,
-      black 36%,
-      rgba(0, 0, 0, 0.86) 52%,
-      rgba(0, 0, 0, 0.42) 70%,
-      rgba(0, 0, 0, 0.12) 84%,
-      transparent 94%
+      rgba(0, 0, 0, 0.95) 18%,
+      rgba(0, 0, 0, 0.78) 36%,
+      rgba(0, 0, 0, 0.5) 54%,
+      rgba(0, 0, 0, 0.22) 72%,
+      rgba(0, 0, 0, 0.06) 84%,
+      transparent 92%
+    ),
+    linear-gradient(
+      to bottom,
+      black 0%,
+      black 38%,
+      rgba(0, 0, 0, 0.85) 55%,
+      rgba(0, 0, 0, 0.45) 72%,
+      rgba(0, 0, 0, 0.15) 86%,
+      transparent 96%
     );
-  mask-image:
+  -webkit-mask-composite: source-in;
+          mask-image:
     radial-gradient(
-      ellipse 125% 80% at 18% 48%,
+      ellipse 105% 78% at 20% 42%,
       black 0%,
-      black 36%,
-      rgba(0, 0, 0, 0.86) 52%,
-      rgba(0, 0, 0, 0.42) 70%,
-      rgba(0, 0, 0, 0.12) 84%,
-      transparent 94%
+      rgba(0, 0, 0, 0.95) 18%,
+      rgba(0, 0, 0, 0.78) 36%,
+      rgba(0, 0, 0, 0.5) 54%,
+      rgba(0, 0, 0, 0.22) 72%,
+      rgba(0, 0, 0, 0.06) 84%,
+      transparent 92%
+    ),
+    linear-gradient(
+      to bottom,
+      black 0%,
+      black 38%,
+      rgba(0, 0, 0, 0.85) 55%,
+      rgba(0, 0, 0, 0.45) 72%,
+      rgba(0, 0, 0, 0.15) 86%,
+      transparent 96%
     );
+          mask-composite: intersect;
 }
 .prudent-svg {
   position: absolute;
