@@ -1,0 +1,50 @@
+name: Update README docs hero
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs-hero.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  screenshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install
+      - run: bun add -d playwright
+      - run: bunx playwright install --with-deps chromium
+
+      - run: bun run docs:build
+
+      - name: Serve docs and screenshot the hero
+        run: |
+          bunx vitepress preview docs --port 4173 &
+          SERVER_PID=$!
+          # Wait for the server to be ready
+          for i in {1..30}; do
+            if curl -fs http://127.0.0.1:4173/prudent-mcp/ > /dev/null; then break; fi
+            sleep 1
+          done
+
+          bun run scripts/screenshot-hero.ts
+          kill $SERVER_PID || true
+
+      - name: Commit screenshot if changed
+        run: |
+          if [[ -n "$(git status --porcelain docs/public/docs-hero.png)" ]]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add docs/public/docs-hero.png
+            git commit -m "docs: refresh README hero screenshot"
+            git push
+          else
+            echo "Hero screenshot unchanged — nothing to commit."
+          fi
