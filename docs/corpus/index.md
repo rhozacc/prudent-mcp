@@ -47,6 +47,7 @@ playbook://{area}[/{subarea}]
 
 The four schemes share the same shape: scheme name → typed path segments. A regulation URI decomposes like this:
 
+<div class="diagram" v-pre>
 <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;color:var(--vp-c-text-1);">
   <style>
     .uri    { fill: currentColor; font: 600 22px ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -77,6 +78,7 @@ The four schemes share the same shape: scheme name → typed path segments. A re
   <text class="tag"  x="362" y="193">point</text>
   <text class="desc" x="362" y="209">optional</text>
 </svg>
+</div>
 
 URIs truncate meaningfully: `regulation://crr/178` is the whole article, `regulation://crr/178/1` is paragraph 1, `regulation://crr/178/1/a` is point (a). The same principle applies across the other three schemes — segments map to the natural hierarchy of the underlying domain.
 
@@ -341,6 +343,7 @@ The MCP exposes the full list via `list_review_areas`. If a sub-area is added, b
 
 A representative slice of the taxonomy, visualised:
 
+<div class="diagram" v-pre>
 <svg viewBox="0 0 720 320" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;color:var(--vp-c-text-1);">
   <style>
     .node { fill: var(--vp-c-bg-soft); stroke: currentColor; stroke-width: 1.4; }
@@ -375,6 +378,7 @@ A representative slice of the taxonomy, visualised:
   <path class="edge" d="M460,138 L590,200"/>
   <path class="edge" d="M630,138 L600,260"/>
 </svg>
+</div>
 
 Top-level slugs are bare (`calibration`), child slugs are dotted (`calibration.pd`). The dotted form is intentional — it makes the parent-child relationship visible from the ID alone, the way URI segments do for the other surfaces.
 

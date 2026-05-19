@@ -83,7 +83,10 @@ For **Claude Desktop**, edit `claude_desktop_config.json`:
   "mcpServers": {
     "prudent": {
       "command": "bun",
-      "args": ["run", "/absolute/path/to/prudent-mcp/examples/inmemory-demo.ts"]
+      "args": [
+        "run",
+        "/absolute/path/to/prudent-mcp/examples/inmemory-demo.ts"
+      ]
     }
   }
 }
@@ -96,7 +99,10 @@ For **Claude Code**, create or edit `.mcp.json` in the project root:
   "mcpServers": {
     "prudent": {
       "command": "bun",
-      "args": ["run", "/absolute/path/to/prudent-mcp/examples/inmemory-demo.ts"]
+      "args": [
+        "run",
+        "/absolute/path/to/prudent-mcp/examples/inmemory-demo.ts"
+      ]
     }
   }
 }

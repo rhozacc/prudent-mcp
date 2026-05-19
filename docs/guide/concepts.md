@@ -14,6 +14,7 @@ flowchart LR
     T --> P
 ```
 
+<div class="diagram" v-pre>
 <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;color:var(--vp-c-text-1);">
   <style>
     .box   { fill: var(--vp-c-bg-soft); stroke: currentColor; stroke-width: 1.5; }
@@ -43,6 +44,7 @@ flowchart LR
   <path class="arrow" d="M360,60  L540,90"/>
   <path class="arrow" d="M360,160 L540,110"/>
 </svg>
+</div>
 
 The four surfaces correspond to the four kinds of artifact you actually deal with on a validation:
 

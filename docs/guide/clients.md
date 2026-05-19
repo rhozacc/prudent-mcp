@@ -14,7 +14,10 @@ Edit `claude_desktop_config.json`:
   "mcpServers": {
     "prudent": {
       "command": "bun",
-      "args": ["run", "/absolute/path/to/prudent-mcp/examples/inmemory-demo.ts"]
+      "args": [
+        "run",
+        "/absolute/path/to/prudent-mcp/examples/inmemory-demo.ts"
+      ]
     }
   }
 }
@@ -33,7 +36,10 @@ In a project directory, create `.mcp.json`:
   "mcpServers": {
     "prudent": {
       "command": "bun",
-      "args": ["run", "/absolute/path/to/prudent-mcp/examples/inmemory-demo.ts"]
+      "args": [
+        "run",
+        "/absolute/path/to/prudent-mcp/examples/inmemory-demo.ts"
+      ]
     }
   }
 }
@@ -52,7 +58,10 @@ Cursor uses the same MCP config shape. From the command palette: `Cursor: Open M
   "mcpServers": {
     "prudent": {
       "command": "bun",
-      "args": ["run", "/absolute/path/to/prudent-mcp/examples/inmemory-demo.ts"]
+      "args": [
+        "run",
+        "/absolute/path/to/prudent-mcp/examples/inmemory-demo.ts"
+      ]
     }
   }
 }

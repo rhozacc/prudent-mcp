@@ -53,6 +53,7 @@ playbook://{area}[/{subarea}]
 
 ## Which tool, when?
 
+<div class="diagram" v-pre>
 <svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;color:var(--vp-c-text-1);">
   <style>
     .q     { fill: var(--vp-c-bg-soft); stroke: currentColor; stroke-width: 1.5; }
@@ -110,5 +111,6 @@ playbook://{area}[/{subarea}]
   <path class="edge" d="M680,154 L680,200"/>
   <path class="edge" d="M680,240 L680,252"/>
 </svg>
+</div>
 
 Reading the tree top-down: ask what you have, follow the branch, run the tool. Most chains stop after one or two more calls — `get_referrers` after a regulation, `get_test` after a search hit, `expand_playbook` after `get_area_overview` if you skipped the overview.
