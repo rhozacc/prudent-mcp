@@ -201,17 +201,29 @@
   filter: drop-shadow(0 8px 24px rgba(58, 88, 255, 0.18));
 }
 
-/* Full-bleed metal bg lives inside .VPHero. Keep the hero a real positioning
- * context, ensure hero content stays above the bg, and give the hero some
- * breathing room so the diagonal sweep has room to read. */
-.VPHero {
+/* Chrome metal bg lives inside .VPHero via the home-hero-before slot but
+ * extends DOWN past VPHero so it sweeps across the .VPFeatures grid too.
+ * .VPHero gets overflow: visible to let the child bleed out; .VPHome gets
+ * overflow: hidden and isolation so the bleed is clipped to the home page
+ * and never reaches the markdown narrative below. */
+.VPHome {
   position: relative;
   overflow: hidden;
+  isolation: isolate;
+}
+.VPHero {
+  position: relative;
+  overflow: visible;
+  z-index: 1;
 }
 .VPHero > .container {
   position: relative;
-  z-index: 1;
+  z-index: 2;
+}
+.VPFeatures {
+  position: relative;
+  z-index: 2;
 }
 .VPHome .VPHero {
-  padding-bottom: clamp(4rem, 12vw, 9rem);
+  padding-bottom: clamp(3rem, 8vw, 6rem);
 }
