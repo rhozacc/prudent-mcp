@@ -40,11 +40,11 @@
   --vp-home-hero-name-color: var(--prudent-blue);
   --vp-home-hero-name-background: none;
   --vp-home-hero-image-background-image: radial-gradient(
-    circle at 30% 30%,
-    rgba(58, 88, 255, 0.18),
-    rgba(58, 88, 255, 0) 60%
+    circle at 35% 35%,
+    rgba(58, 88, 255, 0.10),
+    rgba(58, 88, 255, 0) 65%
   );
-  --vp-home-hero-image-filter: blur(40px);
+  --vp-home-hero-image-filter: blur(60px);
 
   /* Buttons */
   --vp-button-brand-bg:          var(--prudent-blue);
