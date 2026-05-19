@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>prudent-mcp knowledge graph</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f1117; font-family: monospace; color: #cdd6f4; overflow: hidden; }
+  #canvas { width: 100vw; height: 100vh; }
+  .node circle { stroke-width: 2; cursor: pointer; }
+  .node text { font-size: 11px; fill: #cdd6f4; pointer-events: none; }
+  .link { stroke-opacity: 0.5; }
+  #legend {
+    position: fixed; top: 16px; left: 16px;
+    background: #1e1e2e; border: 1px solid #313244;
+    border-radius: 8px; padding: 12px 16px;
+    font-size: 12px; line-height: 2;
+  }
+  .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  #info {
+    position: fixed; bottom: 16px; left: 16px; right: 16px;
+    background: #1e1e2e; border: 1px solid #313244;
+    border-radius: 8px; padding: 12px 16px;
+    font-size: 12px; display: none; max-height: 160px; overflow-y: auto;
+  }
+  #info h3 { color: #cba6f7; margin-bottom: 4px; }
+  #info p { color: #a6adc8; line-height: 1.5; }
+  #hint { position: fixed; top: 16px; right: 16px; font-size: 11px; color: #585b70; }
+</style>
+</head>
+<body>
+<svg id="canvas"></svg>
+<div id="legend">
+  <div><span class="legend-dot" style="background:#89b4fa"></span>regulation</div>
+  <div><span class="legend-dot" style="background:#a6e3a1"></span>test</div>
+  <div><span class="legend-dot" style="background:#fab387"></span>check</div>
+  <div><span class="legend-dot" style="background:#cba6f7"></span>playbook</div>
+  <div><span class="legend-dot" style="background:#f38ba8"></span>review area</div>
+  <div style="margin-top:8px;color:#585b70">drag · scroll to zoom</div>
+</div>
+<div id="info"></div>
+<div id="hint">click a node for details</div>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+const COLORS = {
+  regulation: "#89b4fa",
+  test:       "#a6e3a1",
+  check:      "#fab387",
+  playbook:   "#cba6f7",
+  area:       "#f38ba8",
+};
+
+const DETAILS = {
+  "regulation://crr/180": { title: "CRR Art. 180", body: "Sets requirements for institution-specific PD estimates under IRB. PDs shall be supported by sufficient historical experience and empirical evidence." },
+  "regulation://crr/180/1/a": { title: "CRR Art. 180(1)(a)", body: "Institutions shall estimate PDs by obligor grade from long-run averages of one-year default rates." },
+  "regulation://eba/gl-2017-16/s4": { title: "EBA GL 2017/16 §4", body: "Requirements for PD estimation under IRB, covering reference data sets, observation periods, and calibration methodology." },
+  "regulation://eba/gl-2017-16/78": { title: "EBA GL 2017/16 ¶78", body: "LRA used as calibration target should reflect the likely range of variability of one-year default rates, including downturn periods." },
+  "regulation://crr/178/1/a": { title: "CRR Art. 178(1)(a)", body: "Unlikely-to-pay definition. Objective indicators include non-accrued status, specific credit adjustment, sale at material credit-related loss, distressed restructuring, bankruptcy." },
+  "regulation://crr/178/1/b": { title: "CRR Art. 178(1)(b)", body: "Default when obligor is past due more than 90 days on any material credit obligation, with materiality assessed against thresholds in the relevant Commission Delegated Regulation." },
+  "test://jeffreys": { title: "Jeffreys test", body: "Bayesian PD calibration test at grade/pool level. Posterior probability that true PD exceeds estimate < chosen significance level (typically one-sided 95%)." },
+  "test://binomial": { title: "Binomial test", body: "Frequentist PD calibration test. p-value > α (typically 0.05 one-sided) means calibration is not rejected at the grade." },
+  "test://hosmer-lemeshow": { title: "Hosmer-Lemeshow test", body: "Groups predictions into buckets (typically deciles) and compares observed vs predicted defaults. p-value > α indicates calibration not rejected at portfolio level." },
+  "check://calibration/pd/lra-derived": { title: "LRA derived from sufficient history", body: "PD long-run average computed over ≥1 full economic cycle, ≥5 years of data. Evidence: default rate time series, cycle identification, historical default definition reconciliation." },
+  "check://calibration/pd/segment-tested": { title: "PD calibration tested per grade", body: "Tests at assignment level (grade or pool), not just portfolio. Materially different segments tested separately. Evidence: per-grade default counts, test statistics, segment list." },
+  "check://default-definition/90dpd": { title: "DD includes 90 DPD backstop", body: "Applied default definition includes 90-days-past-due trigger with materiality thresholds aligned to relevant RTS. Evidence: written policy, materiality thresholds, treatment of technical past-dues." },
+  "check://default-definition/utp": { title: "DD includes UTP triggers", body: "Includes all mandatory UTP indicators from EBA GL 2016/07. Any institution-specific triggers documented and applied consistently. Evidence: policy, mandatory indicator mapping, consistency evidence." },
+  "playbook://calibration": { title: "Playbook: Calibration", body: "Top-level calibration playbook. Phase: Identify component — determine whether review concerns PD, LGD, or EAD calibration." },
+  "playbook://calibration/pd": { title: "Playbook: PD Calibration", body: "Phases: (1) Validate LRA derivation, (2) Test calibration at grade level, (3) Document interpretation. Gates: LRA covers full cycle · All material grades tested · Deviations explained." },
+  "area:calibration": { title: "Review Area: Calibration", body: "Parent area covering PD and LGD calibration sub-areas." },
+  "area:calibration.pd": { title: "Review Area: PD Calibration", body: "Child of Calibration." },
+  "area:calibration.lgd": { title: "Review Area: LGD Calibration", body: "Child of Calibration." },
+  "area:default-definition": { title: "Review Area: Default Definition", body: "Standalone review area." },
+  "area:discriminatory-power": { title: "Review Area: Discriminatory Power", body: "Standalone review area." },
+};
+
+const nodes = [
+  { id: "regulation://crr/180",          label: "CRR 180",          type: "regulation", r: 14 },
+  { id: "regulation://crr/180/1/a",      label: "CRR 180(1)(a)",    type: "regulation", r: 12 },
+  { id: "regulation://eba/gl-2017-16/s4",label: "EBA GL §4",        type: "regulation", r: 12 },
+  { id: "regulation://eba/gl-2017-16/78",label: "EBA GL ¶78",       type: "regulation", r: 12 },
+  { id: "regulation://crr/178/1/a",      label: "CRR 178(1)(a)",    type: "regulation", r: 12 },
+  { id: "regulation://crr/178/1/b",      label: "CRR 178(1)(b)",    type: "regulation", r: 12 },
+  { id: "test://jeffreys",               label: "Jeffreys",         type: "test",       r: 11 },
+  { id: "test://binomial",               label: "Binomial",         type: "test",       r: 11 },
+  { id: "test://hosmer-lemeshow",        label: "Hosmer-Lemeshow",  type: "test",       r: 11 },
+  { id: "check://calibration/pd/lra-derived",    label: "LRA derived",       type: "check",    r: 11 },
+  { id: "check://calibration/pd/segment-tested", label: "Grade tested",      type: "check",    r: 11 },
+  { id: "check://default-definition/90dpd",      label: "90 DPD check",      type: "check",    r: 11 },
+  { id: "check://default-definition/utp",        label: "UTP check",         type: "check",    r: 11 },
+  { id: "playbook://calibration",    label: "Playbook: Cal.",    type: "playbook", r: 13 },
+  { id: "playbook://calibration/pd", label: "Playbook: PD Cal.", type: "playbook", r: 13 },
+  { id: "area:calibration",          label: "Area: Calibration",  type: "area", r: 10 },
+  { id: "area:calibration.pd",       label: "Area: PD Cal.",      type: "area", r: 9  },
+  { id: "area:calibration.lgd",      label: "Area: LGD Cal.",     type: "area", r: 9  },
+  { id: "area:default-definition",   label: "Area: Default Def.", type: "area", r: 9  },
+  { id: "area:discriminatory-power", label: "Area: Disc. Power",  type: "area", r: 9  },
+];
+
+const EDGE_COLORS = {
+  hierarchy:      "#585b70",
+  regulatory:     "#89b4fa44",
+  derived:        "#fab38788",
+  scope:          "#cba6f788",
+  phase:          "#a6e3a166",
+  area:           "#f38ba866",
+};
+
+const links = [
+  // regulation parent-child
+  { source: "regulation://crr/180",           target: "regulation://crr/180/1/a",       type: "hierarchy" },
+  { source: "regulation://eba/gl-2017-16/s4", target: "regulation://eba/gl-2017-16/78", type: "hierarchy" },
+
+  // test regulatory_basis
+  { source: "test://jeffreys",          target: "regulation://crr/180/1/a",       type: "regulatory" },
+  { source: "test://jeffreys",          target: "regulation://eba/gl-2017-16/78", type: "regulatory" },
+  { source: "test://binomial",          target: "regulation://crr/180/1/a",       type: "regulatory" },
+  { source: "test://binomial",          target: "regulation://eba/gl-2017-16/78", type: "regulatory" },
+  { source: "test://hosmer-lemeshow",   target: "regulation://crr/180/1/a",       type: "regulatory" },
+  { source: "test://hosmer-lemeshow",   target: "regulation://eba/gl-2017-16/78", type: "regulatory" },
+
+  // check derived_from
+  { source: "check://calibration/pd/lra-derived",    target: "regulation://crr/180/1/a",       type: "derived" },
+  { source: "check://calibration/pd/lra-derived",    target: "regulation://eba/gl-2017-16/78", type: "derived" },
+  { source: "check://calibration/pd/segment-tested", target: "regulation://crr/180",           type: "derived" },
+  { source: "check://default-definition/90dpd",      target: "regulation://crr/178/1/b",       type: "derived" },
+  { source: "check://default-definition/utp",        target: "regulation://crr/178/1/a",       type: "derived" },
+
+  // playbook regulatory_scope
+  { source: "playbook://calibration/pd", target: "regulation://eba/gl-2017-16/s4", type: "scope" },
+  { source: "playbook://calibration/pd", target: "regulation://crr/180",           type: "scope" },
+
+  // playbook phase references (child playbook → checks/tests)
+  { source: "playbook://calibration/pd", target: "check://calibration/pd/lra-derived",    type: "phase" },
+  { source: "playbook://calibration/pd", target: "check://calibration/pd/segment-tested", type: "phase" },
+  { source: "playbook://calibration/pd", target: "test://jeffreys",                        type: "phase" },
+  { source: "playbook://calibration/pd", target: "test://binomial",                        type: "phase" },
+  { source: "playbook://calibration/pd", target: "test://hosmer-lemeshow",                 type: "phase" },
+
+  // playbook hierarchy
+  { source: "playbook://calibration", target: "playbook://calibration/pd", type: "hierarchy" },
+
+  // review area hierarchy
+  { source: "area:calibration", target: "area:calibration.pd",  type: "area" },
+  { source: "area:calibration", target: "area:calibration.lgd", type: "area" },
+];
+
+const svg = d3.select("#canvas");
+const width = window.innerWidth;
+const height = window.innerHeight;
+svg.attr("viewBox", [0, 0, width, height]);
+
+const g = svg.append("g");
+
+svg.call(d3.zoom().scaleExtent([0.2, 4]).on("zoom", e => g.attr("transform", e.transform)));
+
+const sim = d3.forceSimulation(nodes)
+  .force("link", d3.forceLink(links).id(d => d.id).distance(d => d.type === "hierarchy" ? 80 : 140).strength(0.5))
+  .force("charge", d3.forceManyBody().strength(-320))
+  .force("center", d3.forceCenter(width / 2, height / 2))
+  .force("collision", d3.forceCollide(d => d.r + 18));
+
+const link = g.append("g").selectAll("line")
+  .data(links).join("line")
+  .attr("class", "link")
+  .attr("stroke", d => EDGE_COLORS[d.type] ?? "#585b70")
+  .attr("stroke-width", d => d.type === "hierarchy" ? 2 : 1)
+  .attr("stroke-dasharray", d => d.type === "phase" ? "4 3" : null);
+
+const node = g.append("g").selectAll("g")
+  .data(nodes).join("g")
+  .attr("class", "node")
+  .call(d3.drag()
+    .on("start", (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+    .on("drag",  (e, d) => { d.fx = e.x; d.fy = e.y; })
+    .on("end",   (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
+  )
+  .on("click", (e, d) => {
+    const det = DETAILS[d.id];
+    if (!det) return;
+    const el = document.getElementById("info");
+    el.style.display = "block";
+    el.innerHTML = `<h3>${det.title}</h3><p style="margin-top:4px;font-size:11px;color:#585b70">${d.id}</p><p style="margin-top:6px">${det.body}</p>`;
+    e.stopPropagation();
+  });
+
+svg.on("click", () => { document.getElementById("info").style.display = "none"; });
+
+node.append("circle")
+  .attr("r", d => d.r)
+  .attr("fill", d => COLORS[d.type] + "22")
+  .attr("stroke", d => COLORS[d.type]);
+
+node.append("text")
+  .attr("dy", d => d.r + 13)
+  .attr("text-anchor", "middle")
+  .text(d => d.label);
+
+sim.on("tick", () => {
+  link
+    .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+    .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+  node.attr("transform", d => `translate(${d.x},${d.y})`);
+});
+</script>
+</body>
+</html>
