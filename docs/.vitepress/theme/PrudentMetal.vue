@@ -8,99 +8,103 @@
     >
       <defs>
         <!--
-          Chrome looks "real" through three things working together:
-            a) sharp narrow bright/dark BANDS (not smooth gradients)
-            b) cool blue undertones in the shadows, slight cyan in the highs
-            c) the bands SLIDE across the body as the form moves
-
-          We use NO turbulence/displacement on the visible body — that's what
-          was producing pixel-level jaggedness on the ribbon edges. All motion
-          is via:
-            • SMIL animate on the path's `d` (slow liquid bend)
-            • animateTransform on gradient (bands raking across the surface)
-            • CSS transforms on the group (slow ambient drift)
+          PlayStation-Home-grade chrome: glossy, glassy, high-bloom, slightly
+          iridescent. Same path-morph motion engine (smooth, no displacement),
+          but with brighter highlights, more bloom layers, and added halo.
         -->
 
-        <!--
-          Chrome banding gradient. Direction is roughly perpendicular to the
-          ribbon (top-right ↘ bottom-left). Sharp narrow whites separated by
-          deep navies — the contrast is what reads as polished metal.
-        -->
         <linearGradient id="pm-chrome" gradientUnits="userSpaceOnUse"
                         x1="1500" y1="100" x2="80" y2="1200">
           <stop offset="0%"   stop-color="#03061A"/>
           <stop offset="5%"   stop-color="#0A1240"/>
           <stop offset="11%"  stop-color="#1A2EA0"/>
-          <stop offset="18%"  stop-color="#5C77FF"/>
-          <stop offset="23%"  stop-color="#C7D2FF"/>
-          <stop offset="26%"  stop-color="#FFFFFF"/>
-          <stop offset="29%"  stop-color="#E2E8FF"/>
-          <stop offset="34%"  stop-color="#7A93FF"/>
+          <stop offset="17%"  stop-color="#5C77FF"/>
+          <stop offset="22%"  stop-color="#BDD3FF"/>
+          <stop offset="25%"  stop-color="#FFFFFF"/>
+          <stop offset="28%"  stop-color="#E8F2FF"/>
+          <stop offset="33%"  stop-color="#88A8FF"/>
           <stop offset="42%"  stop-color="#2A45D8"/>
           <stop offset="50%"  stop-color="#0F1A6E"/>
           <stop offset="55%"  stop-color="#1E2EA8"/>
-          <stop offset="62%"  stop-color="#8197FF"/>
-          <stop offset="66%"  stop-color="#FFFFFF"/>
-          <stop offset="70%"  stop-color="#A4B6FF"/>
+          <stop offset="61%"  stop-color="#8FB0FF"/>
+          <stop offset="65%"  stop-color="#FFFFFF"/>
+          <stop offset="69%"  stop-color="#C5D6FF"/>
           <stop offset="76%"  stop-color="#3A58FF"/>
           <stop offset="86%"  stop-color="#0F1A6E"/>
           <stop offset="94%"  stop-color="#0A1240"/>
           <stop offset="100%" stop-color="#03061A"/>
-          <!-- Bands slide along the gradient axis over 56s — slow, hypnotic. -->
+          <!-- Bands slide ~2× faster now: 28s (was 56s). -->
           <animateTransform
             attributeName="gradientTransform"
             type="translate"
-            dur="56s"
+            dur="28s"
             values="0 0; -160 80; 80 -40; 40 20; 0 0"
             repeatCount="indefinite"
             additive="sum"/>
         </linearGradient>
 
-        <!--
-          A second, narrower "reflection-map" gradient overlaid with screen
-          blending — adds the hot environment-reflection bands that real
-          chrome catches (the bright sky-reflection above + softer fill).
-        -->
         <linearGradient id="pm-reflect" gradientUnits="userSpaceOnUse"
                         x1="1500" y1="100" x2="80" y2="1200">
           <stop offset="0%"   stop-color="#000000" stop-opacity="0"/>
-          <stop offset="22%"  stop-color="#000000" stop-opacity="0"/>
-          <stop offset="26%"  stop-color="#FFFFFF" stop-opacity="0.9"/>
-          <stop offset="29%"  stop-color="#FFFFFF" stop-opacity="0.55"/>
+          <stop offset="21%"  stop-color="#000000" stop-opacity="0"/>
+          <stop offset="25%"  stop-color="#FFFFFF" stop-opacity="1"/>
+          <stop offset="28%"  stop-color="#E8F2FF" stop-opacity="0.7"/>
           <stop offset="32%"  stop-color="#FFFFFF" stop-opacity="0"/>
-          <stop offset="64%"  stop-color="#FFFFFF" stop-opacity="0"/>
-          <stop offset="67%"  stop-color="#FFFFFF" stop-opacity="0.7"/>
+          <stop offset="63%"  stop-color="#FFFFFF" stop-opacity="0"/>
+          <stop offset="66%"  stop-color="#FFFFFF" stop-opacity="0.9"/>
           <stop offset="70%"  stop-color="#FFFFFF" stop-opacity="0"/>
           <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
           <animateTransform
             attributeName="gradientTransform"
             type="translate"
-            dur="44s"
+            dur="22s"
             values="0 0; -90 45; 45 -22; 0 0"
             repeatCount="indefinite"
             additive="sum"/>
         </linearGradient>
 
-        <!-- Smooth Gaussian-blurred bloom; no displacement = no jaggedness. -->
+        <!-- A subtle iridescent tint that drifts color slightly along the
+             ribbon, like prismatic refraction. Multiplied very lightly. -->
+        <linearGradient id="pm-irid" gradientUnits="userSpaceOnUse"
+                        x1="1500" y1="100" x2="80" y2="1200">
+          <stop offset="0%"   stop-color="#7A93FF" stop-opacity="0"/>
+          <stop offset="35%"  stop-color="#9FCBFF" stop-opacity="0.18"/>
+          <stop offset="55%"  stop-color="#C29DFF" stop-opacity="0.10"/>
+          <stop offset="75%"  stop-color="#7DC8FF" stop-opacity="0.16"/>
+          <stop offset="100%" stop-color="#7A93FF" stop-opacity="0"/>
+          <animateTransform
+            attributeName="gradientTransform"
+            type="translate"
+            dur="34s"
+            values="0 0; -80 40; 40 -20; 0 0"
+            repeatCount="indefinite"
+            additive="sum"/>
+        </linearGradient>
+
+        <!-- Three bloom radii: halo (huge soft glow that bridges the mask edge),
+             far (atmospheric blue), near (hot core). -->
+        <filter id="pm-bloom-halo" x="-40%" y="-40%" width="180%" height="180%"
+                color-interpolation-filters="sRGB">
+          <feGaussianBlur stdDeviation="180"/>
+        </filter>
         <filter id="pm-bloom-far" x="-30%" y="-30%" width="160%" height="160%"
                 color-interpolation-filters="sRGB">
-          <feGaussianBlur stdDeviation="110"/>
+          <feGaussianBlur stdDeviation="130"/>
         </filter>
         <filter id="pm-bloom-near" x="-20%" y="-20%" width="140%" height="140%"
                 color-interpolation-filters="sRGB">
-          <feGaussianBlur stdDeviation="28"/>
+          <feGaussianBlur stdDeviation="34"/>
         </filter>
 
         <!--
-          The path itself MORPHS between three near-identical shapes via SMIL.
-          This gives a genuine flowing-liquid bend without any noise-based
-          displacement, so edges stay mathematically smooth.
+          Path morphs between three near-identical S-curves. SMIL `d` animate
+          — pure math, no noise filters. Now 2× faster: 24s (was 48s).
         -->
         <path id="pm-stream"
               d="M 1700 60 C 1460 240, 1280 320, 1100 500 S 720 880, 480 1020 S 60 1240, -200 1320">
           <animate
             attributeName="d"
-            dur="48s"
+            dur="24s"
             repeatCount="indefinite"
             values="
               M 1700 60 C 1460 240, 1280 320, 1100 500 S 720 880, 480 1020 S 60 1240, -200 1320;
@@ -109,13 +113,11 @@
               M 1700 60 C 1460 240, 1280 320, 1100 500 S 720 880, 480 1020 S 60 1240, -200 1320"/>
         </path>
 
-        <!-- Upper-offset path used for top-edge rim + spec band. The same SMIL
-             d-morph is mirrored here so they stay in sync. -->
         <path id="pm-stream-rim"
               d="M 1700 28 C 1460 208, 1280 288, 1100 468 S 720 848, 480 988 S 60 1208, -200 1288">
           <animate
             attributeName="d"
-            dur="48s"
+            dur="24s"
             repeatCount="indefinite"
             values="
               M 1700 28 C 1460 208, 1280 288, 1100 468 S 720 848, 480 988 S 60 1208, -200 1288;
@@ -126,41 +128,61 @@
 
         <radialGradient id="pm-speck" cx="0.5" cy="0.5" r="0.5">
           <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="1"/>
-          <stop offset="30%"  stop-color="#E8ECFF" stop-opacity="0.6"/>
-          <stop offset="70%"  stop-color="#5C77FF" stop-opacity="0.12"/>
+          <stop offset="25%"  stop-color="#E8F2FF" stop-opacity="0.75"/>
+          <stop offset="60%"  stop-color="#7DC8FF" stop-opacity="0.2"/>
           <stop offset="100%" stop-color="#3A58FF" stop-opacity="0"/>
         </radialGradient>
       </defs>
 
-      <!-- ATMOSPHERIC BLOOM — pure blue haze extending the form softly. -->
+      <!-- HALO — huge soft white glow that bridges/bleeds into the mask edge,
+           so the mask boundary itself dissolves into bloom rather than hard
+           gradient termination. screen-blended for additive shine. -->
+      <use href="#pm-stream"
+           stroke="#9FBCFF"
+           stroke-opacity="0.45"
+           stroke-width="700"
+           stroke-linecap="round"
+           fill="none"
+           filter="url(#pm-bloom-halo)"
+           class="pm-halo"/>
+
+      <!-- ATMOSPHERIC bloom — Prudent Blue haze. -->
       <use href="#pm-stream"
            stroke="#3A58FF"
-           stroke-opacity="0.32"
+           stroke-opacity="0.5"
            stroke-width="540"
            stroke-linecap="round"
            fill="none"
            filter="url(#pm-bloom-far)"/>
 
-      <!-- INNER BLOOM — chrome gradient bloom, peaks white at center bands. -->
+      <!-- HOT CORE bloom — chrome gradient bloom, peaks white. -->
       <use href="#pm-stream"
            stroke="url(#pm-chrome)"
-           stroke-opacity="0.7"
+           stroke-opacity="0.85"
            stroke-width="320"
            stroke-linecap="round"
            fill="none"
-           filter="url(#pm-bloom-near)"/>
+           filter="url(#pm-bloom-near)"
+           class="pm-core"/>
 
       <g class="pm-drift" shape-rendering="geometricPrecision">
 
-        <!-- MAIN BODY — the chrome banding. No displacement filter applied. -->
+        <!-- MAIN BODY — chrome banding. -->
         <use href="#pm-stream"
              stroke="url(#pm-chrome)"
              stroke-width="220"
              stroke-linecap="round"
              fill="none"/>
 
-        <!-- REFLECTION-MAP OVERLAY — narrow sharp highlight bands, screen
-             blended so they only ADD light. -->
+        <!-- IRIDESCENT TINT — multiplied light hue-shift, very subtle. -->
+        <use href="#pm-stream"
+             stroke="url(#pm-irid)"
+             stroke-width="220"
+             stroke-linecap="round"
+             fill="none"
+             class="pm-irid"/>
+
+        <!-- REFLECTION-MAP overlay — narrow sharp white spikes, screen blend. -->
         <use href="#pm-stream"
              stroke="url(#pm-reflect)"
              stroke-width="220"
@@ -168,22 +190,19 @@
              fill="none"
              class="pm-reflect"/>
 
-        <!-- TOP-EDGE SPEC BAND — broad anisotropic highlight on the upper
-             offset path. Subtle (0.45 alpha), wide (60px), sliding slowly. -->
+        <!-- TOP-EDGE SPEC BAND — broad anisotropic highlight. -->
         <use href="#pm-stream-rim"
              stroke="#FFFFFF"
-             stroke-opacity="0.42"
+             stroke-opacity="0.55"
              stroke-width="60"
              stroke-linecap="round"
              fill="none"
              class="pm-spec-band"/>
 
-        <!-- HAIR RIM — a 2px bright line on the upper silhouette and a
-             matching 2px dark line on the lower silhouette. These edge
-             contrasts are what most sell the metal as solid. -->
+        <!-- Hairline rims for solidity. -->
         <use href="#pm-stream-rim"
              stroke="#FFFFFF"
-             stroke-opacity="0.85"
+             stroke-opacity="0.95"
              stroke-width="2"
              stroke-linecap="round"
              fill="none"
@@ -197,45 +216,26 @@
              transform="translate(0,110)"/>
       </g>
 
-      <!-- TRAVELLING SPECKS — radial gradients drifting along the path
-           direction. Screen-blended, slow, opacity-cycled. -->
       <g class="pm-specks">
-        <circle cx="1180" cy="430" r="44" fill="url(#pm-speck)" class="pm-speck pm-speck-a"/>
-        <circle cx="760"  cy="760" r="56" fill="url(#pm-speck)" class="pm-speck pm-speck-b"/>
-        <circle cx="320"  cy="1020" r="40" fill="url(#pm-speck)" class="pm-speck pm-speck-c"/>
+        <circle cx="1180" cy="430" r="48" fill="url(#pm-speck)" class="pm-speck pm-speck-a"/>
+        <circle cx="760"  cy="760" r="62" fill="url(#pm-speck)" class="pm-speck pm-speck-b"/>
+        <circle cx="320"  cy="1020" r="44" fill="url(#pm-speck)" class="pm-speck pm-speck-c"/>
       </g>
     </svg>
   </div>
 </template>
 
 <style scoped>
-/*
- * The bg lives inside .VPHero (via home-hero-before slot) but extends
- * DOWN past it into the .VPFeatures area so the metal sweeps across the
- * feature cards too. Its parent .VPHero gets overflow: visible (set
- * elsewhere in style.css), and .VPHome gets overflow: hidden so the
- * extra height is clipped at the page boundary.
- *
- * Mask: anchored upper-left, fades out before it ever reaches the
- * "Why this exists" section. Top-right is empty for the wordmark.
- */
 .prudent-bg {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  /* Tall enough to cover hero + feature cards, short enough to die before
-   * the "Why this exists" narrative starts. Clamped so it can't grow on
-   * tall viewports past where the narrative would be. */
   height: clamp(560px, 62vh, 820px);
   pointer-events: none;
   z-index: 0;
-  /* Two intersected masks — both must be opaque for a pixel to show.
-   * 1) Radial focal point upper-left so the bulk of the metal reads there,
-   *    with a long gentle ramp to transparent in every direction.
-   * 2) Linear vertical fade that guarantees a soft cutoff at the bottom
-   *    even if the radial isn't aggressive enough on a particular aspect.
-   * No hard edges anywhere. */
+
+  /* Two intersected masks. Both must be opaque for a pixel to show. */
   -webkit-mask-image:
     radial-gradient(
       ellipse 105% 78% at 20% 42%,
@@ -279,21 +279,46 @@
     );
           mask-composite: intersect;
 }
+
+/*
+ * Edge-softening blur: a slight Gaussian blur on the whole SVG smooths
+ * the mask-boundary transition itself, so where the metal fades to
+ * transparent there's no perceptible gradient banding — it dissolves.
+ * Saturation + brightness bumps give the PlayStation-Home glassy gloss.
+ */
 .prudent-svg {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   display: block;
+  filter: blur(0.6px) saturate(1.18) brightness(1.06) contrast(1.04);
 }
 
-/*
- * Slow ambient drift — 64s, ease-in-out. Subtle and meditative; previous
- * version moved twice as fast and felt restless.
- */
+/* Halo and core breathe so the bloom has its own rhythm separate from the
+ * geometry — makes the whole composition feel lit, not painted. */
+.pm-halo {
+  mix-blend-mode: screen;
+  animation: pm-halo 16s ease-in-out infinite alternate;
+  transform-origin: 800px 600px;
+}
+@keyframes pm-halo {
+  0%   { opacity: 0.55; transform: scale(1); }
+  100% { opacity: 0.95; transform: scale(1.04); }
+}
+.pm-core {
+  mix-blend-mode: screen;
+  animation: pm-core 14s ease-in-out infinite alternate;
+}
+@keyframes pm-core {
+  0%   { opacity: 0.7; }
+  100% { opacity: 1; }
+}
+
+/* Ambient drift — half the previous duration so it moves more visibly. */
 .pm-drift {
   transform-origin: 800px 600px;
-  animation: pm-drift 64s ease-in-out infinite alternate;
+  animation: pm-drift 32s ease-in-out infinite alternate;
   will-change: transform;
 }
 @keyframes pm-drift {
@@ -303,54 +328,65 @@
   100% { transform: translate(-4px, 4px)   rotate(0.2deg)  scale(1.006); }
 }
 
-/* Reflection map breathes its opacity slowly — like environment light shifting. */
+.pm-irid {
+  mix-blend-mode: overlay;
+  animation: pm-irid 24s ease-in-out infinite alternate;
+}
+@keyframes pm-irid {
+  0%   { opacity: 0.4; }
+  100% { opacity: 0.85; }
+}
+
 .pm-reflect {
   mix-blend-mode: screen;
-  animation: pm-reflect 38s ease-in-out infinite alternate;
+  animation: pm-reflect 19s ease-in-out infinite alternate;
 }
 @keyframes pm-reflect {
-  0%   { opacity: 0.6; }
-  50%  { opacity: 0.95; }
-  100% { transform: translate(8px, -4px); opacity: 0.75; }
+  0%   { opacity: 0.65; }
+  50%  { opacity: 1; }
+  100% { transform: translate(8px, -4px); opacity: 0.8; }
 }
 
-/* Spec band slides slowly along the ribbon — was 13s, now 26s. */
 .pm-spec-band {
-  animation: pm-spec-band 26s ease-in-out infinite alternate;
+  mix-blend-mode: screen;
+  animation: pm-spec-band 13s ease-in-out infinite alternate;
 }
 @keyframes pm-spec-band {
-  0%   { transform: translate(-28px, 16px); opacity: 0.35; }
-  50%  { opacity: 0.7; }
-  100% { transform: translate(30px, -18px); opacity: 0.5; }
+  0%   { transform: translate(-28px, 16px); opacity: 0.4; }
+  50%  { opacity: 0.8; }
+  100% { transform: translate(30px, -18px); opacity: 0.55; }
 }
 
-/* Travelling specks — slowed to 28–36s and given longer fade-in/out. */
+/* Specks halved: was 28–36s, now 14–18s. */
 .pm-speck { mix-blend-mode: screen; }
-.pm-speck-a { animation: pm-speck-a 32s ease-in-out infinite; }
-.pm-speck-b { animation: pm-speck-b 36s ease-in-out infinite; }
-.pm-speck-c { animation: pm-speck-c 28s ease-in-out infinite; }
+.pm-speck-a { animation: pm-speck-a 16s ease-in-out infinite; }
+.pm-speck-b { animation: pm-speck-b 18s ease-in-out infinite; }
+.pm-speck-c { animation: pm-speck-c 14s ease-in-out infinite; }
 
 @keyframes pm-speck-a {
   0%   { transform: translate(0, 0)          scale(0.7); opacity: 0; }
-  25%  { opacity: 0.85; }
-  65%  { transform: translate(-300px, 180px) scale(1.15); opacity: 0.65; }
+  25%  { opacity: 0.95; }
+  65%  { transform: translate(-300px, 180px) scale(1.2); opacity: 0.75; }
   100% { transform: translate(-600px, 400px) scale(0.55); opacity: 0; }
 }
 @keyframes pm-speck-b {
   0%   { transform: translate(140px, -90px)  scale(0.5); opacity: 0; }
-  30%  { opacity: 0.9; }
-  75%  { transform: translate(-200px, 130px) scale(1.25); opacity: 0.55; }
+  30%  { opacity: 1; }
+  75%  { transform: translate(-200px, 130px) scale(1.3); opacity: 0.65; }
   100% { transform: translate(-420px, 260px) scale(0.55); opacity: 0; }
 }
 @keyframes pm-speck-c {
   0%   { transform: translate(220px, -140px) scale(0.55); opacity: 0; }
-  35%  { opacity: 0.8; }
-  80%  { transform: translate(-100px, 70px)  scale(1.1); opacity: 0.45; }
+  35%  { opacity: 0.9; }
+  80%  { transform: translate(-100px, 70px)  scale(1.15); opacity: 0.55; }
   100% { transform: translate(-280px, 190px) scale(0.5); opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .pm-drift,
+  .pm-halo,
+  .pm-core,
+  .pm-irid,
   .pm-reflect,
   .pm-spec-band,
   .pm-speck-a,
