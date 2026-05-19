@@ -19,6 +19,8 @@
     "demo": "bun run examples/inmemory-demo.ts",
     "inspect": "bunx @modelcontextprotocol/inspector bun src/server.ts",
     "inspect:demo": "bunx @modelcontextprotocol/inspector bun examples/inmemory-demo.ts",
+    "serve": "bun run examples/http-server.ts",
+    "inspect:http": "bunx @modelcontextprotocol/inspector --cli bun examples/http-server.ts --transport http --url http://localhost:3000/mcp",
     "schemas": "bun run scripts/generate-schemas.ts",
     "list": "bun run scripts/list-all.ts",
     "docs:dev": "vitepress dev docs",
