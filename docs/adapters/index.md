@@ -54,9 +54,28 @@ const server = createServer();
 await server.connect(new StdioServerTransport());
 ```
 
+## Built-in file adapter
+
+`src/file-adapter.ts` ships with the server and loads a corpus from a JSON file. It is the adapter used by the MCPB distribution when `CORPUS_FILE` is set.
+
+```ts
+import { loadCorpusFile, createFileAdapters } from "prudent-mcp/file-adapter";
+import { adapters } from "prudent-mcp/adapters";
+
+const corpus = loadCorpusFile("/path/to/corpus.json");
+const fa = createFileAdapters(corpus);
+adapters.regulation = fa.regulation;
+adapters.test       = fa.test;
+adapters.check      = fa.check;
+adapters.playbook   = fa.playbook;
+adapters.meta       = fa.meta;
+```
+
+The JSON is validated against the full zod schemas on load. `createFileAdapters` returns all five adapters backed by in-memory maps — `search` uses a full-JSON-stringify text scan, `get` is a direct map lookup.
+
 ## The in-memory demo as a template
 
-`examples/inmemory-demo.ts` is the reference implementation. It seeds a small slice of PD-calibration content into in-memory maps and implements all five adapter interfaces against them. Use it as the template when building your own backend.
+`examples/inmemory-demo.ts` is the reference implementation for hand-coded adapters. It seeds a small slice of PD-calibration content into in-memory maps and implements all five adapter interfaces against them. Use it as the template when building your own backend.
 
 Key things the demo shows:
 

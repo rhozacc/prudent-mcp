@@ -15,13 +15,17 @@ src/
 ├── server.ts              MCP server + explicit registration of every module
 ├── schema.ts              zod schemas + template literal URI types
 ├── adapters.ts            interfaces per surface + empty defaults + handles
+├── file-adapter.ts        file-based adapters loaded from a corpus JSON file
+├── mcpb-entry.ts          MCPB entry point (wires file-adapter or empty defaults)
 ├── resources.ts           URI templates mirroring the schemes
 ├── tools/                 meta (incl. traversal tools) + one file per surface
 └── prompts/               three prompt scaffolds
 
+manifest.json              MCPB manifest v0.4
 examples/inmemory-demo.ts  seeded in-memory server, runnable end-to-end
 scripts/generate-schemas.ts  zod → JSON Schema export
 scripts/list-all.ts          prints full corpus overview to stdout
+scripts/build-mcpb.ts        bundle src/mcpb-entry.ts + pack .mcpb
 docs/                      architecture, corpus structure, generated schemas
 tests/smoke.test.ts        construction + traversal smoke tests
 ```
@@ -32,7 +36,7 @@ Every tool, resource, and prompt has a description, a zod input schema, and a ha
 
 Bun. TypeScript strict. `@modelcontextprotocol/sdk` (TS-first). zod for runtime validation, template literal types (`type RegulationId = `regulation://${string}``) for compile-time URI segregation.
 
-`bun run typecheck`, `bun test`, `bun run inspect:demo`, `bun run schemas`. No `tsc` build step for local dev.
+`bun run typecheck`, `bun test`, `bun run inspect:demo`, `bun run schemas`, `bun run build:mcpb`. No `tsc` build step for local dev.
 
 ## What to do when extending
 

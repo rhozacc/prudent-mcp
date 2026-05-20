@@ -1,5 +1,18 @@
 # Changes
 
+## MCPB distribution
+
+Added zero-dependency distribution as a `.mcpb` bundle for Claude Desktop.
+
+- `src/file-adapter.ts` — in-memory adapters loaded from a corpus JSON file. All five surfaces (regulation, test, check, playbook, meta) backed by maps parsed from the file. Zod-validated at load time; malformed records error on startup rather than at query time.
+- `src/mcpb-entry.ts` — MCPB entry point. Reads `CORPUS_FILE` env var; if set, wires up file adapters. Falls back to empty defaults.
+- `manifest.json` — MCPB manifest v0.4. User-configurable `corpusFile` (optional string); demo mode (empty corpus) when not set. Targets Node 18+, all three platforms.
+- `scripts/build-mcpb.ts` — bundles `src/mcpb-entry.ts` via esbuild (ESM, `--bundle --platform=node`) into `dist/mcpb/server/index.mjs`, copies manifest and icon, then invokes `@anthropic-ai/mcpb pack`.
+- `esbuild ^0.24` added to `devDependencies`.
+- `build:mcpb` script added to `package.json`.
+
+Corpus JSON format: `{ regulation[], tests[], checks[], playbooks[], taxonomy[] }` — all surfaces optional.
+
 ## Tool description improvements
 
 - `search_regulation`: Added return shape (Regulation array with id/citation/text/commentary), pointer to `get_referrers` as next step, and clarified latest-only constraint with `as_of` fallback — was a single sentence with no return shape and no next-step guidance.

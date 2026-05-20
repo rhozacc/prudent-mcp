@@ -1,0 +1,33 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
+  "manifest_version": "0.4",
+  "name": "prudent-mcp",
+  "version": "0.5.0",
+  "description": "IRB credit risk model validation knowledge base — regulation, tests, checks, and playbooks for Claude.",
+  "author": {
+    "name": "Econlab"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.mjs"],
+      "env": {
+        "CORPUS_FILE": "${user_config.corpusFile}"
+      }
+    }
+  },
+  "user_config": {
+    "corpusFile": {
+      "type": "string",
+      "title": "Corpus file",
+      "description": "Absolute path to your corpus JSON file. Leave empty to start in demo mode (no content).",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=1.0.0",
+    "platforms": ["darwin", "win32", "linux"]
+  }
+}

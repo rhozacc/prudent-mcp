@@ -33,7 +33,15 @@ Requires [Bun](https://bun.sh) ≥ 1.1. See [the quickstart guide](https://rhoza
 
 ## Connect a client
 
-**Claude Desktop** — edit `claude_desktop_config.json`:
+**Claude Desktop (MCPB — no Bun required)** — build once, then drag-and-drop:
+
+```bash
+bun run build:mcpb   # produces dist/prudent-mcp.mcpb
+```
+
+Drag `dist/prudent-mcp.mcpb` onto Claude Desktop. An optional install-time prompt lets you point it at a corpus JSON file; leave it empty to start in demo mode.
+
+**Claude Desktop (manual config)** — edit `claude_desktop_config.json`:
 
 ```json
 {

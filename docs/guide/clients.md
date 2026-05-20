@@ -2,7 +2,31 @@
 
 `prudent-mcp` speaks the standard [Model Context Protocol](https://modelcontextprotocol.io). Any compliant client can connect to it. This page lists the host configurations that are known to work.
 
-## Claude Desktop
+## Claude Desktop — MCPB (no Bun required)
+
+The easiest way to install on Claude Desktop is via the bundled `.mcpb` package. It ships with the Node.js runtime — the user needs no toolchain.
+
+```bash
+bun run build:mcpb   # produces dist/prudent-mcp.mcpb
+```
+
+Drag `dist/prudent-mcp.mcpb` onto Claude Desktop. An install-time prompt lets you set an optional **Corpus file** path — an absolute path to a corpus JSON file. Leave it empty to start with empty adapters (useful for testing the connection before loading data).
+
+**Corpus file format:**
+
+```json
+{
+  "regulation": [ ...Regulation objects... ],
+  "tests":      [ ...Test objects... ],
+  "checks":     [ ...Check objects... ],
+  "playbooks":  [ ...Playbook objects... ],
+  "taxonomy":   [ ...ReviewArea objects... ]
+}
+```
+
+All fields are optional; omit any surface and it returns empty results. The JSON is validated against the zod schemas on startup — malformed records are rejected with a clear error rather than silently dropped.
+
+## Claude Desktop — manual config
 
 Edit `claude_desktop_config.json`:
 
