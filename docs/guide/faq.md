@@ -26,26 +26,6 @@ The three existing prompts (`validate_review_area`, `review_calibration`, `asses
 
 If you find yourself wanting a fourth, write it in the host (Claude Desktop / Code projects can carry their own prompts) before adding it to the corpus.
 
-## Domain
-
-### What's "long-run" in long-run average?
-
-EBA Q&A 2018_3804 says at least one full economic cycle, with a minimum of five years of historical data. Longer periods are required where the available history isn't representative — e.g., a portfolio that only existed during an upturn would need supplementary data sources or a conservative adjustment.
-
-The corpus carries this commentary as a `Commentary` entry on `regulation://crr/180/1/a`.
-
-### How do I tell a PIT model from a TTC model?
-
-Look at how the rating moves with the cycle. If grade-level default rates are stable across the cycle (the rating moves to absorb the cycle), it's TTC. If grade-level default rates spike during downturns (the rating is stable, defaults move within the grade), it's PIT.
-
-The corpus doesn't make that determination — it tells you what each philosophy implies for calibration data, LRA period, and downturn treatment. The judgement is the validator's.
-
-### What goes in `derived_from` for an MoC check?
-
-An MoC check derives from the regulation that mandates conservatism, not the technical methodology. For Category A MoC (data deficiencies), that's typically EBA GL 2017/16 paragraphs 36–47. For Category B (methodological), paragraphs 39–43. The check's `expectation` is the documentation bar; the `derived_from` is the regulatory anchor.
-
-If you're tempted to put a `check://` URI in `derived_from`, that's a sign you should be referencing it from a `Playbook.phase` instead.
-
 ## Implementation
 
 ### Can I extend the schema?

@@ -1,5 +1,14 @@
 # Changes
 
+## Documentation pass
+
+- **Syntax highlighting** — every `call → result` example in the tool docs and the examples page used bare code fences (no language) and rendered unstyled; all now tagged `ts` for consistent coloring.
+- **Schema reference** — new generated page `docs/corpus/schemas.md` (`bun run schema-docs`, chained off `bun run schemas`) renders each surface's JSON Schema, collapsible and highlighted, linked in the nav. The machine-contract companion to the prose field tables in Corpus structure.
+- **Trimmed domain content** — cut the FAQ "Domain" section (long-run / PIT-TTC / MoC) and condensed the concepts page's eight-concept regulatory deep-dive to a short orienting list. The docs describe the tool; they don't teach the domain.
+- **Examples marked illustrative** — a callout clarifies the walkthroughs reflect the full proprietary corpus, not the open-source demo (most reference URIs the demo doesn't carry).
+- **Fixes** — corrected the quickstart clone URL (`econlabsi` → `rhozacc`); condensed duplicated client-config blocks; surfaced the new traversal/coverage tools in the quickstart and on the landing page.
+- **CI** — the `docs-hero` workflow pushed the regenerated screenshot directly to `main`, which branch protection now rejects; it opens a rolling PR instead and is marked `continue-on-error` so it can't fail a run.
+
 ## Traversal, coverage, and corpus tooling
 
 Built on the children change: three new cross-cutting tools (14 → 17), a corpus linter, a corpus graph, and stronger tests.

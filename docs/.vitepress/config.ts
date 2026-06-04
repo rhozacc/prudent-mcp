@@ -39,6 +39,7 @@ export default defineConfig({
         text: "Reference",
         items: [
           { text: "Corpus structure", link: "/corpus/" },
+          { text: "Schema reference", link: "/corpus/schemas" },
           { text: "Corpus graph",     link: "/corpus/graph" },
           { text: "Prompts",          link: "/prompts/" },
           { text: "Adapters",         link: "/adapters/" },

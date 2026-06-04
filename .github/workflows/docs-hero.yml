@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   screenshot:
@@ -37,14 +38,29 @@ jobs:
           bun run scripts/screenshot-hero.ts
           kill $SERVER_PID || true
 
-      - name: Commit screenshot if changed
+      # main is protected (PR-only + required checks), so a direct push is
+      # rejected. Propose the refresh through a rolling PR branch instead, and
+      # never let this housekeeping step fail the run.
+      - name: Open a PR if the screenshot changed
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [[ -n "$(git status --porcelain docs/public/docs-hero.png)" ]]; then
-            git config user.name  "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add docs/public/docs-hero.png
-            git commit -m "docs: refresh README hero screenshot"
-            git push
+          if [[ -z "$(git status --porcelain docs/public/docs-hero.png)" ]]; then
+            echo "Hero screenshot unchanged — nothing to do."
+            exit 0
+          fi
+          branch="bot/docs-hero-refresh"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add docs/public/docs-hero.png
+          git commit -m "docs: refresh README hero screenshot"
+          git push -f origin "$branch"
+          if [[ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[0].number')" ]]; then
+            gh pr create --base main --head "$branch" \
+              --title "docs: refresh README hero screenshot" \
+              --body "Automated refresh from the \`docs-hero\` workflow — the hero screenshot changed after a docs update."
           else
-            echo "Hero screenshot unchanged — nothing to commit."
+            echo "Existing hero-refresh PR updated via force-push."
           fi

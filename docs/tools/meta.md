@@ -26,7 +26,7 @@ What's loaded right now. Tells Claude what's actually queryable before it starts
 ```
 
 **Example:**
-```
+```ts
 get_corpus_info()
 → { last_updated: "2024-10-01T00:00:00Z", counts: { regulation: 12, test: 3, check: 4, playbook: 2 }, coverage: ["CRR", "EBA-GL-2017-16"] }
 ```
@@ -55,7 +55,7 @@ Find everything in the corpus that references a given ID. Works on any surface �
 ```
 
 **Example:**
-```
+```ts
 get_referrers("regulation://crr/180/1/a")
 → { regulation: [], tests: [], checks: ["check://calibration/pd/lra-derived"], playbooks: ["playbook://calibration/pd"] }
 ```
@@ -75,7 +75,7 @@ Loose, human-prose citation string → structured Regulation record. Handles the
 **Returns:** `Regulation | null`
 
 **Example:**
-```
+```ts
 resolve_citation("Art. 178(1)(a)")
 → regulation://crr/178/1/a  (full Regulation record)
 
@@ -103,7 +103,7 @@ type ReviewArea = {
 ```
 
 **Example:**
-```
+```ts
 list_review_areas()
 → [
     { id: "calibration",     name: "Calibration",     children: ["calibration.pd", "calibration.lgd"] },
@@ -129,7 +129,7 @@ Fetch a playbook with all `Phase.references` resolved inline. Avoids N+1 fetches
 Each reference in `phases[*].references` becomes `{ type, id, record }` where `record` is the full Regulation / Test / Check / Playbook object (null if not found).
 
 **Example:**
-```
+```ts
 expand_playbook("playbook://calibration/pd")
 → {
     id: "playbook://calibration/pd",
@@ -171,7 +171,7 @@ type AreaOverview = {
 ```
 
 **Example:**
-```
+```ts
 get_area_overview("calibration.pd")
 → {
     area: { id: "calibration.pd", name: "PD Calibration", ... },
@@ -210,7 +210,7 @@ type ExpandedRegulation = {
 ```
 
 **Example:**
-```
+```ts
 expand_regulation("regulation://crr/180/1/a")
 → {
     id: "regulation://crr/180/1/a",
@@ -251,7 +251,7 @@ type RegulationTreeNode = {
 ```
 
 **Example:**
-```
+```ts
 get_regulation_tree("regulation://crr/180")
 → {
     type: "regulation", id: "regulation://crr/180", citation: "CRR Article 180",
@@ -285,7 +285,7 @@ type CoverageReport = {
 `is_leaf` distinguishes a real gap (a leaf paragraph with no coverage) from a section that may inherit coverage from its children.
 
 **Example:**
-```
+```ts
 get_coverage_gaps()
 → {
     total_regulations: 6, covered: 5,
