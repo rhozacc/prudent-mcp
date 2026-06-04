@@ -1,5 +1,10 @@
 # Changes
 
+## Mermaid rendering
+
+- VitePress shipped no Mermaid plugin, so every `mermaid` block (the corpus graph, the architecture class diagram, the concepts flow) rendered as raw source. Added `vitepress-plugin-mermaid` + `mermaid` and wrapped the config in `withMermaid` — diagrams now render.
+- Decluttered now that they're visible: the generated corpus graph groups nodes into per-surface subgraphs; the architecture class diagram drops the two unconnected computed types (`CorpusInfo`, `Referrers`, documented in the Schema reference) and gains the missing `Phase → Playbook` edge; the concepts page drops the Mermaid flow that duplicated the SVG beside it.
+
 ## Documentation pass
 
 - **Syntax highlighting** — every `call → result` example in the tool docs and the examples page used bare code fences (no language) and rendered unstyled; all now tagged `ts` for consistent coloring.

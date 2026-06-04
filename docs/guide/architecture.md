@@ -134,19 +134,6 @@ classDiagram
         +string[] children
     }
 
-    class CorpusInfo {
-        +string last_updated
-        +Map~Surface,number~ counts
-        +string[] coverage
-    }
-
-    class Referrers {
-        +RegulationId[] regulation
-        +TestId[] tests
-        +CheckId[] checks
-        +PlaybookId[] playbooks
-    }
-
     Regulation "1" *-- "many" Commentary : carries
     Playbook "1" *-- "many" Phase : has
     Regulation ..> Regulation : parent / children
@@ -158,10 +145,11 @@ classDiagram
     Phase ..> Regulation : references
     Phase ..> Test : references
     Phase ..> Check : references
+    Phase ..> Playbook : references
     ReviewArea ..> ReviewArea : parent / children
 ```
 
-The dashed arrows are cross-surface references — the places where template literal types catch wrong-surface IDs at compile time.
+The dashed arrows are cross-surface references — the places where template literal types catch wrong-surface IDs at compile time. The computed types (`CorpusInfo`, `Referrers`) are derived at query time, not stored, so they're omitted here — see the [Schema reference](/corpus/schemas) for their full shape.
 
 ## Request lifecycle
 

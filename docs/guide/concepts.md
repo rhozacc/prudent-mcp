@@ -6,14 +6,6 @@ If you already know the domain and want the schema, skip to [Corpus structure](/
 
 ## The four surfaces, conceptually
 
-```mermaid
-flowchart LR
-    R[Regulation<br/>what the law says] --> C[Check<br/>what passes]
-    R --> T[Test<br/>how to measure]
-    C --> P[Playbook<br/>how to walk it]
-    T --> P
-```
-
 <div class="diagram" v-pre>
 <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;color:var(--vp-c-text-1);">
   <style>
