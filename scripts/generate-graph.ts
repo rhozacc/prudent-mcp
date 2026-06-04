@@ -41,14 +41,19 @@ async function main(): Promise<void> {
 
   const lines: string[] = ["flowchart LR"];
 
-  // Node declarations, shape per surface.
-  for (const r of regs) lines.push(`  ${nodeId(r.id)}["${label(r.citation)}"]`);
-  for (const c of checks) lines.push(`  ${nodeId(c.id)}("${label(c.name)}")`);
-  for (const t of tests) lines.push(`  ${nodeId(t.id)}{{"${label(t.name)}"}}`);
-  for (const p of playbooks) {
-    const name = p.subarea ? `${p.area}/${p.subarea}` : p.area;
-    lines.push(`  ${nodeId(p.id)}[["playbook: ${label(name)}"]]`);
-  }
+  // Group nodes into a subgraph per surface so the map reads as clusters rather
+  // than a hairball. Shapes still encode the surface for when edges cross groups.
+  const subgraph = (title: string, nodes: string[]): void => {
+    if (nodes.length === 0) return;
+    lines.push(`  subgraph ${title}`, ...nodes, "  end");
+  };
+  subgraph("Regulation", regs.map((r) => `    ${nodeId(r.id)}["${label(r.citation)}"]`));
+  subgraph("Check", checks.map((c) => `    ${nodeId(c.id)}("${label(c.name)}")`));
+  subgraph("Test", tests.map((t) => `    ${nodeId(t.id)}{{"${label(t.name)}"}}`));
+  subgraph(
+    "Playbook",
+    playbooks.map((p) => `    ${nodeId(p.id)}[["${label(p.subarea ? `${p.area}/${p.subarea}` : p.area)}"]]`),
+  );
 
   // Edges, deduplicated (a playbook may reference the same record in two phases).
   const edges = new Set<string>();

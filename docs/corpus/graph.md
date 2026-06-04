@@ -17,21 +17,29 @@ Solid arrows are `Regulation.children` (sub-regulations plus the checks/tests th
 
 ```mermaid
 flowchart LR
-  regulation___crr_180["CRR Article 180"]
-  regulation___crr_180_1_a["CRR Article 180(1)(a)"]
-  regulation___eba_gl_2017_16_s4["EBA GL 2017/16 Section 4 — Requirements related to PD estimation"]
-  regulation___eba_gl_2017_16_78["EBA GL 2017/16 paragraph 78"]
-  regulation___crr_178_1_a["CRR Article 178(1)(a)"]
-  regulation___crr_178_1_b["CRR Article 178(1)(b)"]
-  check___calibration_pd_lra_derived("PD long-run average derived from sufficient history")
-  check___calibration_pd_segment_tested("PD calibration tested per grade or pool")
-  check___default_definition_90dpd("Default definition includes 90 DPD backstop")
-  check___default_definition_utp("Default definition includes unlikely-to-pay (UTP) triggers")
-  test___jeffreys{{"Jeffreys test"}}
-  test___binomial{{"Binomial test"}}
-  test___hosmer_lemeshow{{"Hosmer-Lemeshow test"}}
-  playbook___calibration[["playbook: calibration"]]
-  playbook___calibration_pd[["playbook: calibration/pd"]]
+  subgraph Regulation
+    regulation___crr_180["CRR Article 180"]
+    regulation___crr_180_1_a["CRR Article 180(1)(a)"]
+    regulation___eba_gl_2017_16_s4["EBA GL 2017/16 Section 4 — Requirements related to PD estimation"]
+    regulation___eba_gl_2017_16_78["EBA GL 2017/16 paragraph 78"]
+    regulation___crr_178_1_a["CRR Article 178(1)(a)"]
+    regulation___crr_178_1_b["CRR Article 178(1)(b)"]
+  end
+  subgraph Check
+    check___calibration_pd_lra_derived("PD long-run average derived from sufficient history")
+    check___calibration_pd_segment_tested("PD calibration tested per grade or pool")
+    check___default_definition_90dpd("Default definition includes 90 DPD backstop")
+    check___default_definition_utp("Default definition includes unlikely-to-pay (UTP) triggers")
+  end
+  subgraph Test
+    test___jeffreys{{"Jeffreys test"}}
+    test___binomial{{"Binomial test"}}
+    test___hosmer_lemeshow{{"Hosmer-Lemeshow test"}}
+  end
+  subgraph Playbook
+    playbook___calibration[["calibration"]]
+    playbook___calibration_pd[["calibration/pd"]]
+  end
   regulation___crr_180 --> regulation___crr_180_1_a
   regulation___crr_180 --> check___calibration_pd_segment_tested
   regulation___crr_180_1_a --> check___calibration_pd_lra_derived

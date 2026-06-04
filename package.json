@@ -40,8 +40,10 @@
   "devDependencies": {
     "@types/bun": "^1.1.0",
     "esbuild": "^0.24.0",
+    "mermaid": "^11.15.0",
     "typescript": "^5.6.0",
     "vitepress": "^1.6.4",
+    "vitepress-plugin-mermaid": "^2.0.17",
     "zod-to-json-schema": "^3.23.0"
   }
 }

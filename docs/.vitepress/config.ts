@@ -1,6 +1,7 @@
 import { defineConfig } from "vitepress";
+import { withMermaid } from "vitepress-plugin-mermaid";
 
-export default defineConfig({
+export default withMermaid(defineConfig({
   title: "prudent-mcp",
   description: "Structured regulatory knowledge for IRB credit-risk model validation",
   base: "/prudent-mcp/",
@@ -52,4 +53,4 @@ export default defineConfig({
     ],
     search: { provider: "local" },
   },
-});
+}));
