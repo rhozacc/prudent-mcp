@@ -1,6 +1,10 @@
 # Use case examples
 
-Real prompts, real tool calls, simulated responses. The MCP is connected in all four threads.
+Real prompts, real tool calls, simulated responses — how an MCP-equipped client drives the corpus.
+
+::: warning Illustrative — full corpus, not the demo
+These walkthroughs show what the **complete prudent corpus** answers. Most reference regulation, checks, tests, and playbooks — downturn LGD, MoC, representativeness, overrides, IFRS9, AUROC — that are **not in the open-source in-memory demo**, which carries only a PD-calibration and default-definition slice. The tool-call shapes are representative; the responses are illustrative, not literal demo output.
+:::
 
 ---
 
@@ -10,14 +14,14 @@ Real prompts, real tool calls, simulated responses. The MCP is connected in all 
 
 <!-- Claude doesn't guess from training data. It resolves the citation to a structured URI first. -->
 
-```
+```ts
 resolve_citation("Art. 178(1)(a)")
 → regulation://crr/178/1/a
 ```
 
 <!-- Then fetches the verbatim text plus any attached supervisor commentary. -->
 
-```
+```ts
 get_regulation("regulation://crr/178/1/a")
 → text: "A default shall be considered to have occurred when the institution
          considers that the obligor is unlikely to pay..."
@@ -26,7 +30,7 @@ get_regulation("regulation://crr/178/1/a")
 
 <!-- Then walks the reverse index to find what operationalises it. -->
 
-```
+```ts
 get_referrers("regulation://crr/178/1/a")
 → checks: ["check://default-definition/utp"]
    playbooks: ["playbook://default-definition"]
@@ -42,7 +46,7 @@ get_referrers("regulation://crr/178/1/a")
 
 <!-- One call returns the full entry point: review area, all playbooks for it, expanded with every regulation/check/test referenced inline, plus deduplicated ID lists. No N+1 fetches. -->
 
-```
+```ts
 get_area_overview("calibration.pd")
 → area: { id: "calibration.pd", name: "PD Calibration" }
   playbooks: [
@@ -63,7 +67,7 @@ get_area_overview("calibration.pd")
 
 <!-- Claude searches for the test by its alias, not its canonical name. -->
 
-```
+```ts
 search_tests("chi-squared decile")
 → [{ id: "test://hosmer-lemeshow",
      name: "Hosmer-Lemeshow test",
@@ -83,7 +87,7 @@ search_tests("chi-squared decile")
 
 <!-- Historical version lookup — as_of pins to the regulation text that was in force on that date. -->
 
-```
+```ts
 get_regulation("regulation://crr/178/1/b", as_of="2014-06-01")
 → document_version: "2013-06-26"
    text: "...Materiality is left to national competent authority discretion."
@@ -91,7 +95,7 @@ get_regulation("regulation://crr/178/1/b", as_of="2014-06-01")
 
 <!-- Contrast with the current version. -->
 
-```
+```ts
 get_regulation("regulation://crr/178/1/b")
 → document_version: "2024-01-09"
    text: "...materiality assessed against thresholds set in the relevant
@@ -108,12 +112,12 @@ get_regulation("regulation://crr/178/1/b")
 
 <!-- Claude pulls the regulatory anchor first. -->
 
-```
+```ts
 resolve_citation("CRR Art. 181 downturn LGD")
 → regulation://crr/181/1/b
 ```
 
-```
+```ts
 get_regulation("regulation://crr/181/1/b")
 → text: "...where LGD estimates are not appropriate for an economic downturn,
          institutions shall use LGD estimates that are appropriate for an
@@ -124,12 +128,12 @@ get_regulation("regulation://crr/181/1/b")
 
 <!-- Then walks the checks against it. -->
 
-```
+```ts
 get_referrers("regulation://crr/181/1/b")
 → checks: ["check://lgd/downturn/methodology", "check://lgd/downturn/reference-value"]
 ```
 
-```
+```ts
 get_check("check://lgd/downturn/methodology")
 → expectation: "Downturn LGD is derived from one of: (i) observed historical
                 downturn losses, (ii) impact assessment with calibration to
@@ -155,12 +159,12 @@ get_check("check://lgd/downturn/methodology")
 
 <!-- Override analysis sits inside model use and rating assignment — let's find the right playbook. -->
 
-```
+```ts
 list_review_areas()
 → [..., { id: "rating-assignment.overrides", name: "Rating overrides", parent: "rating-assignment" }, ...]
 ```
 
-```
+```ts
 get_area_overview("rating-assignment.overrides")
 → area: { id: "rating-assignment.overrides", name: "Rating overrides" }
   playbooks: [playbook://rating-assignment/overrides (4 phases)]
@@ -173,7 +177,7 @@ get_area_overview("rating-assignment.overrides")
 
 <!-- Pull the performance-tracking check since rate alone isn't sufficient. -->
 
-```
+```ts
 get_check("check://rating-assignment/overrides/performance-tracked")
 → expectation: "Override performance is tracked separately from non-override
                 cases. Default rates of overridden grades are compared to both
@@ -197,7 +201,7 @@ get_check("check://rating-assignment/overrides/performance-tracked")
 
 <!-- Two regulatory anchors apply — the general representativeness mandate and the EBA elaboration. -->
 
-```
+```ts
 search_regulation("representative data")
 → [
     { id: "regulation://crr/174/c", citation: "CRR Article 174(c)" },
@@ -205,7 +209,7 @@ search_regulation("representative data")
   ]
 ```
 
-```
+```ts
 get_regulation("regulation://eba/gl-2017-16/84")
 → text: "...institutions shall demonstrate that the data used for risk
          parameter estimation is representative of the portfolio to which
@@ -214,7 +218,7 @@ get_regulation("regulation://eba/gl-2017-16/84")
                product, geography, vintage; quantitative comparison required]
 ```
 
-```
+```ts
 get_check("check://representativeness/development-vs-application")
 → expectation: "Development sample is compared to application portfolio across
                 obligor type, product, geography, vintage, and risk driver
@@ -232,7 +236,7 @@ get_check("check://representativeness/development-vs-application")
 
 <!-- MoC has its own EBA GL section with explicit category requirements. -->
 
-```
+```ts
 search_regulation("margin of conservatism")
 → [
     { id: "regulation://eba/gl-2017-16/36", citation: "EBA GL 2017/16 para 36" },
@@ -241,7 +245,7 @@ search_regulation("margin of conservatism")
   ]
 ```
 
-```
+```ts
 get_regulation("regulation://eba/gl-2017-16/43")
 → text: "Institutions shall categorise the MoC according to the following
          categories: (a) Category A — MoC for data and methodological
@@ -249,7 +253,7 @@ get_regulation("regulation://eba/gl-2017-16/43")
          Category C — general estimation error..."
 ```
 
-```
+```ts
 get_check("check://moc/categorisation")
 → expectation: "Every MoC is classified into Category A, B, or C with a
                 stated deficiency, a quantification approach, and a periodic
@@ -273,12 +277,12 @@ get_check("check://moc/categorisation")
 
 <!-- The definitions overlap heavily but not perfectly. Let's pull both anchors. -->
 
-```
+```ts
 resolve_citation("CRR 178 default definition")
 → regulation://crr/178
 ```
 
-```
+```ts
 get_regulation("regulation://crr/178")
 → children: ["regulation://crr/178/1/a", "regulation://crr/178/1/b",
              "regulation://crr/178/3", "regulation://crr/178/5"]
@@ -288,7 +292,7 @@ get_regulation("regulation://crr/178")
 
 <!-- The Q&A is the relevant commentary — pull it specifically. -->
 
-```
+```ts
 get_check("check://default-definition/ifrs9-alignment")
 → expectation: "Where the institution uses the IFRS9 stage 3 definition as the
                 IRB default definition, the two definitions are demonstrated to
@@ -313,7 +317,7 @@ get_check("check://default-definition/ifrs9-alignment")
 
 <!-- This is performance monitoring against the supervisory bar. -->
 
-```
+```ts
 search_tests("AUROC")
 → [{ id: "test://auroc",
      family: "discrimination",
@@ -322,7 +326,7 @@ search_tests("AUROC")
                            remediation" }]
 ```
 
-```
+```ts
 get_area_overview("monitoring.discrimination")
 → playbooks: [playbook://monitoring/discrimination (3 phases)]
   check_ids: ["check://monitoring/discrimination/threshold-breach",
@@ -330,7 +334,7 @@ get_area_overview("monitoring.discrimination")
               "check://monitoring/discrimination/escalation"]
 ```
 
-```
+```ts
 get_check("check://monitoring/discrimination/threshold-breach")
 → expectation: "When AUROC falls below 0.70 or shows persistent downward
                 trend over three or more reporting periods, the model owner
@@ -351,7 +355,7 @@ A single high-level instruction. The model decomposes it, drives the corpus thro
 
 <!-- Step 1: Anchor on the canonical taxonomy slug. The analyst said "PD model"; the corpus uses dotted slugs. -->
 
-```
+```ts
 list_review_areas()
 → [
     { id: "calibration.pd", name: "PD Calibration", ... },
@@ -364,7 +368,7 @@ list_review_areas()
 
 <!-- Step 2: Pull the full PD calibration entry point in one shot — area + expanded playbook + every regulation/check/test referenced inline. -->
 
-```
+```ts
 get_area_overview("calibration.pd")
 → area: { id: "calibration.pd", name: "PD Calibration" }
   playbooks: [playbook://calibration/pd (3 phases, fully expanded)]
@@ -377,7 +381,7 @@ get_area_overview("calibration.pd")
 
 <!-- Step 3: The analyst mentioned drift, so cross to monitoring/discrimination as well. -->
 
-```
+```ts
 get_area_overview("monitoring.discrimination")
 → check_ids: ["check://monitoring/discrimination/threshold-breach",
               "check://monitoring/discrimination/trend-analysis"]
@@ -386,7 +390,7 @@ get_area_overview("monitoring.discrimination")
 
 <!-- Step 4: Resolve the "modified HL test" against the corpus by family, not name. -->
 
-```
+```ts
 search_tests("modified HL")
 → [{ id: "test://hosmer-lemeshow",
      family: "calibration-grouped",
@@ -396,7 +400,7 @@ search_tests("modified HL")
 
 <!-- Step 5: The 2010–2017 development sample is now seven years old. Pull the representativeness check. -->
 
-```
+```ts
 get_check("check://representativeness/development-vs-application")
 → expectation: "Development sample is compared to application portfolio across
                 obligor type, product, geography, vintage, and risk driver
@@ -407,7 +411,7 @@ get_check("check://representativeness/development-vs-application")
 
 <!-- Step 6: Thin MoC docs — pull the MoC framework requirements. -->
 
-```
+```ts
 get_check("check://moc/categorisation")
 → expectation: "Every MoC is classified into Category A, B, or C with a
                 stated deficiency, a quantification approach, and a periodic
@@ -417,7 +421,7 @@ get_check("check://moc/categorisation")
 
 <!-- Step 7: Default rate drift suggests LRA period may no longer cover a cycle. Pull the LRA check explicitly. -->
 
-```
+```ts
 get_check("check://calibration/pd/lra-derived")
 → expectation: "PD long-run average is computed over a period containing at
                 least one full economic cycle, with a minimum of five years of
@@ -426,7 +430,7 @@ get_check("check://calibration/pd/lra-derived")
 
 <!-- Step 8: Final cross-reference — what playbooks recurse into this set, so nothing is missed at the seams. -->
 
-```
+```ts
 get_referrers("regulation://eba/gl-2017-16/84")
 → checks: ["check://representativeness/development-vs-application"]
    playbooks: ["playbook://calibration/pd", "playbook://representativeness"]

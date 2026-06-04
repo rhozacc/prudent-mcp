@@ -23,13 +23,14 @@ src/
 
 manifest.json              MCPB manifest v0.4
 examples/inmemory-demo.ts  seeded in-memory server, runnable end-to-end
-scripts/generate-schemas.ts  zod → JSON Schema export (uses scripts/schema-registry.ts)
-scripts/schema-registry.ts   shared named-schema list (generator + drift test)
+scripts/generate-schemas.ts  zod → JSON Schema export (chained to also write the schema reference page)
+scripts/schema-registry.ts   shared named-schema list (generator, schema-docs, drift test)
+scripts/generate-schema-docs.ts  regenerates docs/corpus/schemas.md (rendered schema reference)
 scripts/list-all.ts          prints full corpus overview to stdout
 scripts/validate-corpus.ts   integrity linter (mirror invariant, dangling refs, cycles); CI-able
 scripts/generate-graph.ts    regenerates docs/corpus/graph.md (Mermaid corpus map)
 scripts/build-mcpb.ts        bundle src/mcpb-entry.ts + pack .mcpb
-docs/                      architecture, corpus structure, generated schemas, corpus graph
+docs/                      architecture, corpus structure, schema reference, corpus graph
 tests/smoke.test.ts        construction + traversal smoke tests
 tests/schema.test.ts       schema validation + generative URI tests
 tests/schema-drift.test.ts golden test: committed JSON Schemas match the zod defs

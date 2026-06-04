@@ -75,21 +75,7 @@ To run against a real corpus instead of the in-memory demo, point `args` at the 
 
 ## Cursor
 
-Cursor uses the same MCP config shape. From the command palette: `Cursor: Open MCP Settings`, then add:
-
-```json
-{
-  "mcpServers": {
-    "prudent": {
-      "command": "bun",
-      "args": [
-        "run",
-        "/absolute/path/to/prudent-mcp/examples/inmemory-demo.ts"
-      ]
-    }
-  }
-}
-```
+Cursor uses the same MCP config shape. From the command palette run `Cursor: Open MCP Settings` and add the same `mcpServers` block shown above for Claude Code.
 
 ## MCP Inspector
 

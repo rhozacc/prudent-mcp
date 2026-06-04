@@ -446,7 +446,7 @@ These types exist in the schema but are computed at query time, not stored:
 bun run schemas
 ```
 
-Outputs `docs/schemas/*.schema.json`. The contract is portable — adapters and downstream tooling can pull these straight from the repo and validate records against them. A drift test (`bun test`) fails if the committed schemas fall out of sync with the zod definitions.
+Outputs `docs/schemas/*.schema.json` and the rendered [Schema reference](/corpus/schemas) page. The contract is portable — adapters and downstream tooling can pull the JSON straight from the repo and validate records against it. A drift test (`bun test`) fails if the committed schemas fall out of sync with the zod definitions.
 
 ## Validating and visualizing the corpus
 

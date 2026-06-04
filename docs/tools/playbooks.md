@@ -19,7 +19,7 @@ Full-text search across the catalog of validation playbooks.
 **Returns:** `Playbook[]` — summary only (`id`, `area`, `subarea`). Use `get_playbook` for the full record.
 
 **Example:**
-```
+```ts
 search_playbooks("calibration")
 → [
     { id: "playbook://calibration/pd",  area: "calibration", subarea: "pd" },
@@ -60,7 +60,7 @@ type Phase = {
 ```
 
 **Example:**
-```
+```ts
 get_playbook("playbook://calibration/pd")
 → {
     id: "playbook://calibration/pd",

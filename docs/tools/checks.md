@@ -19,7 +19,7 @@ Full-text search across the catalog of qualitative checks.
 **Returns:** `Check[]` — includes `id`, `name`, `derived_from`, `expectation`, and `expected_evidence`.
 
 **Example:**
-```
+```ts
 search_checks("long-run average")
 → [{ id: "check://calibration/pd/lra-derived", name: "PD long-run average derived from sufficient history", ... }]
 ```
@@ -56,7 +56,7 @@ type Check = {
 Machine-readable artifact list. Each entry names a specific document, dataset, or output the reviewer needs to verify the check — e.g. "Default rate time series covering the stated LRA period". Downstream tooling can use this to generate review checklists or verify document completeness.
 
 **Example:**
-```
+```ts
 get_check("check://calibration/pd/lra-derived")
 → {
     name: "PD long-run average derived from sufficient history",

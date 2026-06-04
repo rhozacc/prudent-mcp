@@ -19,7 +19,7 @@ Full-text search across all loaded regulatory frameworks.
 **Returns:** `Regulation[]` — latest versions only.
 
 **Example:**
-```
+```ts
 search_regulation("long-run average")
 → [
     { id: "regulation://crr/180/1/a",       citation: "CRR Article 180(1)(a)", ... },
@@ -63,13 +63,13 @@ type Regulation = {
 `children` mixes structure and operationalization: a section lists its paragraphs, and any record can list the `check://`/`test://` URIs that hang off it. A child check/test must also name this regulation in its own `derived_from` / `regulatory_basis` (the mirror invariant), so `get_referrers` stays the single computed reverse index. A `PlaybookId` is rejected here at compile time — playbooks reference regulation, never the other way around.
 
 **Example — latest:**
-```
+```ts
 get_regulation("regulation://crr/178/1/b")
 → { document_version: "2024-01-09", text: "...materiality assessed against thresholds set in the relevant Commission Delegated Regulation..." }
 ```
 
 **Example — historical:**
-```
+```ts
 get_regulation("regulation://crr/178/1/b", as_of: "2014-06-01")
 → { document_version: "2013-06-26", text: "...Materiality is left to national competent authority discretion." }
 ```

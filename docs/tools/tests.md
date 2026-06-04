@@ -21,7 +21,7 @@ Full-text search across the catalog of described statistical tests.
 Particularly useful for matching bank-specific test names to corpus entries — banks often use variant names for the same underlying method. The `family` field is the equivalence key.
 
 **Example:**
-```
+```ts
 search_tests("chi-squared decile")
 → [{ id: "test://hosmer-lemeshow", name: "Hosmer-Lemeshow test", aliases: ["HL test", "HL chi-squared", "modified HL"], family: "calibration-grouped" }]
 ```
@@ -58,7 +58,7 @@ type Test = {
 `family` groups methodologically equivalent tests — different banks often run their own variant of the same test. If `family` matches, the method is acceptable as long as the acceptance criteria are met. `aliases` is the matching layer: it maps the names analysts actually write in validation reports to the canonical corpus entry.
 
 **Example:**
-```
+```ts
 get_test("test://jeffreys")
 → {
     name: "Jeffreys test",

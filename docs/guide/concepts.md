@@ -57,41 +57,20 @@ The four surfaces correspond to the four kinds of artifact you actually deal wit
 
 Under the Capital Requirements Regulation (CRR), banks can use their own internal models — rather than standardised risk weights — to compute regulatory capital for credit risk. The model has to estimate, for each obligor or facility, a probability of default (PD), a loss given default (LGD), and an exposure at default (EAD). The supervisor approves the model and then validates it on an ongoing basis. Validation means proving the model is calibrated, discriminating, and aligned with the regulation — including how default is defined, how the data history is used, and how downturn conditions are reflected.
 
-## The eight concepts the corpus is built around
+## The concepts the corpus is built around
 
-### 1. Default definition
+The schema is shaped by the artifacts a validator works with, not by the regulation's table of contents. The recurring ones:
 
-The trigger that flips an obligor from performing to defaulted. CRR Article 178 defines it: 90 days past due **or** unlikely to pay. The EBA Guidelines on the application of the default definition (EBA/GL/2016/07) spell out the mandatory indicators of unlikely-to-pay. Every downstream estimate (PD, LGD, EAD) is conditioned on this definition, so any drift between the definition the bank applies and the regulation is a finding.
+- **Default definition** — the trigger that flips an obligor from performing to defaulted.
+- **PD calibration** — the assertion that observed default rates match estimated PDs.
+- **Discriminatory power** — whether the model ranks defaulters above non-defaulters.
+- **Long-run average (LRA)** — the multi-year base every PD estimate is derived from.
+- **Downturn LGD / EAD** — loss parameters under stressed conditions.
+- **Margin of conservatism (MoC)** — a buffer for known weaknesses in an estimate.
+- **Representativeness** — whether the development data matches the portfolio the model is applied to.
+- **Rating philosophy** — point-in-time vs through-the-cycle.
 
-### 2. PD calibration
-
-PD calibration is the assertion that **observed default rates match estimated PDs**. The CRR mandates that PDs are estimated from long-run averages of one-year default rates (Art. 180). "Long-run" is at least one full economic cycle (EBA GL 2017/16 para 78), typically five+ years.
-
-Calibration is tested at grade level (Jeffreys, one-sided binomial) and at portfolio level (Hosmer-Lemeshow, Brier score). All of these are members of the `calibration-binomial` or `calibration-grouped` families in the corpus.
-
-### 3. Discriminatory power
-
-Whether the model ranks defaults higher than non-defaults. AUROC, Gini, KS-statistic, accuracy ratio — all measure discrimination, all are members of the `discrimination` family. The supervisory bar is "appropriate level of differentiation," typically read as AUROC ≥ 0.7 with documented justification.
-
-### 4. Long-run average (LRA)
-
-The denominator of every PD estimate. The LRA period must cover a full economic cycle, the default definition must be consistent across the period, and the data must be representative of the current portfolio. Drift on any of those is a finding — and the corpus has a check for each (`check://calibration/pd/lra-derived`).
-
-### 5. Downturn LGD / EAD
-
-LGD and EAD must reflect downturn conditions (CRR Art. 181, 182). The EBA RTS on downturn LGD specifies the methodology. The corpus models downturn separately from baseline calibration because the downturn adjustment is its own validation surface.
-
-### 6. Margin of conservatism (MoC)
-
-An additive buffer applied to PD, LGD, or EAD to compensate for known weaknesses in the estimate — data quality issues, methodological limitations, general estimation error. EBA GL 2017/16 categorises MoC into Category A (data deficiencies), Category B (methodological), Category C (general). Every applied MoC needs a documented justification and a quantification approach.
-
-### 7. Representativeness
-
-The data used to estimate the model must represent the current portfolio and the period of application. Representativeness assessments compare the development sample to the application portfolio across obligor type, geography, vintage, and product. EBA GL para 84 onwards.
-
-### 8. Rating philosophy
-
-Point-in-time (PIT) vs through-the-cycle (TTC). A PIT rating moves with the cycle; a TTC rating is stable. The bank declares its philosophy and the validation has to confirm the data and calibration are consistent with it. This is a structural question, not a numeric one — and there's an entire playbook for it.
+Each maps to regulation, tests, and checks in the corpus. The corpus *describes* these and traces them to law; it doesn't teach the domain — for that, read the primary sources (the CRR and the EBA guidelines).
 
 ## Where the corpus stops
 

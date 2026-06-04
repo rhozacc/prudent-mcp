@@ -21,8 +21,8 @@ features:
     details: Describes what regulation says and what a test measures. No execution, no writes, no orchestration.
   - title: Traceable to law
     details: Every check carries derived_from RegulationId[] — a typed chain from supervisor expectation back to CRR or EBA GL.
-  - title: Traversal tools
-    details: expand_playbook and get_area_overview assemble multi-surface views in one call, eliminating N+1 fetches.
+  - title: Traversal & audit tools
+    details: expand_playbook, get_area_overview, and get_regulation_tree assemble multi-surface views in one call; get_coverage_gaps flags law with no validation check.
 ---
 
 <div class="home-narrative">

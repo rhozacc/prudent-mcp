@@ -5,7 +5,7 @@
 curl -fsSL https://bun.sh/install | bash
 
 # Clone and install
-git clone https://github.com/econlabsi/prudent-mcp.git
+git clone https://github.com/rhozacc/prudent-mcp.git
 cd prudent-mcp
 bun install
 
@@ -71,6 +71,9 @@ This starts an in-memory server (`examples/inmemory-demo.ts`) seeded with a smal
 | `get_playbook` `"playbook://calibration/pd"` | three phases with mixed-surface references |
 | `expand_playbook` `"playbook://calibration/pd"` | same, with every reference resolved inline |
 | `get_area_overview` `"calibration.pd"` | area node + expanded playbooks + deduplicated ID lists |
+| `expand_regulation` `"regulation://crr/180/1/a"` | the paragraph with its check/test children resolved inline |
+| `get_regulation_tree` `"regulation://crr/180"` | the article as a dossier — sub-paragraphs + operationalizing checks/tests |
+| `get_coverage_gaps` | regulations with no check/test coverage |
 | `get_check` `"check://calibration/pd/lra-derived"` | expectation + expected_evidence list |
 | `bun run list` | full corpus overview to stdout |
 
