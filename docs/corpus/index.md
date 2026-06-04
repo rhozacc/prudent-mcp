@@ -118,8 +118,8 @@ A specific paragraph of a specific regulation, frozen to a document version.
 | `citation` | `string` | yes | Human-readable, e.g. `"CRR Article 178(1)(a)"` |
 | `text` | `string` | yes | The paragraph text. Verbatim from source. |
 | `commentary` | `Commentary[]` | no, default `[]` | Interpretive material attached to this paragraph (Q&A, supervisor letters). |
-| `parent` | `RegulationId` | no | Parent record — e.g. the section that contains this paragraph. |
-| `children` | `RegulationId[]` | no, default `[]` | Child records — e.g. the paragraphs within a section. Denormalized inverse of `parent`. |
+| `parent` | `RegulationId` | no | Parent record — e.g. the section that contains this paragraph. Always a regulation. |
+| `children` | `RegulationChildId[]` | no, default `[]` | Child records — sub-regulations (paragraphs within a section) **plus** the checks/tests that operationalize this record. `RegulationChildId = RegulationId \| TestId \| CheckId`. Denormalized inverse of `parent`. |
 
 ### Commentary
 
@@ -179,6 +179,34 @@ A paragraph record carries the reverse link:
 }
 ```
 
+### Checks and tests as children
+
+`children` is not limited to sub-regulations. A record can also list the `check://` and `test://` URIs that operationalize it — so a reviewer fetching a paragraph sees, in one record, both its sub-structure and the concrete checks and tests that hang off it. (A `playbook://` is *not* a valid child — playbooks reference regulation, never the reverse.)
+
+The relationship is symmetric and must be kept consistent:
+
+- the regulation lists the check/test in `children`;
+- the check/test names the regulation in its `parent`;
+- and the same regulation appears in the check's `derived_from` (or the test's `regulatory_basis`).
+
+That last rule is the **mirror invariant**. It keeps `derived_from` / `regulatory_basis` the single authoritative up-link, so `get_referrers` — which already scans those forward links — needs no extra work and the two views never drift. A check may derive from several regulations but nests under exactly one (`parent`); the others stay reachable through `derived_from`.
+
+```json
+{
+  "id": "regulation://crr/180/1/a",
+  "citation": "CRR Article 180(1)(a)",
+  "children": ["check://calibration/pd/lra-derived"]
+}
+```
+
+```json
+{
+  "id": "check://calibration/pd/lra-derived",
+  "parent": "regulation://crr/180/1/a",
+  "derived_from": ["regulation://crr/180/1/a", "regulation://eba/gl-2017-16/78"]
+}
+```
+
 ---
 
 ## Test
@@ -194,6 +222,7 @@ A statistical test described, not executed. The corpus tells Claude *what the te
 | `purpose` | `string` | yes | What the test measures and when to use it. |
 | `acceptance_criteria` | `string` | no | Concrete pass/fail bar in plain language. Optional because some tests are diagnostic-only. |
 | `regulatory_basis` | `RegulationId[]` | no, default `[]` | Regulations that reference or require this test family. Softer than `Check.derived_from` — "referenced by" rather than "derived from." |
+| `parent` | `RegulationId` | no | Set when this test is listed as a child of a regulation. Must appear in `regulatory_basis` (the mirror invariant). |
 | `last_updated` | `string` (ISO date) | yes | |
 
 ### On aliases and family
@@ -226,6 +255,7 @@ A qualitative check with a concrete pass/fail expectation, traced back to law.
 | `id` | `CheckId` | yes | e.g. `check://calibration/pd/lra-derived` |
 | `name` | `string` | yes | Display name. |
 | `derived_from` | `RegulationId[]` | no, default `[]` | Regulation IDs this check operationalizes. |
+| `parent` | `RegulationId` | no | Set when this check is listed as a child of a regulation. Must appear in `derived_from` (the mirror invariant). |
 | `expectation` | `string` | yes | What "pass" looks like, in plain language. |
 | `expected_evidence` | `string[]` | no, default `[]` | Artifacts the reviewer must gather to complete this check. |
 | `last_updated` | `string` (ISO date) | yes | |
@@ -389,7 +419,7 @@ Top-level slugs are bare (`calibration`), child slugs are dotted (`calibration.p
 These types exist in the schema but are computed at query time, not stored:
 
 - **`CorpusInfo`** — what's loaded right now. The adapter exposes the data; the MCP computes the summary.
-- **`Referrers`** — back-references for a given ID. The MCP computes this by scanning `Check.derived_from` and `Phase.references`. Reverse indexes don't live in the corpus; the MCP builds them.
+- **`Referrers`** — back-references for a given ID. The MCP computes this by scanning `Check.derived_from` and `Phase.references`. Reverse indexes don't live in the corpus; the MCP builds them. Because a check/test listed in `Regulation.children` must mirror its `derived_from` / `regulatory_basis` (the mirror invariant), those forward links already cover it — `children` needs no separate scanning.
 
 ---
 
@@ -398,9 +428,11 @@ These types exist in the schema but are computed at query time, not stored:
 | Field | Points to | Notes |
 |---|---|---|
 | `Regulation.parent` | `RegulationId?` | Section → paragraph hierarchy. Optional. |
-| `Regulation.children` | `RegulationId[]` | Inverse of parent — paragraphs within a section. |
+| `Regulation.children` | `RegulationChildId[]` | Inverse of parent — sub-regulations plus the checks/tests that operationalize this record. `RegulationId \| TestId \| CheckId`. |
 | `Check.derived_from` | `RegulationId[]` | Traceability to law. Type-enforced. |
+| `Check.parent` | `RegulationId?` | Set when the check is a child of a regulation. Mirrors one of its `derived_from` entries. |
 | `Test.regulatory_basis` | `RegulationId[]` | Regulations that reference or require this test family. |
+| `Test.parent` | `RegulationId?` | Set when the test is a child of a regulation. Mirrors one of its `regulatory_basis` entries. |
 | `Playbook.regulatory_scope` | `RegulationId[]` | High-level mandate. Typically section-level IDs. |
 | `Phase.references` | `(RegulationId \| TestId \| CheckId \| PlaybookId)[]` | Mixed by design. |
 | `ReviewArea.parent` / `.children` | `ReviewArea.id` | Inside the taxonomy only. |

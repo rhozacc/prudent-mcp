@@ -49,6 +49,7 @@ Bun. TypeScript strict. `@modelcontextprotocol/sdk` (TS-first). zod for runtime 
 ## Schema decisions worth understanding before extending
 
 - **Template literal URI types** — `Check.derived_from: RegulationId[]` rejects a `TestId` at compile time. Don't widen to `string[]`.
+- **`Regulation.children` is mixed but typed** — `RegulationChildId = RegulationId | TestId | CheckId`. A record nests sub-regulations *and* the checks/tests that operationalize it; a `PlaybookId` is rejected at compile time. It stays the denormalized inverse of `parent`, which now also lives on `Check`/`Test`. **Mirror invariant:** a check/test listed as a child must also name that regulation in `derived_from`/`regulatory_basis` (and point back via `parent`), so `get_referrers` remains the single computed reverse index — don't add a second scan over `children`.
 - `Check.derived_from` + `Check.expectation` + `Check.expected_evidence` — traceability from supervisor expectations back to law, plus the concrete artifacts a reviewer must gather. Without `derived_from`, a Check is opinion. Without `expected_evidence`, it's underspecified.
 - **Check URI shape** — `check://{area}/{topic}[/{specific}]` (e.g. `check://calibration/pd/lra-derived`). Hierarchical, consistent with `regulation://`. Don't flatten back to `check://slug`.
 - `Test.family` + `Test.aliases` + `Test.acceptance_criteria` — equivalence reasoning across bank-specific test variants.

@@ -121,4 +121,32 @@ describe("traversal tools", () => {
     expect(check!.expected_evidence.length).toBeGreaterThan(0);
     expect(check!.expected_evidence[0]).toContain("default rate time series");
   });
+
+  it("regulation children can hold checks and tests, mirrored by parent + derived_from/regulatory_basis", async () => {
+    // A leaf paragraph that attaches an operationalizing check as a child.
+    const reg = await adapters.regulation.get("regulation://crr/180/1/a");
+    expect(reg).not.toBeNull();
+    expect(reg!.children).toContain("check://calibration/pd/lra-derived");
+
+    const check = await adapters.check.get("check://calibration/pd/lra-derived");
+    expect(check!.parent).toBe("regulation://crr/180/1/a");
+    expect(check!.derived_from).toContain("regulation://crr/180/1/a"); // mirror invariant
+
+    // A paragraph that attaches calibration tests as children.
+    const eba = await adapters.regulation.get("regulation://eba/gl-2017-16/78");
+    expect(eba!.children).toContain("test://jeffreys");
+
+    const test = await adapters.test.get("test://jeffreys");
+    expect(test!.parent).toBe("regulation://eba/gl-2017-16/78");
+    expect(test!.regulatory_basis).toContain("regulation://eba/gl-2017-16/78"); // mirror invariant
+
+    // An article-level record whose children mix a sub-regulation and a check.
+    const art = await adapters.regulation.get("regulation://crr/180");
+    expect(art!.children).toEqual(
+      expect.arrayContaining([
+        "regulation://crr/180/1/a",
+        "check://calibration/pd/segment-tested",
+      ]),
+    );
+  });
 });

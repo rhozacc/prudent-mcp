@@ -23,12 +23,20 @@ export type PlaybookId = `playbook://${string}`;
 /** Any cross-surface reference — useful for things like Phase.references. */
 export type AnyId = RegulationId | TestId | CheckId | PlaybookId;
 
+/**
+ * What a Regulation may nest in `children`: sub-regulations plus the checks and
+ * tests that operationalize it. Still typed — a PlaybookId is rejected at compile
+ * time, same as the other surface IDs.
+ */
+export type RegulationChildId = RegulationId | TestId | CheckId;
+
 // Zod regex validators — for runtime checks at the adapter boundary.
 const regulationIdSchema = z.string().regex(/^regulation:\/\/.+/) as z.ZodType<RegulationId>;
 const testIdSchema = z.string().regex(/^test:\/\/.+/) as z.ZodType<TestId>;
 const checkIdSchema = z.string().regex(/^check:\/\/.+/) as z.ZodType<CheckId>;
 const playbookIdSchema = z.string().regex(/^playbook:\/\/.+/) as z.ZodType<PlaybookId>;
 const anyIdSchema = z.union([regulationIdSchema, testIdSchema, checkIdSchema, playbookIdSchema]);
+const regulationChildIdSchema = z.union([regulationIdSchema, testIdSchema, checkIdSchema]);
 
 // --- Regulation surface (versioned per source document) ----------------------
 
@@ -48,7 +56,11 @@ export const RegulationSchema = z.object({
   text: z.string(),
   commentary: z.array(CommentarySchema).default([]),
   parent: regulationIdSchema.optional(),
-  children: z.array(regulationIdSchema).default([]),
+  // Sub-regulations plus the checks/tests that operationalize this record. A
+  // check/test child MUST also name this regulation in its derived_from /
+  // regulatory_basis (the mirror invariant) — that keeps get_referrers the
+  // single computed reverse index rather than a second source of truth.
+  children: z.array(regulationChildIdSchema).default([]),
   // Future fields: supersedes, last_amended, effective_from, ...
 });
 export type Regulation = z.infer<typeof RegulationSchema>;
@@ -63,6 +75,7 @@ export const TestSchema = z.object({
   purpose: z.string(),
   acceptance_criteria: z.string().optional(),
   regulatory_basis: z.array(regulationIdSchema).default([]),  // regulations that reference or require this test family
+  parent: regulationIdSchema.optional(),                      // set when this test hangs off a regulation as a child; must appear in regulatory_basis
   last_updated: z.string().date(),
   // Future fields: inputs, outputs, applies_to, interpretation, ...
 });
@@ -72,6 +85,7 @@ export const CheckSchema = z.object({
   id: checkIdSchema,
   name: z.string(),
   derived_from: z.array(regulationIdSchema).default([]),     // traceability to law
+  parent: regulationIdSchema.optional(),                     // set when this check hangs off a regulation as a child; must appear in derived_from
   expectation: z.string(),                                    // concrete bar in plain language
   expected_evidence: z.array(z.string()).default([]),         // artifacts the reviewer must gather
   last_updated: z.string().date(),
@@ -133,4 +147,5 @@ export {
   checkIdSchema,
   playbookIdSchema,
   anyIdSchema,
+  regulationChildIdSchema,
 };

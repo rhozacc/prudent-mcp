@@ -1,5 +1,17 @@
 # Changes
 
+## Regulation children: checks and tests
+
+`Regulation.children` widened from `RegulationId[]` to `RegulationChildId[]` (`RegulationId | TestId | CheckId`). A regulation record can now attach the checks and tests that operationalize it, alongside its sub-regulations — still typed, so a `PlaybookId` is rejected at compile time.
+
+- `src/schema.ts` — new `RegulationChildId` type + `regulationChildIdSchema`; `Regulation.children` uses it. Added `parent?: RegulationId` to `Check` and `Test` (the inverse of `children`).
+- **Mirror invariant** — a check/test listed in `Regulation.children` must also name that regulation in its `derived_from` / `regulatory_basis`, and point back via `parent`. Keeps `derived_from` / `regulatory_basis` the single authoritative up-link, so `get_referrers` is unchanged.
+- `examples/inmemory-demo.ts` — seeded the relationship: `crr/180/1/a` attaches `check://calibration/pd/lra-derived`; `crr/180` mixes a sub-paragraph with `check://calibration/pd/segment-tested`; `eba/gl-2017-16/78` attaches the three calibration tests. Each carries the mirroring `parent`.
+- `scripts/list-all.ts` — prints regulation `children` and check/test `parent`.
+- `docs/schemas/{Regulation,Check,Test}.schema.json` — regenerated via `bun run schemas`.
+- Docs — `docs/corpus/index.md`, `docs/tools/regulation.md`, `docs/guide/architecture.md`, `README.md`, `CLAUDE.md`.
+- `tests/smoke.test.ts` — added coverage for checks/tests as children plus the mirror invariant.
+
 ## MCPB distribution
 
 Added zero-dependency distribution as a `.mcpb` bundle for Claude Desktop.

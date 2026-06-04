@@ -54,8 +54,20 @@
         "children": {
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^regulation:\\/\\/.+"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^regulation:\\/\\/.+"
+              },
+              {
+                "type": "string",
+                "pattern": "^test:\\/\\/.+"
+              },
+              {
+                "type": "string",
+                "pattern": "^check:\\/\\/.+"
+              }
+            ]
           },
           "default": []
         }

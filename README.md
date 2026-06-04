@@ -14,7 +14,7 @@ Validating an IRB model means cross-referencing a bank's documentation against a
 
 | Surface | URI scheme | Notes |
 |---|---|---|
-| **Regulation** | `regulation://{framework}/{article}[/{paragraph}[/{point}]]` | Versioned per source document. `get_regulation` accepts `as_of` for historical lookups. Supports parent/child hierarchy for section-level references. |
+| **Regulation** | `regulation://{framework}/{article}[/{paragraph}[/{point}]]` | Versioned per source document. `get_regulation` accepts `as_of` for historical lookups. Parent/child hierarchy nests sections and can attach the checks/tests that operationalize a record. |
 | **Tests** | `test://{test-id}` | Statistical tests described — aliases and family grouping let Claude recognize bank-specific variants. Never executed. |
 | **Checks** | `check://{area}/{topic}[/{specific}]` | Qualitative checks with a concrete pass/fail bar, traced back to law via `derived_from: RegulationId[]`. |
 | **Playbooks** | `playbook://{area}[/{subarea}]` | Guided walkthroughs structured as ordered phases with mixed-surface references. |
