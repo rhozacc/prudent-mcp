@@ -446,4 +446,15 @@ These types exist in the schema but are computed at query time, not stored:
 bun run schemas
 ```
 
-Outputs `docs/schemas/*.schema.json`. The contract is portable — adapters and downstream tooling can pull these straight from the repo and validate records against them.
+Outputs `docs/schemas/*.schema.json`. The contract is portable — adapters and downstream tooling can pull these straight from the repo and validate records against them. A drift test (`bun test`) fails if the committed schemas fall out of sync with the zod definitions.
+
+## Validating and visualizing the corpus
+
+Two scripts operate over whatever corpus is wired (the in-memory demo by default, or a file via `CORPUS_FILE`):
+
+```bash
+bun run validate      # integrity linter — mirror invariant, dangling refs, parent/children, cycles
+bun run graph         # regenerates docs/corpus/graph.md, a Mermaid map of the corpus
+```
+
+`validate` exits non-zero on any violation, so it drops straight into CI. `graph` derives the [corpus graph](/corpus/graph) from the data itself, so the diagram can't drift from what's actually loaded.

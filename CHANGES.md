@@ -1,5 +1,19 @@
 # Changes
 
+## Traversal, coverage, and corpus tooling
+
+Built on the children change: three new cross-cutting tools (14 → 17), a corpus linter, a corpus graph, and stronger tests.
+
+- **`expand_regulation`** — fetch a regulation with its children resolved one level inline (the reverse-direction companion to `expand_playbook`).
+- **`get_regulation_tree`** — recursive dossier: a branch of law with the checks/tests operationalizing each node attached as leaves. Bounded by `depth` (default 5) and a cycle guard; cut-off nodes flagged `truncated: true`.
+- **`get_coverage_gaps`** — audits the corpus for regulations no check/test points at (the aggregate inverse of `get_referrers`); `is_leaf` distinguishes real gaps from sections that inherit coverage.
+- The three tools factor exported, directly-testable helpers in `src/tools/meta.ts`.
+- `scripts/validate-corpus.ts` (`bun run validate`) — integrity linter: mirror invariant, parent/children bidirectionality, dangling references, parent-chain cycles. Exits non-zero on violations; honours `CORPUS_FILE`. CI-able.
+- `scripts/generate-graph.ts` (`bun run graph`) — writes `docs/corpus/graph.md`, a Mermaid map of the corpus (node shape per surface, solid = children, dotted = playbook references). Derived from data so it can't drift.
+- `scripts/schema-registry.ts` — shared named-schema list, imported by both the generator and the new drift test so they can't disagree.
+- Tests — `tests/schema.test.ts` (schema validation + generative URI property tests), `tests/schema-drift.test.ts` (golden test: committed `docs/schemas/*.json` match the zod defs), plus smoke coverage for the three new tools. Tool-count tripwire updated 14 → 17.
+- Docs — `docs/tools/meta.md`, `docs/tools/index.md`, `docs/corpus/index.md`, `docs/corpus/graph.md`, `docs/guide/index.md`, VitePress sidebar, `CLAUDE.md`.
+
 ## Regulation children: checks and tests
 
 `Regulation.children` widened from `RegulationId[]` to `RegulationChildId[]` (`RegulationId | TestId | CheckId`). A regulation record can now attach the checks and tests that operationalize it, alongside its sub-regulations — still typed, so a `PlaybookId` is rejected at compile time.

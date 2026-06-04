@@ -23,11 +23,16 @@ src/
 
 manifest.json              MCPB manifest v0.4
 examples/inmemory-demo.ts  seeded in-memory server, runnable end-to-end
-scripts/generate-schemas.ts  zod → JSON Schema export
+scripts/generate-schemas.ts  zod → JSON Schema export (uses scripts/schema-registry.ts)
+scripts/schema-registry.ts   shared named-schema list (generator + drift test)
 scripts/list-all.ts          prints full corpus overview to stdout
+scripts/validate-corpus.ts   integrity linter (mirror invariant, dangling refs, cycles); CI-able
+scripts/generate-graph.ts    regenerates docs/corpus/graph.md (Mermaid corpus map)
 scripts/build-mcpb.ts        bundle src/mcpb-entry.ts + pack .mcpb
-docs/                      architecture, corpus structure, generated schemas
+docs/                      architecture, corpus structure, generated schemas, corpus graph
 tests/smoke.test.ts        construction + traversal smoke tests
+tests/schema.test.ts       schema validation + generative URI tests
+tests/schema-drift.test.ts golden test: committed JSON Schemas match the zod defs
 ```
 
 Every tool, resource, and prompt has a description, a zod input schema, and a handler. In the open-source distribution the default adapters return empty results. The in-memory demo reassigns adapter handles to seed real content for development and inspection.
@@ -36,7 +41,7 @@ Every tool, resource, and prompt has a description, a zod input schema, and a ha
 
 Bun. TypeScript strict. `@modelcontextprotocol/sdk` (TS-first). zod for runtime validation, template literal types (`type RegulationId = `regulation://${string}``) for compile-time URI segregation.
 
-`bun run typecheck`, `bun test`, `bun run inspect:demo`, `bun run schemas`, `bun run build:mcpb`. No `tsc` build step for local dev.
+`bun run typecheck`, `bun test`, `bun run inspect:demo`, `bun run schemas`, `bun run validate`, `bun run graph`, `bun run build:mcpb`. No `tsc` build step for local dev.
 
 ## What to do when extending
 
@@ -76,9 +81,10 @@ Bun. TypeScript strict. `@modelcontextprotocol/sdk` (TS-first). zod for runtime 
 ## Surface area
 
 ```
-Tools:       14   6 cross-cutting + (search + get) × 4 surfaces
+Tools:       17   9 cross-cutting + (search + get) × 4 surfaces
                   cross-cutting: get_corpus_info · get_referrers · resolve_citation
                                  list_review_areas · expand_playbook · get_area_overview
+                                 expand_regulation · get_regulation_tree · get_coverage_gaps
 Templates:    4   one per URI scheme
 Prompts:      3   validate_review_area · review_calibration · assess_findings
 Schemas:      9   Regulation · Test · Check · Playbook · CorpusInfo · Referrers

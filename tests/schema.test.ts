@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 
 import { adapters } from "../src/adapters.ts";
-import { CheckSchema, RegulationSchema, TestSchema } from "../src/schema.ts";
+import { CheckSchema, RegulationSchema, TestSchema, regulationChildIdSchema } from "../src/schema.ts";
 
 // ── Schema contract — the runtime half of the template-literal types ──────────
 //
@@ -49,6 +49,30 @@ describe("RegulationSchema.children", () => {
       children: ["crr/180/1/a"],
     });
     expect(result.success).toBe(false);
+  });
+});
+
+// ── Generative / property-style — the union contract over random URIs ─────────
+//
+// Hand-rolled rather than a fast-check dependency: cheap, deterministic enough,
+// and keeps the dep list lean. Asserts the RegulationChildId union accepts
+// regulation/test/check and rejects everything else, across many shapes.
+
+describe("regulationChildIdSchema (generative)", () => {
+  const token = () => Math.random().toString(36).slice(2, 8);
+  const ITERATIONS = 250;
+
+  it("accepts regulation/test/check URIs and rejects playbook across random inputs", () => {
+    for (let i = 0; i < ITERATIONS; i++) {
+      for (const scheme of ["regulation", "test", "check", "playbook"] as const) {
+        const uri = `${scheme}://${token()}/${token()}`;
+        expect(regulationChildIdSchema.safeParse(uri).success).toBe(scheme !== "playbook");
+      }
+      // Scheme-less or wrong-scheme strings never validate.
+      expect(regulationChildIdSchema.safeParse(token()).success).toBe(false);
+      expect(regulationChildIdSchema.safeParse(`http://${token()}`).success).toBe(false);
+      expect(regulationChildIdSchema.safeParse(`regulation://`).success).toBe(false); // needs a non-empty path
+    }
   });
 });
 

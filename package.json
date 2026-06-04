@@ -21,6 +21,8 @@
     "inspect:demo": "bunx @modelcontextprotocol/inspector bun examples/inmemory-demo.ts",
     "schemas": "bun run scripts/generate-schemas.ts",
     "list": "bun run scripts/list-all.ts",
+    "validate": "bun run scripts/validate-corpus.ts",
+    "graph": "bun run scripts/generate-graph.ts",
     "build:mcpb": "bun run scripts/build-mcpb.ts",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
