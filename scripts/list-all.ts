@@ -48,6 +48,7 @@ async function main() {
         console.log(`    ${c.text}`);
       }
     }
+    if (r.children.length) console.log(`\n  children: ${r.children.join(", ")}`);
   }
 
   // ── Tests ─────────────────────────────────────────────────────────────────
@@ -56,6 +57,7 @@ async function main() {
   for (const t of tests) {
     console.log(H2(`${t.name}  [${t.id}]`));
     console.log(`  family: ${t.family}`);
+    if (t.parent) console.log(`  parent: ${t.parent}`);
     if (t.aliases.length) console.log(`  aliases: ${t.aliases.join(", ")}`);
     console.log(`\n  purpose: ${t.purpose}`);
     console.log(`\n  acceptance: ${t.acceptance_criteria}`);
@@ -67,6 +69,7 @@ async function main() {
   for (const c of checks) {
     console.log(H2(`${c.name}  [${c.id}]`));
     console.log(`  derived_from: ${c.derived_from.join(", ")}`);
+    if (c.parent) console.log(`  parent: ${c.parent}`);
     console.log(`\n  expectation: ${c.expectation}`);
     if (c.expected_evidence.length) {
       console.log("\n  evidence:");

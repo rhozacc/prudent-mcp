@@ -49,14 +49,18 @@ type Regulation = {
   id: RegulationId;
   framework: string;
   document_id: string;
-  document_version: string;   // e.g. "2024-01-09"
+  document_version: string;       // e.g. "2024-01-09"
   citation: string;
   text: string;
   commentary: Commentary[];
-  parent?: RegulationId;      // set on paragraph records that belong to a section
-  children: RegulationId[];   // set on section records; empty on leaf paragraphs
+  parent?: RegulationId;          // the regulation record this one nests under (a section, or the parent article)
+  children: RegulationChildId[];  // sub-regulations + the checks/tests that operationalize this record
 }
+
+// RegulationChildId = RegulationId | TestId | CheckId
 ```
+
+`children` mixes structure and operationalization: a section lists its paragraphs, and any record can list the `check://`/`test://` URIs that hang off it. A child check/test must also name this regulation in its own `derived_from` / `regulatory_basis` (the mirror invariant), so `get_referrers` stays the single computed reverse index. A `PlaybookId` is rejected here at compile time — playbooks reference regulation, never the other way around.
 
 **Example — latest:**
 ```

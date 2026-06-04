@@ -26,7 +26,7 @@ Three views: the surface map (how the four kinds of record reference each other)
   <text class="uri"   x="50" y="90">regulation://crr/178/1/a</text>
   <text class="sub"   x="50" y="112">Versioned (document_version, as_of).</text>
   <text class="sub"   x="50" y="128">Carries inline Commentary[].</text>
-  <text class="sub"   x="50" y="144">parent / children for section nesting.</text>
+  <text class="sub"   x="50" y="144">parent / children: nesting + checks/tests.</text>
   <path class="self" d="M250,70 C290,50 290,110 250,90"/>
   <rect class="surface" x="470" y="40"  width="220" height="120" rx="8"/>
   <text class="title" x="490" y="68">Test</text>
@@ -65,7 +65,7 @@ Three views: the surface map (how the four kinds of record reference each other)
 </svg>
 </div>
 
-Solid arrows are typed cross-surface references. The dashed self-loop on Regulation is parent/children for section nesting. Every typed reference is enforced at compile time — `Check.derived_from: RegulationId[]` rejects a `TestId` before the program runs.
+Solid arrows are typed cross-surface references. The dashed self-loop on Regulation is parent/children — section nesting, and now also the checks/tests a record attaches as children (mirrored by `parent` on those surfaces). Every typed reference is enforced at compile time — `Check.derived_from: RegulationId[]` rejects a `TestId` before the program runs, and `Regulation.children: RegulationChildId[]` rejects a `PlaybookId`.
 
 ## Schema relationships
 
@@ -80,7 +80,7 @@ classDiagram
         +string text
         +Commentary[] commentary
         +RegulationId? parent
-        +RegulationId[] children
+        +RegulationChildId[] children
     }
 
     class Commentary {
@@ -97,6 +97,7 @@ classDiagram
         +string purpose
         +string? acceptance_criteria
         +RegulationId[] regulatory_basis
+        +RegulationId? parent
         +string last_updated
     }
 
@@ -104,6 +105,7 @@ classDiagram
         +CheckId id
         +string name
         +RegulationId[] derived_from
+        +RegulationId? parent
         +string expectation
         +string[] expected_evidence
         +string last_updated
@@ -148,6 +150,8 @@ classDiagram
     Regulation "1" *-- "many" Commentary : carries
     Playbook "1" *-- "many" Phase : has
     Regulation ..> Regulation : parent / children
+    Regulation ..> Check : children / parent
+    Regulation ..> Test : children / parent
     Check ..> Regulation : derived_from
     Test ..> Regulation : regulatory_basis
     Playbook ..> Regulation : regulatory_scope

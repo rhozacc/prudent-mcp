@@ -19,7 +19,7 @@ Validating an IRB model means cross-referencing a bank's documentation against a
 | **Checks** | `check://{area}/{topic}[/{specific}]` | Qualitative checks with a concrete pass/fail expectation, traced back to law via `derived_from: RegulationId[]`. |
 | **Playbooks** | `playbook://{area}[/{subarea}]` | Guided walkthroughs structured as ordered phases with mixed-surface references. |
 
-Plus six cross-cutting tools: `get_corpus_info`, `get_referrers`, `resolve_citation`, `list_review_areas`, `expand_playbook`, `get_area_overview`.
+Plus nine cross-cutting tools: `get_corpus_info`, `get_referrers`, `resolve_citation`, `list_review_areas`, `expand_playbook`, `get_area_overview`, `expand_regulation`, `get_regulation_tree`, `get_coverage_gaps`.
 
 Plus three prompt scaffolds for guided review walkthroughs.
 

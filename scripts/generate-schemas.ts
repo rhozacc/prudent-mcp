@@ -15,37 +15,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
-import {
-  CheckSchema,
-  CommentarySchema,
-  CorpusInfoSchema,
-  PhaseSchema,
-  PlaybookSchema,
-  ReferrersSchema,
-  RegulationSchema,
-  ReviewAreaSchema,
-  TestSchema,
-} from "../src/schema.ts";
-
-const surfaces = {
-  Regulation: RegulationSchema,
-  Test: TestSchema,
-  Check: CheckSchema,
-  Playbook: PlaybookSchema,
-} as const;
-
-const supporting = {
-  Commentary: CommentarySchema,
-  Phase: PhaseSchema,
-  ReviewArea: ReviewAreaSchema,
-  CorpusInfo: CorpusInfoSchema,
-  Referrers: ReferrersSchema,
-} as const;
+import { schemaRegistry, supportingSchemas, surfaceSchemas } from "./schema-registry.ts";
 
 const outDir = resolve("docs/schemas");
 mkdirSync(outDir, { recursive: true });
 
-for (const [name, schema] of Object.entries({ ...surfaces, ...supporting })) {
+for (const [name, schema] of Object.entries(schemaRegistry)) {
   const json = zodToJsonSchema(schema, {
     name,
     $refStrategy: "none",
@@ -55,4 +30,4 @@ for (const [name, schema] of Object.entries({ ...surfaces, ...supporting })) {
   console.log(`  wrote ${path}`);
 }
 
-console.log(`\nDone. ${Object.keys(surfaces).length} surfaces + ${Object.keys(supporting).length} supporting types.`);
+console.log(`\nDone. ${Object.keys(surfaceSchemas).length} surfaces + ${Object.keys(supportingSchemas).length} supporting types.`);

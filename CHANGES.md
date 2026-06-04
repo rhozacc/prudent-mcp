@@ -1,5 +1,31 @@
 # Changes
 
+## Traversal, coverage, and corpus tooling
+
+Built on the children change: three new cross-cutting tools (14 → 17), a corpus linter, a corpus graph, and stronger tests.
+
+- **`expand_regulation`** — fetch a regulation with its children resolved one level inline (the reverse-direction companion to `expand_playbook`).
+- **`get_regulation_tree`** — recursive dossier: a branch of law with the checks/tests operationalizing each node attached as leaves. Bounded by `depth` (default 5) and a cycle guard; cut-off nodes flagged `truncated: true`.
+- **`get_coverage_gaps`** — audits the corpus for regulations no check/test points at (the aggregate inverse of `get_referrers`); `is_leaf` distinguishes real gaps from sections that inherit coverage.
+- The three tools factor exported, directly-testable helpers in `src/tools/meta.ts`.
+- `scripts/validate-corpus.ts` (`bun run validate`) — integrity linter: mirror invariant, parent/children bidirectionality, dangling references, parent-chain cycles. Exits non-zero on violations; honours `CORPUS_FILE`. CI-able.
+- `scripts/generate-graph.ts` (`bun run graph`) — writes `docs/corpus/graph.md`, a Mermaid map of the corpus (node shape per surface, solid = children, dotted = playbook references). Derived from data so it can't drift.
+- `scripts/schema-registry.ts` — shared named-schema list, imported by both the generator and the new drift test so they can't disagree.
+- Tests — `tests/schema.test.ts` (schema validation + generative URI property tests), `tests/schema-drift.test.ts` (golden test: committed `docs/schemas/*.json` match the zod defs), plus smoke coverage for the three new tools. Tool-count tripwire updated 14 → 17.
+- Docs — `docs/tools/meta.md`, `docs/tools/index.md`, `docs/corpus/index.md`, `docs/corpus/graph.md`, `docs/guide/index.md`, VitePress sidebar, `CLAUDE.md`.
+
+## Regulation children: checks and tests
+
+`Regulation.children` widened from `RegulationId[]` to `RegulationChildId[]` (`RegulationId | TestId | CheckId`). A regulation record can now attach the checks and tests that operationalize it, alongside its sub-regulations — still typed, so a `PlaybookId` is rejected at compile time.
+
+- `src/schema.ts` — new `RegulationChildId` type + `regulationChildIdSchema`; `Regulation.children` uses it. Added `parent?: RegulationId` to `Check` and `Test` (the inverse of `children`).
+- **Mirror invariant** — a check/test listed in `Regulation.children` must also name that regulation in its `derived_from` / `regulatory_basis`, and point back via `parent`. Keeps `derived_from` / `regulatory_basis` the single authoritative up-link, so `get_referrers` is unchanged.
+- `examples/inmemory-demo.ts` — seeded the relationship: `crr/180/1/a` attaches `check://calibration/pd/lra-derived`; `crr/180` mixes a sub-paragraph with `check://calibration/pd/segment-tested`; `eba/gl-2017-16/78` attaches the three calibration tests. Each carries the mirroring `parent`.
+- `scripts/list-all.ts` — prints regulation `children` and check/test `parent`.
+- `docs/schemas/{Regulation,Check,Test}.schema.json` — regenerated via `bun run schemas`.
+- Docs — `docs/corpus/index.md`, `docs/tools/regulation.md`, `docs/guide/architecture.md`, `README.md`, `CLAUDE.md`.
+- `tests/smoke.test.ts` — added coverage for checks/tests as children plus the mirror invariant.
+
 ## MCPB distribution
 
 Added zero-dependency distribution as a `.mcpb` bundle for Claude Desktop.

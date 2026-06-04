@@ -19,6 +19,10 @@
           },
           "default": []
         },
+        "parent": {
+          "type": "string",
+          "pattern": "^regulation:\\/\\/.+"
+        },
         "expectation": {
           "type": "string"
         },

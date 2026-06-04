@@ -1,6 +1,6 @@
 # Tools overview
 
-14 tools across six files. Every tool has a description, a zod input schema, and a handler that delegates to the adapter layer.
+17 tools across six files. Every tool has a description, a zod input schema, and a handler that delegates to the adapter layer.
 
 ## All tools
 
@@ -12,6 +12,9 @@
 | `list_review_areas` | meta | Canonical taxonomy of review areas |
 | `expand_playbook` | meta | Playbook with all Phase.references resolved inline |
 | `get_area_overview` | meta | One-shot entry point: area node + expanded playbooks + deduplicated IDs |
+| `expand_regulation` | meta | Regulation with its children (sub-regs + checks/tests) resolved inline |
+| `get_regulation_tree` | meta | Recursive dossier: a branch of law with operationalizing checks/tests |
+| `get_coverage_gaps` | meta | Regulations with no check/test coverage — the aggregate inverse of get_referrers |
 | `search_regulation` | regulation | Full-text search across all loaded regulatory frameworks |
 | `get_regulation` | regulation | Fetch a regulation paragraph by URI, with optional `as_of` |
 | `search_tests` | tests | Full-text search across the statistical test catalog |

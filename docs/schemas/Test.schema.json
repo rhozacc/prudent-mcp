@@ -35,6 +35,10 @@
           },
           "default": []
         },
+        "parent": {
+          "type": "string",
+          "pattern": "^regulation:\\/\\/.+"
+        },
         "last_updated": {
           "type": "string",
           "format": "date"

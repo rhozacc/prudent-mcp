@@ -49,7 +49,8 @@ const REGULATIONS: Record<RegulationId, Regulation> = {
       "PDs shall be estimated per obligor grade and be supported by sufficient historical " +
       "experience and empirical evidence.",
     commentary: [],
-    children: ["regulation://crr/180/1/a"],
+    // Mixed children: a sub-paragraph plus a check that operationalizes the article.
+    children: ["regulation://crr/180/1/a", "check://calibration/pd/segment-tested"],
   },
   "regulation://crr/180/1/a": {
     id: "regulation://crr/180/1/a",
@@ -71,7 +72,7 @@ const REGULATIONS: Record<RegulationId, Regulation> = {
       },
     ],
     parent: "regulation://crr/180",
-    children: [],
+    children: ["check://calibration/pd/lra-derived"],
   },
   "regulation://eba/gl-2017-16/s4": {
     id: "regulation://eba/gl-2017-16/s4",
@@ -97,7 +98,7 @@ const REGULATIONS: Record<RegulationId, Regulation> = {
       "one-year default rates, including downturn periods relevant to the portfolio.",
     commentary: [],
     parent: "regulation://eba/gl-2017-16/s4",
-    children: [],
+    children: ["test://jeffreys", "test://binomial", "test://hosmer-lemeshow"],
   },
   "regulation://crr/178/1/a": {
     id: "regulation://crr/178/1/a",
@@ -181,6 +182,7 @@ const TESTS: Record<TestId, Test> = {
       "Posterior probability that the true PD exceeds the estimate is below the " +
       "chosen significance level (typically one-sided 95%).",
     regulatory_basis: ["regulation://crr/180/1/a", "regulation://eba/gl-2017-16/78"],
+    parent: "regulation://eba/gl-2017-16/78",
     last_updated: "2024-06-01",
   },
   "test://binomial": {
@@ -195,6 +197,7 @@ const TESTS: Record<TestId, Test> = {
     acceptance_criteria:
       "p-value > α (typically 0.05 one-sided) indicates calibration is not rejected at the grade.",
     regulatory_basis: ["regulation://crr/180/1/a", "regulation://eba/gl-2017-16/78"],
+    parent: "regulation://eba/gl-2017-16/78",
     last_updated: "2024-06-01",
   },
   "test://hosmer-lemeshow": {
@@ -209,6 +212,7 @@ const TESTS: Record<TestId, Test> = {
       "Chi-squared statistic with g-2 degrees of freedom (g = number of groups). " +
       "p-value > α (typically 0.05) indicates calibration is not rejected at portfolio level.",
     regulatory_basis: ["regulation://crr/180/1/a", "regulation://eba/gl-2017-16/78"],
+    parent: "regulation://eba/gl-2017-16/78",
     last_updated: "2024-06-01",
   },
 };
@@ -218,6 +222,7 @@ const CHECKS: Record<CheckId, Check> = {
     id: "check://calibration/pd/lra-derived",
     name: "PD long-run average derived from sufficient history",
     derived_from: ["regulation://crr/180/1/a", "regulation://eba/gl-2017-16/78"],
+    parent: "regulation://crr/180/1/a",
     expectation:
       "PD long-run average is computed over a period containing at least one full " +
       "economic cycle, with a minimum of five years of default data. Where recent " +
@@ -234,6 +239,7 @@ const CHECKS: Record<CheckId, Check> = {
     id: "check://calibration/pd/segment-tested",
     name: "PD calibration tested per grade or pool",
     derived_from: ["regulation://crr/180"],
+    parent: "regulation://crr/180",
     expectation:
       "Calibration tests are performed at the level at which PDs are assigned " +
       "(rating grade or pool), not solely at portfolio level. Materially different " +

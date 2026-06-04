@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "bun:test";
 
 import { createServer } from "../src/server.ts";
 import { adapters } from "../src/adapters.ts";
+import { buildRegulationTree, computeCoverageGaps, expandRegulation } from "../src/tools/meta.ts";
 
 describe("server registration", () => {
   it("constructs without crashing", () => {
@@ -9,14 +10,14 @@ describe("server registration", () => {
     expect(server).toBeDefined();
   });
 
-  it("registers the expected surface area (14 tools, 4 resource templates, 3 prompts)", () => {
+  it("registers the expected surface area (17 tools, 4 resource templates, 3 prompts)", () => {
     const server = createServer();
     const s = server as unknown as {
       _registeredTools: Record<string, unknown>;
       _registeredResourceTemplates: Record<string, unknown>;
       _registeredPrompts: Record<string, unknown>;
     };
-    expect(Object.keys(s._registeredTools).length).toBe(14);
+    expect(Object.keys(s._registeredTools).length).toBe(17);
     expect(Object.keys(s._registeredResourceTemplates).length).toBe(4);
     expect(Object.keys(s._registeredPrompts).length).toBe(3);
   });
@@ -120,5 +121,83 @@ describe("traversal tools", () => {
     expect(Array.isArray(check!.expected_evidence)).toBe(true);
     expect(check!.expected_evidence.length).toBeGreaterThan(0);
     expect(check!.expected_evidence[0]).toContain("default rate time series");
+  });
+
+  it("regulation children can hold checks and tests, mirrored by parent + derived_from/regulatory_basis", async () => {
+    // A leaf paragraph that attaches an operationalizing check as a child.
+    const reg = await adapters.regulation.get("regulation://crr/180/1/a");
+    expect(reg).not.toBeNull();
+    expect(reg!.children).toContain("check://calibration/pd/lra-derived");
+
+    const check = await adapters.check.get("check://calibration/pd/lra-derived");
+    expect(check!.parent).toBe("regulation://crr/180/1/a");
+    expect(check!.derived_from).toContain("regulation://crr/180/1/a"); // mirror invariant
+
+    // A paragraph that attaches calibration tests as children.
+    const eba = await adapters.regulation.get("regulation://eba/gl-2017-16/78");
+    expect(eba!.children).toContain("test://jeffreys");
+
+    const test = await adapters.test.get("test://jeffreys");
+    expect(test!.parent).toBe("regulation://eba/gl-2017-16/78");
+    expect(test!.regulatory_basis).toContain("regulation://eba/gl-2017-16/78"); // mirror invariant
+
+    // An article-level record whose children mix a sub-regulation and a check.
+    const art = await adapters.regulation.get("regulation://crr/180");
+    expect(art!.children).toEqual(
+      expect.arrayContaining([
+        "regulation://crr/180/1/a",
+        "check://calibration/pd/segment-tested",
+      ]),
+    );
+  });
+
+  it("expand_regulation resolves a regulation's check/test children inline", async () => {
+    const raw = await adapters.regulation.get("regulation://crr/180/1/a");
+    expect(raw).not.toBeNull();
+    const expanded = await expandRegulation(raw!);
+    expect(expanded.id).toBe("regulation://crr/180/1/a");
+    const checkChild = expanded.children.find((c) => c.type === "check");
+    expect(checkChild?.id).toBe("check://calibration/pd/lra-derived");
+    expect(checkChild?.record).not.toBeNull();
+  });
+
+  it("get_regulation_tree walks sub-regulations and attaches check/test leaves", async () => {
+    const tree = await buildRegulationTree("regulation://crr/180", 5, new Set());
+    expect(tree.type).toBe("regulation");
+
+    // crr/180's children mix a sub-regulation and a check.
+    const checkChild = tree.children.find((c) => c.type === "check");
+    expect(checkChild?.id).toBe("check://calibration/pd/segment-tested");
+
+    const regChild = tree.children.find((c) => c.type === "regulation");
+    expect(regChild).toBeDefined();
+    if (regChild && regChild.type === "regulation") {
+      expect(regChild.id).toBe("regulation://crr/180/1/a");
+      // …and that sub-regulation carries the lra-derived check as its own leaf.
+      const grandchildCheck = regChild.children.find((c) => c.type === "check");
+      expect(grandchildCheck?.id).toBe("check://calibration/pd/lra-derived");
+    }
+  });
+
+  it("get_regulation_tree flags truncation at depth 0", async () => {
+    const tree = await buildRegulationTree("regulation://crr/180", 0, new Set());
+    expect(tree.children).toHaveLength(0);
+    expect(tree.truncated).toBe(true);
+  });
+
+  it("get_coverage_gaps flags the uncovered section but not a covered leaf", async () => {
+    const regs = await adapters.regulation.search("");
+    const checks = await adapters.check.search("");
+    const tests = await adapters.test.search("");
+    const report = computeCoverageGaps(regs, checks, tests);
+
+    const uncoveredIds = report.uncovered.map((u) => u.id);
+    // s4 is a section referenced by no check/test directly — a gap, but not a leaf.
+    expect(uncoveredIds).toContain("regulation://eba/gl-2017-16/s4");
+    const s4 = report.uncovered.find((u) => u.id === "regulation://eba/gl-2017-16/s4");
+    expect(s4?.is_leaf).toBe(false);
+    // crr/180/1/a is covered by lra-derived — must not appear as a gap.
+    expect(uncoveredIds).not.toContain("regulation://crr/180/1/a");
+    expect(report.covered + report.uncovered.length).toBe(report.total_regulations);
   });
 });
