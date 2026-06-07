@@ -11,7 +11,8 @@
   "exports": {
     ".": "./src/server.ts",
     "./schema": "./src/schema.ts",
-    "./adapters": "./src/adapters.ts"
+    "./adapters": "./src/adapters.ts",
+    "./file-adapter": "./src/file-adapter.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

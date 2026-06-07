@@ -26,6 +26,8 @@ import type {
   TestId,
 } from "./schema.ts";
 
+export type { Referrers } from "./schema.ts";
+
 // --- Interfaces --------------------------------------------------------------
 
 export interface RegulationAdapter {
