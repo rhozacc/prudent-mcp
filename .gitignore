@@ -2,3 +2,9 @@ node_modules/
 dist/
 docs/.vitepress/cache
 docs/.vitepress/dist
+
+# Dashboard-emitted corpus artifacts must never enter this repo.
+# The corpus data is proprietary and lives in prudent-dashboard/.
+corpus.json
+*.corpus.json
+data/
