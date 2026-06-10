@@ -12,7 +12,8 @@
     ".": "./src/server.ts",
     "./schema": "./src/schema.ts",
     "./adapters": "./src/adapters.ts",
-    "./file-adapter": "./src/file-adapter.ts"
+    "./file-adapter": "./src/file-adapter.ts",
+    "./validate": "./src/validate.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
