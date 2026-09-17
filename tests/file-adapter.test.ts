@@ -543,8 +543,44 @@ describe("resolveCitationDetailed", () => {
     ];
     const r = resolveCitationDetailed(citing, "CRR Article 178");
     expect(r.match).toBeNull();
-    expect(r.coverage_note).toContain("1 records do cite it");
-    expect(r.coverage_note).toContain("get_referrers");
+    // The refusal NAMES the records rather than counting them: a count tells
+    // the caller something exists, an id lets them open it.
+    expect(r.coverage_note).toContain("1 served record(s) name it");
+    expect(r.coverage_note).toContain("regulation://gl-2017-16/article-78");
+  });
+
+  it("names records that mention an instrument only in their text", () => {
+    // `cites[].framework` holds only the named frameworks the extractor knows,
+    // so it can never route out for a numbered act. Scanning the served text is
+    // what makes the other instruments reachable — and it is the moment that
+    // matters, because a refusal naming no way out is when a model stops
+    // looking and fills the gap from memory.
+    const mentions = [
+      cite("regulation://egim/3.298", "Chapter 3, paragraph 298", "ecb-guide-internal-models"),
+    ];
+    mentions[0]!.text =
+      "Characterise an economic downturn in accordance with the Commission Delegated " +
+      "Regulation (EU) No 2021/930.";
+    const r = resolveCitationDetailed(mentions, "Commission Delegated Regulation (EU) 2021/930");
+    expect(r.match).toBeNull();
+    expect(r.coverage_note).toContain("regulation://egim/3.298");
+    // And it says what the instrument IS — the half a model otherwise supplies
+    // from memory, and the half it gets wrong.
+    expect(r.coverage_note).toContain("regulatory technical standard");
+    expect(r.coverage_note).toContain("Article 181(3)(a)");
+    expect(r.coverage_note).toContain("do not state its requirements");
+  });
+
+  it("explains a citation with no provision number instead of returning a bare null", () => {
+    // A document name on its own used to return {match:null} and nothing else —
+    // strictly less than an instrument the corpus does NOT hold received.
+    const held = resolveCitationDetailed(regs, "eba-gl-2017-16");
+    expect(held.match).toBeNull();
+    expect(held.coverage_note).toContain("names a document this corpus holds");
+
+    const unknown = resolveCitationDetailed(regs, "the RTS on economic downturn");
+    expect(unknown.match).toBeNull();
+    expect(unknown.coverage_note).toContain("no provision number");
   });
 
   it("is what the file adapter's meta.resolveCitation delegates to", async () => {

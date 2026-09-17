@@ -266,6 +266,79 @@ const namedInstrument = (text: string): string | null => {
   return `${kind.toLowerCase()}-${year}-${serial}`;
 };
 
+/**
+ * Instruments this corpus does NOT hold, and what they are.
+ *
+ * Deliberately tiny, deliberately authored, and deliberately only about
+ * IDENTITY — what kind of instrument it is and which provision empowers it.
+ * Not what it requires: that is the text, the corpus does not have it, and
+ * inventing it is the failure this whole file exists to prevent.
+ *
+ * It earns its place because the identity is the half a model gets wrong. The
+ * corpus names Regulation (EU) 2021/930 in three served records and nowhere
+ * says it is a regulatory technical standard, or that it was adopted under the
+ * empowerment in CRR Article 181(3)(a) — so a model asked "is this the same
+ * tier as the CRR?" has no served field to answer from, answers from memory,
+ * and gets the hierarchy backwards. One line of curated fact, quotable against
+ * a provision the corpus DOES hold, is the cheapest available fix.
+ *
+ * Every entry must name an empowering provision that this corpus serves, so the
+ * claim is checkable rather than asserted.
+ */
+const EMPOWERMENTS: Record<string, { kind: string; empoweredBy?: string; visibleAt?: string }> = {
+  "regulation-2021-930": {
+    kind: "a regulatory technical standard — a Commission delegated act, not a legislative one",
+    empoweredBy: "Article 181(3)(a) and Article 182(4)(a) of the CRR",
+    visibleAt: "regulation://crr/article-181",
+  },
+  "regulation-2010-1093": {
+    kind:
+      "the Regulation establishing the EBA; its Article 16 is the basis on which every EBA " +
+      "guideline in this corpus is issued, and the source of their comply-or-explain effect",
+    visibleAt: "regulation://crr/article-181",
+  },
+};
+
+/**
+ * Which served records NAME a numbered EU instrument, keyed the same way
+ * `namedInstrument` keys a citation.
+ *
+ * The existing "way out" in the refusal below was built from `cites[].framework`
+ * — a field that only ever holds `crr` and `crd` — so it could never fire for a
+ * numbered act, and every instrument the corpus mentions but does not hold got
+ * the emptiest possible refusal at exactly the moment a model reaches for
+ * memory. This scans the served text instead, which is where the mentions
+ * actually are.
+ *
+ * Computed, never authored: a regex over text the corpus already serves.
+ */
+const mentionCache = new WeakMap<object, Map<string, string[]>>();
+function instrumentMentions(regulations: Regulation[]): Map<string, string[]> {
+  const cached = mentionCache.get(regulations);
+  if (cached !== undefined) return cached;
+  const index = new Map<string, string[]>();
+  const re =
+    /\b(regulation|directive|decision)\s*\((?:eu|ec|euratom)\)\s*(?:no\.?\s*)?(\d{1,4})\s*\/\s*(\d{1,4})\b/gi;
+  for (const r of regulations) {
+    const seen = new Set<string>();
+    for (const m of r.text.matchAll(re)) {
+      const kind = m[1];
+      const a = m[2];
+      const b = m[3];
+      if (kind === undefined || a === undefined || b === undefined) continue;
+      const [year, serial] = isYearNumber(a) ? [a, b] : [b, a];
+      seen.add(`${kind.toLowerCase()}-${year}-${serial}`);
+    }
+    for (const key of seen) {
+      const at = index.get(key);
+      if (at === undefined) index.set(key, [r.id]);
+      else at.push(r.id);
+    }
+  }
+  mentionCache.set(regulations, index);
+  return index;
+}
+
 /** Does any served record belong to the instrument this citation names? */
 function corpusHolds(regulations: Regulation[], instrument: string): boolean {
   const needle = instrument.replace(/[^a-z0-9]/g, "");
@@ -369,19 +442,43 @@ export function resolveCitationDetailed(
   // miss, it is a different body of law.
   const instrument = namedInstrument(text);
   if (instrument !== null && !corpusHolds(regulations, instrument)) {
-    // A dead end that names the way out. The corpus does not hold the CRR, but
-    // most of what it does hold elaborates it — so the records CITING the
-    // instrument are the answer to what was almost certainly being asked.
-    const citing = regulations.filter((r) =>
-      (r.cites ?? []).some((c) => citationTokens(c.framework).join("") === instrument),
-    ).length;
+    // A dead end that names the way out. Two ways out, in fact, and which one
+    // is available decides whether the caller goes looking or guesses.
+    //
+    // (a) What the instrument IS. A refusal that says only "not held" invites
+    //     the model to supply the instrument's identity from memory, and the
+    //     identity — its tier, and the provision empowering it — is the part it
+    //     gets wrong. Curated, checkable against a provision this corpus serves.
+    // (b) Which served records NAME it. Scanned from the text rather than read
+    //     off `cites[].framework`, which holds only `crr`/`crd` and so could
+    //     never fire for a numbered act.
+    const what = EMPOWERMENTS[instrument];
+    // Both sources, unioned. `cites[].framework` is the only one that reaches a
+    // named framework like `crr`; the text scan is the only one that reaches a
+    // numbered act. Each is blind where the other sees.
+    const byCite = regulations
+      .filter((r) => (r.cites ?? []).some((c) => citationTokens(c.framework).join("") === instrument))
+      .map((r) => r.id);
+    const mentions = [
+      ...new Set([...byCite, ...(instrumentMentions(regulations).get(instrument) ?? [])]),
+    ];
+    const shown = mentions.slice(0, 3);
     return none({
       coverage_note:
         `This corpus holds no ${instrumentLabel(instrument)}. Nothing was matched, rather than ` +
         "sourcing a same-numbered provision from another document. " +
-        (citing > 0
-          ? `${citing} records do cite it — search_regulation with the provision number, or ` +
-            "get_referrers on one of those records, to reach what elaborates it."
+        (what === undefined
+          ? ""
+          : `It is ${what.kind}` +
+            (what.empoweredBy === undefined ? "" : `, adopted under ${what.empoweredBy}`) +
+            ". " +
+            (what.visibleAt === undefined
+              ? ""
+              : `That relationship is stated in served text at ${what.visibleAt}. `)) +
+        (shown.length > 0
+          ? `${mentions.length} served record(s) name it: ${shown.join(", ")}` +
+            `${mentions.length > shown.length ? ", …" : ""} — open those for what this corpus ` +
+            "says about it. Its own text is not here, so do not state its requirements from this corpus."
           : "Use get_corpus_info for the documents actually loaded."),
     });
   }
@@ -432,7 +529,27 @@ export function resolveCitationDetailed(
   // (ii) Spine equality: the numbers alone, however the citation spells the
   // structure around them.
   const spine = spineOf(rest.filter((t) => !STRUCTURAL.has(t)));
-  if (spine.length === 0) return none();
+  if (spine.length === 0) {
+    // A citation with no provision number in it — a document name on its own
+    // ("EBA/GL/2019/03"), or prose naming an instrument by description ("the
+    // RTS on economic downturn"). There is nothing to place, but a bare null is
+    // the worst answer available: it is strictly LESS information than an
+    // instrument the corpus does not hold gets, and it reads as "unknown
+    // string" at the exact moment the caller is deciding whether to look
+    // elsewhere or fill in from memory.
+    //
+    // Say which of the two it is, because they need opposite next steps.
+    const named = docs === null ? [] : [...docs];
+    return none({
+      coverage_note:
+        named.length > 0
+          ? `"${text}" names a document this corpus holds (${named.join(", ")}) but no provision ` +
+            "within it. Add a provision number, or use search_regulation to search inside it."
+          : `"${text}" carries no provision number to resolve, and names no document this corpus ` +
+            "holds. If it names an instrument, this corpus may still describe it without holding " +
+            "it — search_regulation with its distinctive words, or get_corpus_info for what is loaded.",
+    });
+  }
 
   const recordSpine = (r: Regulation): string[] =>
     spineOf(bare(citationTokens(r.citation)).filter((t) => !STRUCTURAL.has(t)));
