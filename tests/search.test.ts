@@ -143,6 +143,45 @@ describe("rankedSearch", () => {
     expect(body).toMatch(/[.!?]$/);
     expect(body[0]).toBe(body[0]!.toUpperCase());
   });
+
+  it("reports the source field's length, so truncation is derivable from the record", () => {
+    // NOT from the ellipsis: the markers are a decoration makeExcerpt controls,
+    // so a check that infers "was this cut?" from them can be satisfied by
+    // deleting two characters without changing a single excerpt.
+    const short = check("check://e/chars", "Calibration", "Short text.");
+    const [m] = rankedSearch([short], "calibration", checkSearchFields);
+    expect(m!.matched.field_chars).toBe("Calibration".length);
+
+    const longText = `${"Padding sentence. ".repeat(20)}The calibration target sits here.`;
+    const [ml] = rankedSearch([check("check://e/c2", "Unrelated", longText)], "calibration", checkSearchFields);
+    expect(ml!.matched.field_chars).toBe(longText.length);
+    expect(ml!.matched.excerpt.length).toBeLessThan(ml!.matched.field_chars);
+  });
+
+  it("a sentence longer than the budget is cut at an enumeration point, not mid-clause", () => {
+    // A legal instrument numbers its obligations "(a) …; (b) …;" with no
+    // sentence terminator until the end, so the whole paragraph is one span and
+    // the excerpt falls into the bounded-window fallback. Ending it wherever the
+    // character count ran out is what made ~44% of regulation hits unquotable.
+    const limb = (n: string, filler: string) => `(${n}) institutions shall ${filler} for the purposes of this paragraph; `;
+    const para =
+      "1. In quantifying the risk parameters institutions shall apply the following requirements: " +
+      limb("a", "estimate the long run average of realised outcomes") +
+      limb("b", "apply a calibration target appropriate to a downturn") +
+      limb("c", "include an additional margin of conservatism") +
+      limb("d", "document every assumption relied upon");
+    const [m] = rankedSearch([regulation("regulation://x/1", "Article 1", para)], "calibration", regulationSearchFields("calibration"));
+    const body = m!.matched.excerpt.replace(/^…/, "").replace(/…$/, "").trim();
+
+    expect(body).toContain("calibration");
+    expect(body).toMatch(/[.!?;]$/); // a statement end — ";" ends a point
+    expect(body.endsWith(":")).toBe(false); // a colon promises a list it lacks
+
+    // And it never BEGINS on an orphaned limb: "(c) include an additional
+    // margin of conservatism" without its chapeau has lost the addressee and
+    // the trigger, which is the same defect class as a confident wrong citation.
+    expect(body).not.toMatch(/^\s*\(?[a-z0-9]{1,3}\)/i);
+  });
 });
 
 // ── regulationSearchFields — the id field is query-shape dependent ─────────────

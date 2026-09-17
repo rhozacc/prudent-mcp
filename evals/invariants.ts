@@ -504,21 +504,59 @@ export async function missesAreActionable(s: Session): Promise<InvariantResult> 
  *             that cannot be quoted forces the model to open the full record,
  *             so the honest cost is search + open, not search alone.
  */
+/** A statement end: sentence terminators plus the `;` ending an enumerated point. */
+const QUOTABLE_END = /[.!?;]["')\]]?$/;
+/** An enumeration marker at the head of a fragment: "(c) ", "(iv)", "3) ". */
+const ENUM_HEAD = /^\s*\(?[a-z0-9]{1,3}\)/i;
+const flat = (s: string): string => s.replace(/\s+/g, " ").trim();
+
 /**
  * Is this excerpt something the caller can quote and answer from, or only a
  * pointer to the record it came from?
  *
- * Quotable means: the whole field (nothing was cut), or a run that ends where a
- * sentence ends. The one case this correctly refuses is a bounded window inside
- * a single sentence longer than the excerpt budget — there is no way to end
- * that at a terminator without serving the record, so it stays a pointer.
+ * Four conditions, and each one closes a way of passing the other three.
+ *
+ *  1. Truncation is derived from the SOURCE, never from the ellipsis. The two
+ *     "…" markers are a decoration makeExcerpt controls: deleting them takes
+ *     this bar from ~70% to 100% without changing a single excerpt, which is
+ *     the cheapest cheat available anywhere in the suite. When `source` is
+ *     given, "was it cut?" is a length comparison against the field itself.
+ *  2. It ends where a statement ends. A colon is NOT a statement end — it
+ *     promises an enumeration the excerpt does not carry.
+ *  3. It does not BEGIN on an enumerated limb. "(c) include an additional
+ *     margin of conservatism…" has lost the chapeau carrying its addressee and
+ *     its trigger, and quoting it is the same defect class as a confident wrong
+ *     citation.
+ *  4. It appears in the field VERBATIM. Conditions 1-3 alone are satisfied by
+ *     appending a full stop to whatever the budget cut, which would turn this
+ *     bar into a lint on the last byte.
+ *
+ * The one case this still correctly refuses is a bounded window inside a single
+ * statement longer than the excerpt budget — there is no way to end that at a
+ * boundary without serving the record, so it stays a pointer.
  */
-export function excerptIsQuotable(excerpt: string): boolean {
-  const cut = excerpt.startsWith("…") || excerpt.endsWith("…");
+export function excerptIsQuotable(excerpt: string, recordBody?: string): boolean {
   const body = excerpt.replace(/^…/, "").replace(/…$/, "").trim();
   if (body.length === 0) return false;
-  if (!cut) return true; // the complete field, however short
-  return /[.!?]["')\]]?$/.test(body);
+  const want = flat(body);
+
+  if (recordBody !== undefined) {
+    // The excerpt may come from ANY searched field — citation, text, or one of
+    // the commentary entries — and the concise projection does not say which.
+    // Find the field that actually contains it, then judge truncation against
+    // THAT field's length. Comparing against the whole record would call a
+    // short complete citation "truncated"; comparing against `text` alone
+    // would call a commentary hit "not verbatim".
+    const fields = [...recordBody.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => flat(m[1] ?? ""));
+    const host = fields.find((f) => f.includes(want));
+    if (host === undefined) return false; // (4) not verbatim in any field
+    if (host.length <= want.length) return true; // (1) nothing was cut
+  } else if (!excerpt.startsWith("…") && !excerpt.endsWith("…")) {
+    return true; // no record to check against; fall back to the marker
+  }
+
+  if (ENUM_HEAD.test(body)) return false; // (3) orphaned limb
+  return QUOTABLE_END.test(body); // (2)
 }
 
 /**
@@ -534,8 +572,30 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
 
   // Sample records from the server's own search output, then re-query using the
   // rarest words in each record's excerpt.
-  const seed = await s.call("search_regulation", { query: "requirements estimation data", limit: 10 });
-  const ids = [...seed.text.matchAll(/"id"\s*:\s*"(regulation:\/\/[^"]+)"/g)].map((m) => m[1] ?? "");
+  //
+  // Six unrelated seeds, not one. Five probes drawn from a single query is not
+  // a sample: at a true rate near the bar it quantises to five points and turns
+  // over on one record, so the same corpus and the same code could report 40%
+  // or 80% on consecutive runs. Widening the seed set is what makes the number
+  // mean something — and it costs six calls.
+  const SEED_QUERIES = [
+    "requirements estimation data",
+    "downturn calibration",
+    "margin of conservatism",
+    "definition of default days past due",
+    "rating system validation",
+    "collateral valuation haircut",
+  ];
+  const PROBE_TARGET = 24;
+
+  const ids: string[] = [];
+  for (const q of SEED_QUERIES) {
+    const seed = await s.call("search_regulation", { query: q, limit: 10 });
+    for (const m of seed.text.matchAll(/"id"\s*:\s*"(regulation:\/\/[^"]+)"/g)) {
+      const found = m[1];
+      if (found !== undefined && !ids.includes(found)) ids.push(found);
+    }
+  }
   if (ids.length === 0) {
     return {
       id: "I8",
@@ -546,7 +606,7 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
           id: "I8/no-seed",
           severity: "info",
           summary: "No regulation records were returned to sample, so retrieval could not be measured.",
-          evidence: ["search_regulation('requirements estimation data') returned no ids"],
+          evidence: [`${SEED_QUERIES.length} seed queries returned no ids`],
         },
       ],
     };
@@ -558,7 +618,7 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
   let pathTokens = 0;
   let unusableExcerpts = 0;
 
-  for (const id of ids.slice(0, 5)) {
+  for (const id of ids.slice(0, PROBE_TARGET)) {
     const rec = await s.call("get_regulation", { id });
     if (rec.isError) continue;
     const text = /"text"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(rec.text)?.[1] ?? "";
@@ -585,8 +645,17 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
     // the excerpt could not have been quoted. Charging the open unconditionally
     // measures the same number however good the excerpts get, which makes the
     // metric blind to the thing it exists to track.
-    const excerpt = /"matched_excerpt"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(back.text)?.[1] ?? "";
-    const usable = excerptIsQuotable(excerpt);
+    // Score the excerpt belonging to THIS record against THIS record's own
+    // text. Taking the first excerpt in the page scored whichever record
+    // happened to rank top, against no source at all — so the verbatim and
+    // truncation conditions had nothing to check and the bar was a lint on the
+    // last byte.
+    const own = back.text.indexOf(`"${id}"`);
+    const excerpt =
+      (own === -1
+        ? /"matched_excerpt"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(back.text)
+        : /"matched_excerpt"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(back.text.slice(own)))?.[1] ?? "";
+    const usable = excerptIsQuotable(excerpt, own === -1 ? undefined : rec.text);
     if (!usable) unusableExcerpts++;
     const topId = returned[0];
     let open = 0;
