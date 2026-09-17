@@ -47,9 +47,13 @@ Add a function returning `InvariantResult` to `invariants.ts` and list it in `AL
 - Return `applicable: false` when there was nothing to bind on.
 - Severity is `fatal` for truthfulness, `warn` for cost, `info` for observations.
 
-## Wired into `test:ci`
+## Wired into `test:ci`, and `test:ci` is wired into CI
 
 It opened at 17 fatal findings — it was written to characterise the server before fixing it — and is now **0 fatal against both the seeded demo and a real corpus**, so it runs in `test:ci` as a regression gate rather than a report. A fatal finding fails the build.
+
+That sentence was true of the script and false in effect for longer than it should have been: `ci.yml` ran `typecheck`, `bun test` and `validate` as three separate steps and never invoked `test:ci`, so the suite ran in no workflow at all. CI now runs the script itself, which is what stops the two drifting again — a check added to `test:ci` is added to CI by construction.
+
+**What CI cannot see.** The workflow evaluates the seeded demo, because this repo holds no corpus and a failing log from a real one would name record content in public. So the demo run is a floor, not a verdict: it cannot bind I2 or I3, and the numbers that matter for answer quality — excerpt quotability, retrieval cost per question — are only meaningful against a corpus with real prose in it. Run `CORPUS_FILE=… bun run evals` for that, and gate it where the corpus lives.
 
 Two invariants report `applicable: false` against the demo and that is the honest state, not a gap to paper over:
 
