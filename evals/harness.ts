@@ -57,6 +57,15 @@ export interface ToolCard {
   schemaChars: number;
   /** Standing cost of publishing this tool, paid on every request. */
   tokens: number;
+  /**
+   * The published OUTPUT schema, when the tool declares one. Not counted toward
+   * `tokens`: a client validates against it but a model is never shown it.
+   * Kept so the suite can check that what a handler actually returns is what the
+   * tool says it returns — drift `tsc` cannot see, because a body assembled by
+   * spread satisfies the handler's return type while carrying keys the
+   * published schema never names.
+   */
+  outputSchema?: unknown;
 }
 
 export interface Session {
@@ -107,12 +116,14 @@ export async function openSession(opts: OpenOptions = {}): Promise<Session> {
     const description = t.description ?? "";
     const schemaText = JSON.stringify(t.inputSchema);
     const schemaChars = schemaText.length;
+    const out = (t as { outputSchema?: unknown }).outputSchema;
     return {
       name: t.name,
       description,
       schemaText,
       schemaChars,
       tokens: estimateTokens("x".repeat(t.name.length + description.length + schemaChars)),
+      ...(out === undefined ? {} : { outputSchema: out }),
     };
   });
   const surfaceTokens = tools.reduce((n, t) => n + t.tokens, 0);

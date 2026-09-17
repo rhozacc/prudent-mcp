@@ -24,7 +24,7 @@ const ConcisePlaybookHit = z.object({
   area: z.string(),
   subarea: z.string().optional(),
   phase_count: z.number().int(),
-});
+}).passthrough();
 
 /**
  * A playbook without its reference lists.

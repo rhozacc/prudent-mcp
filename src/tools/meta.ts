@@ -330,7 +330,7 @@ export function registerMetaTools(server: McpServer): void {
         "whose verified date is older than 30 days; follow up with list_sources, then " +
         "list_review_areas to map a task onto the corpus.",
       inputSchema: {},
-      outputSchema: CorpusInfoSchema,
+      outputSchema: CorpusInfoSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async () => ok(await adapters.meta.info()),
@@ -354,7 +354,7 @@ export function registerMetaTools(server: McpServer): void {
       inputSchema: {
         id: z.string().describe("Any content-surface ID — regulation://, test://, check://, or playbook://."),
       },
-      outputSchema: ReferrersSchema,
+      outputSchema: ReferrersSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async ({ id }) => {
@@ -397,7 +397,7 @@ export function registerMetaTools(server: McpServer): void {
       inputSchema: {
         text: z.string().describe("A loose, human-prose citation."),
       },
-      outputSchema: CitationResolutionSchema.shape,
+      outputSchema: CitationResolutionSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async ({ text }) => ok(await adapters.meta.resolveCitation(text)),
@@ -416,7 +416,7 @@ export function registerMetaTools(server: McpServer): void {
         "derived from the playbooks present, so this is never empty for a corpus that has " +
         "any.",
       inputSchema: {},
-      outputSchema: { areas: z.array(ReviewAreaSchema) },
+      outputSchema: z.object({ areas: z.array(ReviewAreaSchema) }).passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async () => ok({ areas: await adapters.meta.taxonomy() }),
@@ -628,13 +628,15 @@ export function registerMetaTools(server: McpServer): void {
         "coverage from its children. The aggregate inverse of get_referrers — follow up with " +
         "get_regulation on any uncovered id.",
       inputSchema: {},
-      outputSchema: {
-        total_regulations: z.number().int(),
-        covered: z.number().int(),
-        uncovered: z.array(
-          z.object({ id: regulationIdSchema, citation: z.string(), is_leaf: z.boolean() }),
-        ),
-      },
+      outputSchema: z
+        .object({
+          total_regulations: z.number().int(),
+          covered: z.number().int(),
+          uncovered: z.array(
+            z.object({ id: regulationIdSchema, citation: z.string(), is_leaf: z.boolean() }),
+          ),
+        })
+        .passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async () => {

@@ -708,6 +708,89 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
 
 // ============================================================================
 
+// ============================================================================
+// I16 — a tool returns what its published schema says it returns
+// ============================================================================
+
+/**
+ * The output schema is the only machine-readable promise this server makes
+ * about the SHAPE of a response, and nothing in the toolchain checks it against
+ * the handler. `tsc` does not: a body assembled by spread satisfies the
+ * handler's return type while carrying keys the schema never names. `satisfies`
+ * does not, for the same reason. Until the envelopes were opened the only thing
+ * that noticed was a validating client, at runtime, in production — and it
+ * noticed by rejecting the response.
+ *
+ * Opening the envelopes fixed the rejection and traded it for silence: an
+ * undeclared key is now served happily and documented nowhere. So this is a
+ * warn, not a fatal — the response is usable, but a caller reading the schema
+ * to decide what to parse is reading an incomplete list.
+ *
+ * Corpus-agnostic: every probe is a tool of this server called with arguments
+ * derived from its own output.
+ */
+export async function outputMatchesDeclaredSchema(s: Session): Promise<InvariantResult> {
+  const findings: Finding[] = [];
+  const declared = new Map<string, Set<string>>();
+  for (const t of s.tools) {
+    const os = t.outputSchema as { properties?: Record<string, unknown> } | undefined;
+    if (os?.properties === undefined) continue;
+    declared.set(t.name, new Set(Object.keys(os.properties)));
+  }
+  if (declared.size === 0) {
+    return {
+      id: "I16",
+      title: "Responses match their published output schema",
+      applicable: false,
+      findings: [
+        {
+          id: "I16/no-schemas",
+          severity: "info",
+          summary: "No tool publishes an output schema, so response shape could not be checked.",
+          evidence: [`${s.tools.length} tools listed`],
+        },
+      ],
+    };
+  }
+
+  const probes: Array<[string, Record<string, unknown>]> = [
+    ["get_corpus_info", {}],
+    ["list_review_areas", {}],
+    ["list_sources", {}],
+    ["get_coverage_gaps", {}],
+    ["search_regulation", { query: "default", limit: 2 }],
+    ["search_checks", { query: "default", limit: 2 }],
+    ["search_tests", { query: "default", limit: 2 }],
+    ["search_playbooks", { query: "estimation", limit: 2 }],
+    ["resolve_citation", { text: "Article 178" }],
+  ];
+
+  let bound = 0;
+  for (const [tool, args] of probes) {
+    const want = declared.get(tool);
+    if (want === undefined) continue;
+    const t = await s.call(tool, args);
+    if (t.isError || t.json === null || typeof t.json !== "object") continue;
+    bound++;
+    const extra = Object.keys(t.json as Record<string, unknown>).filter((k) => !want.has(k));
+    if (extra.length > 0) {
+      findings.push({
+        id: `I16/${tool}`,
+        severity: "warn",
+        summary: `${tool} returns ${extra.length} key(s) its published output schema does not declare — a caller reading the schema to decide what to parse is reading an incomplete list.`,
+        evidence: [`undeclared: ${extra.join(", ")}`, `declared: ${[...want].join(", ")}`],
+      });
+    }
+  }
+
+  return {
+    id: "I16",
+    title: "Responses match their published output schema",
+    applicable: bound > 0,
+    findings,
+  };
+}
+
 export const ALL = [
   envelopeIsJson,
   describedIdsResolve,
@@ -717,4 +800,5 @@ export const ALL = [
   costWithinBudget,
   missesAreActionable,
   selfRetrievalIsAffordable,
+  outputMatchesDeclaredSchema,
 ] as const;
