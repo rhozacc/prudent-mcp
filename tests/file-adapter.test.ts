@@ -345,6 +345,50 @@ describe("regulation.get(id, asOf) with regulation_history", () => {
   });
 });
 
+describe("regulation.get(id, asOf) against a corpus with no history", () => {
+  // The registry knows when each document was published even when no provision
+  // carries version history, and that is enough to stop `as_of` lying. Serving
+  // today's text for a date before the document existed is the failure the
+  // tool's own description rules out ("never current text as historical"), and
+  // a validator's commonest question is what applied at an approval date.
+  const dated = {
+    ...fullCorpus,
+    sources: [
+      {
+        ...fullCorpus.sources[0]!,
+        id: "source://eba/gl-x",
+        framework: "eba",
+        document_id: "eba-gl-x",
+        published: "2020-01-01",
+      },
+    ],
+  };
+  const id = "regulation://eba/gl-x/1" as Parameters<
+    ReturnType<typeof createFileAdapters>["regulation"]["get"]
+  >[0];
+
+  it("refuses a date before the document was published", async () => {
+    const a = createFileAdapters(loadCorpusFile(writeCorpus("asof-dated.json", dated)));
+    expect(await a.regulation.get(id, "2016-01-01")).toBeNull();
+  });
+
+  it("serves the current text from the publication date onward", async () => {
+    const a = createFileAdapters(loadCorpusFile(writeCorpus("asof-dated.json", dated)));
+    expect((await a.regulation.get(id, "2020-01-01"))?.id).toBe(id);
+    expect((await a.regulation.get(id, "2026-01-01"))?.id).toBe(id);
+    expect((await a.regulation.get(id))?.id).toBe(id);
+  });
+
+  it("is unchanged when the registry gives no date for the document", async () => {
+    // A corpus that says nothing about when a document existed keeps its
+    // pre-existing behaviour exactly: absent is not a claim.
+    const undatedSource = { ...dated.sources[0]! };
+    delete (undatedSource as { published?: string }).published;
+    const a = createFileAdapters(loadCorpusFile(writeCorpus("asof-undated.json", { ...dated, sources: [undatedSource] })));
+    expect((await a.regulation.get(id, "1999-01-01"))?.id).toBe(id);
+  });
+});
+
 // ── resolveCitationDetailed — the deterministic citation matcher ──────────────
 //
 // The bar is honesty before recall: a citation this corpus cannot place must
