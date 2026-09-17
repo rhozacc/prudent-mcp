@@ -206,21 +206,58 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
 
   // A citation naming an instrument the corpus does not cover must not be
   // answered out of an instrument it does.
-  const foreign = await s.call("resolve_citation", {
-    text: "Article 1 of Regulation (EU) No 9999/9999",
-  });
-  const foreignMatch = /"id"\s*:\s*"([^"]+)"/.exec(foreign.text)?.[1];
-  if (foreignMatch !== undefined) {
-    findings.push({
-      id: "I3/wrong-instrument",
-      severity: "fatal",
-      summary:
-        "resolve_citation answers a citation into an instrument the corpus does not hold, sourcing the match from an unrelated document.",
-      evidence: [
-        `resolve_citation("Article 1 of Regulation (EU) No 9999/9999") → ${foreignMatch}`,
-        "the model will attribute this text to the instrument the user named",
-      ],
-    });
+  //
+  // BOTH numbering eras are probed, and the second one is why: EU acts were
+  // numbered serial/YEAR until 2015 and YEAR/serial after it. A gate written
+  // for the old form is blind to every act adopted since, and "9999/9999"
+  // cannot reveal that — its second number has four digits, so it matches the
+  // old pattern and the probe passes on a gate that is broken for everything
+  // real. The post-2015 probe needs a SHORT serial to bind at all.
+  for (const probe of [
+    "Article 1 of Regulation (EU) No 9999/9999", // pre-2015 form
+    "Article 1 of Regulation (EU) 2099/930", // post-2015 form, short serial
+  ]) {
+    const foreign = await s.call("resolve_citation", { text: probe });
+    const foreignMatch = /"id"\s*:\s*"([^"]+)"/.exec(foreign.text)?.[1];
+    if (foreignMatch !== undefined) {
+      findings.push({
+        id: "I3/wrong-instrument",
+        severity: "fatal",
+        summary:
+          "resolve_citation answers a citation into an instrument the corpus does not hold, sourcing the match from an unrelated document.",
+        evidence: [
+          `resolve_citation("${probe}") → ${foreignMatch}`,
+          "the model will attribute this text to the instrument the user named",
+        ],
+      });
+      continue;
+    }
+    // Declining is necessary but not sufficient: the refusal has to identify
+    // the instrument, or it reads as "malformed citation" rather than "outside
+    // this corpus" — and a model that reads it the first way fills the gap from
+    // memory instead of looking elsewhere.
+    if (!/holds no/i.test(foreign.text)) {
+      findings.push({
+        id: "I3/refusal-not-instrument-shaped",
+        severity: "warn",
+        summary:
+          "resolve_citation declines a citation naming an instrument this corpus does not hold, but the refusal does not name the instrument — so it reads as a malformed citation rather than a coverage boundary.",
+        evidence: [`resolve_citation("${probe}") → ${foreign.text.slice(0, 220)}`],
+      });
+    }
+    // And it must not invent a citation for a real act while refusing it. A
+    // post-2015 act is "Regulation (EU) 2099/930"; writing "No 2099/930" is a
+    // wrong citation of a real instrument, from the one code path whose whole
+    // purpose is not guessing.
+    if (/No\s+2099\s*\/\s*930/.test(foreign.text)) {
+      findings.push({
+        id: "I3/mislabels-instrument",
+        severity: "fatal",
+        summary:
+          'resolve_citation renders a post-2015 EU act with the pre-2015 "No" — a wrong citation of a real instrument, emitted while refusing it.',
+        evidence: [`resolve_citation("${probe}") → ${foreign.text.slice(0, 220)}`],
+      });
+    }
   }
 
   return { id: "I3", title: "Citation resolution is honest", applicable: true, findings };

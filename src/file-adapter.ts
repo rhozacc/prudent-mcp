@@ -230,11 +230,40 @@ const INSTRUMENT_PATTERNS: Array<{ key: string; re: RegExp }> = [
   { key: "crd", re: /\bcrd\s*(iv|v)?\b|directive\s*2013\s*\/\s*36/i },
 ];
 
-/** A numbered EU instrument the citation names, e.g. "Regulation (EU) No 9999/9999". */
+/** Is this the YEAR half of an EU act number, rather than the serial? */
+const isYearNumber = (s: string): boolean => /^(?:19|20)\d{2}$/.test(s);
+
+/**
+ * A numbered EU instrument the citation names, in either numbering era.
+ *
+ * EU acts were numbered serial/YEAR until 2015 ("Regulation (EU) No 575/2013")
+ * and YEAR/serial from 2015 on, with the "No" dropped ("Regulation (EU)
+ * 2021/930"). The old pattern required a FOUR-DIGIT second number, so every act
+ * adopted since 2015 with a serial under 1000 fell straight through the gate —
+ * nine of the twenty-seven numbered instruments this corpus's own text names,
+ * including the downturn RTS and the GDPR-shaped 2016/679.
+ *
+ * Falling through matters more than it sounds. The gate is the defence against
+ * sourcing a same-numbered provision from a document the caller did not name;
+ * skipping it sent the citation into the numeric spine rules, which is why
+ * asking for 2021/930 came back "nothing in this corpus is numbered 2021.930" —
+ * a malformed-citation shape, when the truth is a coverage boundary.
+ */
 const namedInstrument = (text: string): string | null => {
   for (const { key, re } of INSTRUMENT_PATTERNS) if (re.test(text)) return key;
-  const m = /regulation\s*\(eu\)\s*(?:no\.?\s*)?(\d+)\s*\/\s*(\d{4})/i.exec(text);
-  return m === null ? null : `regulation-${m[1]}-${m[2]}`;
+  const m =
+    /\b(regulation|directive|decision)\s*\((?:eu|ec|euratom)\)\s*(?:no\.?\s*)?(\d{1,4})\s*\/\s*(\d{1,4})\b/i.exec(
+      text,
+    );
+  if (m === null) return null;
+  const kind = m[1];
+  const first = m[2];
+  const second = m[3];
+  if (kind === undefined || first === undefined || second === undefined) return null;
+  // Normalise to kind-YEAR-serial whichever era the citation is written in, so
+  // one instrument has one key however it was spelled.
+  const [year, serial] = isYearNumber(first) ? [first, second] : [second, first];
+  return `${kind.toLowerCase()}-${year}-${serial}`;
 };
 
 /** Does any served record belong to the instrument this citation names? */
@@ -257,11 +286,23 @@ const asCandidate = (r: Regulation): CitationCandidate => ({
   document_id: r.document_id,
 });
 
-/** Instrument key rendered the way a reader would write it. */
-const instrumentLabel = (instrument: string): string =>
-  instrument.startsWith("regulation-")
-    ? instrument.replace(/^regulation-(\d+)-(\d+)$/, "Regulation (EU) No $1/$2")
-    : instrument.toUpperCase();
+/**
+ * Instrument key rendered the way a reader would write it.
+ *
+ * The era decides the "No": post-2015 acts are cited "Regulation (EU) 2021/930"
+ * and writing "Regulation (EU) No 2021/930" is a wrong citation of a real act —
+ * not a thing to emit from a refusal whose whole purpose is not guessing.
+ */
+const instrumentLabel = (instrument: string): string => {
+  const m = /^(regulation|directive|decision)-(\d{4})-(\d+)$/.exec(instrument);
+  if (m === null) return instrument.toUpperCase();
+  const kind = `${(m[1] ?? "").charAt(0).toUpperCase()}${(m[1] ?? "").slice(1)}`;
+  const year = m[2] ?? "";
+  const serial = m[3] ?? "";
+  return Number(year) >= 2015
+    ? `${kind} (EU) ${year}/${serial}`
+    : `${kind} (EU) No ${serial}/${year}`;
+};
 
 /** Several equally good matches: report them all, choose none. */
 function ambiguousResolution(text: string, hits: Regulation[]): CitationResolution {
@@ -411,6 +452,43 @@ export function resolveCitationDetailed(
         `No record is "${text}" itself. The corpus holds ${relatives.length} narrower provision(s) ` +
         `under it${relatives.length > MAX_CANDIDATES ? ` (first ${MAX_CANDIDATES} listed)` : ""}; ` +
         "open one, or use get_regulation_tree on it for the whole subtree.",
+    });
+  }
+
+  // (iv) The CONTAINING provision — the mirror of (iii), and the half that was
+  // missing. Rule (iii) answers "the corpus holds provisions under the one you
+  // named"; this answers "the corpus holds the record yours sits inside".
+  //
+  // It matters because of how the corpus is shaped rather than how citations
+  // are written: the CRR is stored at whole-article granularity — not one of
+  // its 160 records carries a bracketed citation — while 86% of the
+  // cross-references the corpus makes about itself are bracketed sub-article
+  // points. So "Article 181(1)(b) of the CRR" was a bare miss reading "nothing
+  // in this corpus is numbered 181.1.b", for a provision served in full, whose
+  // text contains point (b) verbatim.
+  //
+  // Still a decline: `match` stays null and `confidence` stays "none". Matching
+  // is not being loosened — the container is reported as a candidate, exactly
+  // as a narrower relative is. Token-level prefix, so 1218 still cannot claim
+  // to contain 121.
+  const containers = pool
+    .map((r) => ({ r, rs: recordSpine(r) }))
+    // A record whose citation carries no numbers is a prefix of everything;
+    // without this guard a "Preamble" would claim to contain every citation.
+    .filter(({ rs }) => rs.length > 0 && startsWithTokens(spine, rs))
+    // Narrowest first: the most specific container is the most useful one.
+    .sort((a, b) => b.rs.length - a.rs.length);
+  if (containers.length > 0) {
+    const best = containers[0]!;
+    const inside = spine.slice(best.rs.length).join(".");
+    return none({
+      unmatched_segments: spine,
+      candidates: containers.slice(0, MAX_CANDIDATES).map(({ r }) => asCandidate(r)),
+      coverage_note:
+        `No record is "${text}" itself — this corpus does not address provisions at that ` +
+        `granularity. It holds the provision containing it: "${best.r.citation}" ` +
+        `(${best.r.id}), whose text carries point ${inside}. Open it and quote the point from ` +
+        "its text rather than citing this resolution.",
     });
   }
 

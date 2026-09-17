@@ -423,6 +423,55 @@ describe("resolveCitationDetailed", () => {
     expect(foreign.coverage_note).toContain("9999/9999");
   });
 
+  it("sees post-2015 EU numbering, and cites each era the way it is written", () => {
+    // Acts were numbered serial/YEAR until 2015 and YEAR/serial after it. A gate
+    // requiring a four-digit SECOND number is blind to every act adopted since,
+    // and the miss then falls through to the numeric spine rules — which is how
+    // asking for a real instrument came back "nothing is numbered 2021.930",
+    // a malformed-citation shape rather than a coverage boundary.
+    const modern = resolveCitationDetailed(regs, "Commission Delegated Regulation (EU) 2021/930");
+    expect(modern.match).toBeNull();
+    expect(modern.coverage_note).toContain("holds no Regulation (EU) 2021/930");
+    // And never the pre-2015 "No" on a post-2015 act: that is a wrong citation
+    // of a real instrument, emitted by the one path whose job is not guessing.
+    expect(modern.coverage_note).not.toContain("No 2021/930");
+
+    const legacy = resolveCitationDetailed(regs, "Article 5 of Regulation (EU) No 1093/2010");
+    expect(legacy.match).toBeNull();
+    expect(legacy.coverage_note).toContain("Regulation (EU) No 1093/2010");
+  });
+
+  it("names the CONTAINING provision when the corpus is coarser than the citation", () => {
+    // The mirror of the narrower-relatives rule. The CRR is stored at whole-
+    // article granularity while most cross-references to it are bracketed
+    // sub-article points, so "Article 180(1)(b)" — a point served verbatim
+    // inside Article 180 — used to come back as a bare miss.
+    const r = resolveCitationDetailed(regs, "CRR Article 180(1)(b)");
+    expect(r.match).toBeNull(); // still a decline: matching is not loosened
+    expect(r.confidence).toBe("none");
+    expect(r.candidates.map((c) => c.id)).toContain("regulation://crr/180");
+    expect(r.coverage_note).toContain("Article 180");
+
+    // The NARROWEST container is offered first: 180(1)(a) is held, so a point
+    // under it leads with that rather than with the whole article.
+    const deeper = resolveCitationDetailed(regs, "CRR Article 180(1)(a)(2)");
+    expect(deeper.match).toBeNull();
+    expect(deeper.candidates.map((c) => c.id)).toEqual([
+      "regulation://crr/180/1/a",
+      "regulation://crr/180",
+    ]);
+  });
+
+  it("a record whose citation carries no numbers contains nothing", () => {
+    // Without the guard an unnumbered record is a prefix of every spine, so it
+    // would claim to contain every citation in the corpus.
+    const withPreamble = [...regs, cite("regulation://crr/preamble", "Preamble")];
+    const r = resolveCitationDetailed(withPreamble, "CRR Article 999(1)");
+    expect(r.match).toBeNull();
+    expect(r.candidates).toEqual([]);
+    expect(r.coverage_note).toContain("Nothing in this corpus is numbered");
+  });
+
   it("reports ambiguity across documents rather than picking one", () => {
     const twoDocs = [
       cite("regulation://gl-2017-16/article-78", "Article 78", "eba-gl-2017-16"),
