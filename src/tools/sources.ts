@@ -54,7 +54,7 @@ export function registerSourceTools(server: McpServer): void {
       inputSchema: {
         status: SourceStatusSchema.optional().describe("Filter by lifecycle status."),
       },
-      outputSchema: { sources: z.array(SourceSummarySchema) },
+      outputSchema: z.object({ sources: z.array(SourceSummarySchema) }).passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async ({ status }) => {
@@ -92,7 +92,7 @@ export function registerSourceTools(server: McpServer): void {
           "A source id from list_sources — shape source://{framework}/{document-id}",
         ),
       },
-      outputSchema: SourceSchema,
+      outputSchema: SourceSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async ({ id }) => {

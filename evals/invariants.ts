@@ -15,7 +15,7 @@
  * nothing to bind on — a check that passes by having nothing to measure is the
  * exact failure mode this file exists to catch.
  */
-import type { Finding, InvariantResult, Session } from "./harness.ts";
+import { estimateTokens, type Finding, type InvariantResult, type Session } from "./harness.ts";
 
 const SCHEMES = ["regulation", "check", "test", "playbook", "source"] as const;
 type Scheme = (typeof SCHEMES)[number];
@@ -206,21 +206,58 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
 
   // A citation naming an instrument the corpus does not cover must not be
   // answered out of an instrument it does.
-  const foreign = await s.call("resolve_citation", {
-    text: "Article 1 of Regulation (EU) No 9999/9999",
-  });
-  const foreignMatch = /"id"\s*:\s*"([^"]+)"/.exec(foreign.text)?.[1];
-  if (foreignMatch !== undefined) {
-    findings.push({
-      id: "I3/wrong-instrument",
-      severity: "fatal",
-      summary:
-        "resolve_citation answers a citation into an instrument the corpus does not hold, sourcing the match from an unrelated document.",
-      evidence: [
-        `resolve_citation("Article 1 of Regulation (EU) No 9999/9999") → ${foreignMatch}`,
-        "the model will attribute this text to the instrument the user named",
-      ],
-    });
+  //
+  // BOTH numbering eras are probed, and the second one is why: EU acts were
+  // numbered serial/YEAR until 2015 and YEAR/serial after it. A gate written
+  // for the old form is blind to every act adopted since, and "9999/9999"
+  // cannot reveal that — its second number has four digits, so it matches the
+  // old pattern and the probe passes on a gate that is broken for everything
+  // real. The post-2015 probe needs a SHORT serial to bind at all.
+  for (const probe of [
+    "Article 1 of Regulation (EU) No 9999/9999", // pre-2015 form
+    "Article 1 of Regulation (EU) 2099/930", // post-2015 form, short serial
+  ]) {
+    const foreign = await s.call("resolve_citation", { text: probe });
+    const foreignMatch = /"id"\s*:\s*"([^"]+)"/.exec(foreign.text)?.[1];
+    if (foreignMatch !== undefined) {
+      findings.push({
+        id: "I3/wrong-instrument",
+        severity: "fatal",
+        summary:
+          "resolve_citation answers a citation into an instrument the corpus does not hold, sourcing the match from an unrelated document.",
+        evidence: [
+          `resolve_citation("${probe}") → ${foreignMatch}`,
+          "the model will attribute this text to the instrument the user named",
+        ],
+      });
+      continue;
+    }
+    // Declining is necessary but not sufficient: the refusal has to identify
+    // the instrument, or it reads as "malformed citation" rather than "outside
+    // this corpus" — and a model that reads it the first way fills the gap from
+    // memory instead of looking elsewhere.
+    if (!/holds no/i.test(foreign.text)) {
+      findings.push({
+        id: "I3/refusal-not-instrument-shaped",
+        severity: "warn",
+        summary:
+          "resolve_citation declines a citation naming an instrument this corpus does not hold, but the refusal does not name the instrument — so it reads as a malformed citation rather than a coverage boundary.",
+        evidence: [`resolve_citation("${probe}") → ${foreign.text.slice(0, 220)}`],
+      });
+    }
+    // And it must not invent a citation for a real act while refusing it. A
+    // post-2015 act is "Regulation (EU) 2099/930"; writing "No 2099/930" is a
+    // wrong citation of a real instrument, from the one code path whose whole
+    // purpose is not guessing.
+    if (/No\s+2099\s*\/\s*930/.test(foreign.text)) {
+      findings.push({
+        id: "I3/mislabels-instrument",
+        severity: "fatal",
+        summary:
+          'resolve_citation renders a post-2015 EU act with the pre-2015 "No" — a wrong citation of a real instrument, emitted while refusing it.',
+        evidence: [`resolve_citation("${probe}") → ${foreign.text.slice(0, 220)}`],
+      });
+    }
   }
 
   return { id: "I3", title: "Citation resolution is honest", applicable: true, findings };
@@ -366,8 +403,38 @@ export interface Budget {
  * or the finding fires on every corpus and stops carrying information. It is
  * set to catch the entry path GROWING, not to argue the bundle should not exist.
  */
+/**
+ * `surface` is a RATCHET, not an aspiration.
+ *
+ * It sat at 3,000 against a measured 4,754 and warned on every run since the
+ * suite was written, which is the same as not measuring: a permanent warning is
+ * read as background, and the one time it moves nobody notices. Worse, it
+ * penalised exactly the work that makes the surface worth its cost — the rule
+ * paragraphs telling a caller what this corpus is NOT — so "improve the
+ * guidance" and "get the budget green" pulled against each other.
+ *
+ * It is now set just above the measured model-visible cost (5,807 tok: 4,813 of
+ * tool cards, 994 of instructions), so the check does the job a budget can
+ * actually do — catch GROWTH. Raise it only with the reason recorded here.
+ *
+ * 3,000 was not reachable by trimming prose. The only route under it is
+ * collapsing the four search_* tools into one, and that trades away the
+ * per-surface steering that makes a model pick the right surface in the first
+ * place — a worse answer for a cheaper prompt. The routes that would genuinely
+ * lower it, in the order they should be taken:
+ *
+ *   - merge the five per-record get_* tools into one get(id)        ~-700 tok
+ *   - serve get_coverage_gaps as a resource rather than a tool      ~-250 tok
+ *   - trim the input-schema `describe()` text, which is ~40% of the surface
+ *
+ * History, so a later raise has something to argue with:
+ *   3,000  original, aspirational, never met
+ *   6,100  measured 5,807 + 5% headroom — instructions gained the scope,
+ *          boundary and legal-force rules; list_review_areas stopped
+ *          advertising itself as the entry point for every question
+ */
 export const DEFAULT_BUDGET: Budget = {
-  surface: 3000,
+  surface: 6100,
   call: 6000,
   bundle: 9000,
   entryPath: 8000,
@@ -389,11 +456,15 @@ export async function costWithinBudget(
       id: "I6/surface",
       severity: "warn",
       summary: `Publishing ${s.tools.length} tools costs ~${s.surfaceTokens} tokens of context before a single question is asked (budget ${budget.surface}).`,
-      evidence: s.tools
-        .slice()
-        .sort((a, b) => b.tokens - a.tokens)
-        .slice(0, 5)
-        .map((t) => `${t.name}: ~${t.tokens} tok (desc ${t.description.length}c + schema ${t.schemaChars}c)`),
+      evidence: [
+        `tools ~${s.surfaceTokens - estimateTokens(s.instructions)} tok + instructions ~${estimateTokens(s.instructions)} tok = ~${s.surfaceTokens} model-visible`,
+        `~${s.wireTokens} tok cross the wire once output schemas are counted — not budgeted, because no model is shown them`,
+        ...s.tools
+          .slice()
+          .sort((a, b) => b.tokens - a.tokens)
+          .slice(0, 5)
+          .map((t) => `${t.name}: ~${t.tokens} tok (desc ${t.description.length}c + schema ${t.schemaChars}c)`),
+      ],
     });
   }
 
@@ -457,6 +528,7 @@ export async function missesAreActionable(s: Session): Promise<InvariantResult> 
     ["get_check", { id: "check://nope/nothing-here" }],
     ["get_area_overview", { area: "no-such-area-at-all" }],
   ];
+  const routed = new Map<string, string>();
   let bound = 0;
   for (const [tool, args] of probes) {
     const t = await s.call(tool, args);
@@ -470,16 +542,35 @@ export async function missesAreActionable(s: Session): Promise<InvariantResult> 
       });
       continue;
     }
-    const namesATool = s.tools.some((x) => x.name !== tool && t.text.includes(x.name));
-    if (!namesATool) {
+    const routes = s.tools.filter((x) => x.name !== tool && t.text.includes(x.name)).map((x) => x.name);
+    if (routes.length === 0) {
       findings.push({
         id: `I7/${tool}-unrouted`,
         severity: "warn",
         summary: `${tool}'s miss message does not name another tool to try.`,
         evidence: [t.text.slice(0, 160)],
       });
+      continue;
     }
+    routed.set(tool, routes.join(","));
   }
+
+  // The route has to DIFFER by probe class. Satisfying "names some tool" with
+  // one boilerplate string appended everywhere passes the check above while
+  // telling a caller nothing — the miss reads the same whether they asked for a
+  // bad id, a bad area, or a citation into an instrument that does not exist.
+  // Without this the check degrades into "does a constant contain a substring".
+  const distinct = new Set(routed.values());
+  if (routed.size > 1 && distinct.size === 1) {
+    findings.push({
+      id: "I7/undifferentiated",
+      severity: "warn",
+      summary:
+        "Every miss routes to the same tools regardless of what was asked — the message is boilerplate, not guidance.",
+      evidence: [...routed].map(([tool, r]) => `${tool} → ${r}`),
+    });
+  }
+
   return { id: "I7", title: "Misses are actionable", applicable: bound > 0, findings };
 }
 
@@ -504,21 +595,59 @@ export async function missesAreActionable(s: Session): Promise<InvariantResult> 
  *             that cannot be quoted forces the model to open the full record,
  *             so the honest cost is search + open, not search alone.
  */
+/** A statement end: sentence terminators plus the `;` ending an enumerated point. */
+const QUOTABLE_END = /[.!?;]["')\]]?$/;
+/** An enumeration marker at the head of a fragment: "(c) ", "(iv)", "3) ". */
+const ENUM_HEAD = /^\s*\(?[a-z0-9]{1,3}\)/i;
+const flat = (s: string): string => s.replace(/\s+/g, " ").trim();
+
 /**
  * Is this excerpt something the caller can quote and answer from, or only a
  * pointer to the record it came from?
  *
- * Quotable means: the whole field (nothing was cut), or a run that ends where a
- * sentence ends. The one case this correctly refuses is a bounded window inside
- * a single sentence longer than the excerpt budget — there is no way to end
- * that at a terminator without serving the record, so it stays a pointer.
+ * Four conditions, and each one closes a way of passing the other three.
+ *
+ *  1. Truncation is derived from the SOURCE, never from the ellipsis. The two
+ *     "…" markers are a decoration makeExcerpt controls: deleting them takes
+ *     this bar from ~70% to 100% without changing a single excerpt, which is
+ *     the cheapest cheat available anywhere in the suite. When `source` is
+ *     given, "was it cut?" is a length comparison against the field itself.
+ *  2. It ends where a statement ends. A colon is NOT a statement end — it
+ *     promises an enumeration the excerpt does not carry.
+ *  3. It does not BEGIN on an enumerated limb. "(c) include an additional
+ *     margin of conservatism…" has lost the chapeau carrying its addressee and
+ *     its trigger, and quoting it is the same defect class as a confident wrong
+ *     citation.
+ *  4. It appears in the field VERBATIM. Conditions 1-3 alone are satisfied by
+ *     appending a full stop to whatever the budget cut, which would turn this
+ *     bar into a lint on the last byte.
+ *
+ * The one case this still correctly refuses is a bounded window inside a single
+ * statement longer than the excerpt budget — there is no way to end that at a
+ * boundary without serving the record, so it stays a pointer.
  */
-export function excerptIsQuotable(excerpt: string): boolean {
-  const cut = excerpt.startsWith("…") || excerpt.endsWith("…");
+export function excerptIsQuotable(excerpt: string, recordBody?: string): boolean {
   const body = excerpt.replace(/^…/, "").replace(/…$/, "").trim();
   if (body.length === 0) return false;
-  if (!cut) return true; // the complete field, however short
-  return /[.!?]["')\]]?$/.test(body);
+  const want = flat(body);
+
+  if (recordBody !== undefined) {
+    // The excerpt may come from ANY searched field — citation, text, or one of
+    // the commentary entries — and the concise projection does not say which.
+    // Find the field that actually contains it, then judge truncation against
+    // THAT field's length. Comparing against the whole record would call a
+    // short complete citation "truncated"; comparing against `text` alone
+    // would call a commentary hit "not verbatim".
+    const fields = [...recordBody.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => flat(m[1] ?? ""));
+    const host = fields.find((f) => f.includes(want));
+    if (host === undefined) return false; // (4) not verbatim in any field
+    if (host.length <= want.length) return true; // (1) nothing was cut
+  } else if (!excerpt.startsWith("…") && !excerpt.endsWith("…")) {
+    return true; // no record to check against; fall back to the marker
+  }
+
+  if (ENUM_HEAD.test(body)) return false; // (3) orphaned limb
+  return QUOTABLE_END.test(body); // (2)
 }
 
 /**
@@ -534,8 +663,30 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
 
   // Sample records from the server's own search output, then re-query using the
   // rarest words in each record's excerpt.
-  const seed = await s.call("search_regulation", { query: "requirements estimation data", limit: 10 });
-  const ids = [...seed.text.matchAll(/"id"\s*:\s*"(regulation:\/\/[^"]+)"/g)].map((m) => m[1] ?? "");
+  //
+  // Six unrelated seeds, not one. Five probes drawn from a single query is not
+  // a sample: at a true rate near the bar it quantises to five points and turns
+  // over on one record, so the same corpus and the same code could report 40%
+  // or 80% on consecutive runs. Widening the seed set is what makes the number
+  // mean something — and it costs six calls.
+  const SEED_QUERIES = [
+    "requirements estimation data",
+    "downturn calibration",
+    "margin of conservatism",
+    "definition of default days past due",
+    "rating system validation",
+    "collateral valuation haircut",
+  ];
+  const PROBE_TARGET = 24;
+
+  const ids: string[] = [];
+  for (const q of SEED_QUERIES) {
+    const seed = await s.call("search_regulation", { query: q, limit: 10 });
+    for (const m of seed.text.matchAll(/"id"\s*:\s*"(regulation:\/\/[^"]+)"/g)) {
+      const found = m[1];
+      if (found !== undefined && !ids.includes(found)) ids.push(found);
+    }
+  }
   if (ids.length === 0) {
     return {
       id: "I8",
@@ -546,7 +697,7 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
           id: "I8/no-seed",
           severity: "info",
           summary: "No regulation records were returned to sample, so retrieval could not be measured.",
-          evidence: ["search_regulation('requirements estimation data') returned no ids"],
+          evidence: [`${SEED_QUERIES.length} seed queries returned no ids`],
         },
       ],
     };
@@ -558,7 +709,7 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
   let pathTokens = 0;
   let unusableExcerpts = 0;
 
-  for (const id of ids.slice(0, 5)) {
+  for (const id of ids.slice(0, PROBE_TARGET)) {
     const rec = await s.call("get_regulation", { id });
     if (rec.isError) continue;
     const text = /"text"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(rec.text)?.[1] ?? "";
@@ -585,8 +736,17 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
     // the excerpt could not have been quoted. Charging the open unconditionally
     // measures the same number however good the excerpts get, which makes the
     // metric blind to the thing it exists to track.
-    const excerpt = /"matched_excerpt"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(back.text)?.[1] ?? "";
-    const usable = excerptIsQuotable(excerpt);
+    // Score the excerpt belonging to THIS record against THIS record's own
+    // text. Taking the first excerpt in the page scored whichever record
+    // happened to rank top, against no source at all — so the verbatim and
+    // truncation conditions had nothing to check and the bar was a lint on the
+    // last byte.
+    const own = back.text.indexOf(`"${id}"`);
+    const excerpt =
+      (own === -1
+        ? /"matched_excerpt"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(back.text)
+        : /"matched_excerpt"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(back.text.slice(own)))?.[1] ?? "";
+    const usable = excerptIsQuotable(excerpt, own === -1 ? undefined : rec.text);
     if (!usable) unusableExcerpts++;
     const topId = returned[0];
     let open = 0;
@@ -639,6 +799,248 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
 
 // ============================================================================
 
+// ============================================================================
+// I16 — a tool returns what its published schema says it returns
+// ============================================================================
+
+/**
+ * The output schema is the only machine-readable promise this server makes
+ * about the SHAPE of a response, and nothing in the toolchain checks it against
+ * the handler. `tsc` does not: a body assembled by spread satisfies the
+ * handler's return type while carrying keys the schema never names. `satisfies`
+ * does not, for the same reason. Until the envelopes were opened the only thing
+ * that noticed was a validating client, at runtime, in production — and it
+ * noticed by rejecting the response.
+ *
+ * Opening the envelopes fixed the rejection and traded it for silence: an
+ * undeclared key is now served happily and documented nowhere. So this is a
+ * warn, not a fatal — the response is usable, but a caller reading the schema
+ * to decide what to parse is reading an incomplete list.
+ *
+ * Corpus-agnostic: every probe is a tool of this server called with arguments
+ * derived from its own output.
+ */
+export async function outputMatchesDeclaredSchema(s: Session): Promise<InvariantResult> {
+  const findings: Finding[] = [];
+  const declared = new Map<string, Set<string>>();
+  for (const t of s.tools) {
+    const os = t.outputSchema as { properties?: Record<string, unknown> } | undefined;
+    if (os?.properties === undefined) continue;
+    declared.set(t.name, new Set(Object.keys(os.properties)));
+  }
+  if (declared.size === 0) {
+    return {
+      id: "I16",
+      title: "Responses match their published output schema",
+      applicable: false,
+      findings: [
+        {
+          id: "I16/no-schemas",
+          severity: "info",
+          summary: "No tool publishes an output schema, so response shape could not be checked.",
+          evidence: [`${s.tools.length} tools listed`],
+        },
+      ],
+    };
+  }
+
+  const probes: Array<[string, Record<string, unknown>]> = [
+    ["get_corpus_info", {}],
+    ["list_review_areas", {}],
+    ["list_sources", {}],
+    ["get_coverage_gaps", {}],
+    ["search_regulation", { query: "default", limit: 2 }],
+    ["search_checks", { query: "default", limit: 2 }],
+    ["search_tests", { query: "default", limit: 2 }],
+    ["search_playbooks", { query: "estimation", limit: 2 }],
+    ["resolve_citation", { text: "Article 178" }],
+  ];
+
+  let bound = 0;
+  for (const [tool, args] of probes) {
+    const want = declared.get(tool);
+    if (want === undefined) continue;
+    const t = await s.call(tool, args);
+    if (t.isError || t.json === null || typeof t.json !== "object") continue;
+    bound++;
+    const extra = Object.keys(t.json as Record<string, unknown>).filter((k) => !want.has(k));
+    if (extra.length > 0) {
+      findings.push({
+        id: `I16/${tool}`,
+        severity: "warn",
+        summary: `${tool} returns ${extra.length} key(s) its published output schema does not declare — a caller reading the schema to decide what to parse is reading an incomplete list.`,
+        evidence: [`undeclared: ${extra.join(", ")}`, `declared: ${[...want].join(", ")}`],
+      });
+    }
+  }
+
+  return {
+    id: "I16",
+    title: "Responses match their published output schema",
+    applicable: bound > 0,
+    findings,
+  };
+}
+
+// ============================================================================
+// I9 — a citation written the way a regulator writes it is answered
+// ============================================================================
+
+/** The numbers in a citation, in order: "Article 181(1)(b)" → ["181","1","b"]. */
+const citationNumbers = (s: string): string[] =>
+  [...s.matchAll(/\d+[a-z]?|\([a-z0-9]{1,3}\)/gi)].map((m) => m[0].replace(/[()]/g, "").toLowerCase());
+
+/**
+ * A corpus stored at one granularity is asked for another, constantly. Every
+ * regulator, every bank and every supervisor writes "Article 181(1)(b)"; a
+ * corpus holding whole articles has no record at that address. Returning a bare
+ * miss for it is the single most consequential refusal this server makes,
+ * because the caller knows the provision exists and concludes the corpus is
+ * useless for it — then answers from memory.
+ *
+ * Corpus-agnostic: the probes are built by taking citations the server itself
+ * hands out and asking one level deeper than whatever it published.
+ *
+ * The guard is what keeps this from being satisfied cheaply. "Return the
+ * containing document for everything" would pass a bare does-it-answer check,
+ * so every candidate must be a NUMERIC PREFIX of the probe — a container, not
+ * a neighbour and not the whole document.
+ */
+export async function humanRegisterCitationsResolve(s: Session): Promise<InvariantResult> {
+  const findings: Finding[] = [];
+  const seen = new Set<string>();
+  for (const q of ["default", "estimation", "downturn", "validation"]) {
+    const t = await s.call("search_regulation", { query: q, limit: 10 });
+    for (const m of t.text.matchAll(/"citation"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
+      const c = m[1];
+      if (c !== undefined && /\d/.test(c) && !/\(/.test(c)) seen.add(c);
+    }
+  }
+  const bases = [...seen].slice(0, 8);
+  if (bases.length === 0) {
+    return {
+      id: "I9",
+      title: "Citations in the human register are answered or explained",
+      applicable: false,
+      findings: [
+        {
+          id: "I9/no-citations",
+          severity: "info",
+          summary: "No numbered, unbracketed citations were observed to deepen into a probe.",
+          evidence: ["searched 4 terms over search_regulation"],
+        },
+      ],
+    };
+  }
+
+  let bound = 0;
+  for (const base of bases) {
+    const probe = `${base}(1)`;
+    const r = await s.call("resolve_citation", { text: probe });
+    if (r.isError) continue;
+    bound++;
+    const body = (r.json ?? {}) as {
+      match?: { id?: string } | null;
+      candidates?: Array<{ id?: string; citation?: string }>;
+      coverage_note?: string;
+    };
+    const answered =
+      (body.match ?? null) !== null ||
+      (body.candidates ?? []).length > 0 ||
+      (body.coverage_note ?? "").length > 0;
+    if (!answered) {
+      findings.push({
+        id: "I9/bare-miss",
+        severity: "fatal",
+        summary: `resolve_citation("${probe}") returns nothing at all — no match, no candidate, no reason. The caller cannot tell "not in this corpus" from "I did not understand you".`,
+        evidence: [r.text.slice(0, 200)],
+      });
+      continue;
+    }
+    // A candidate must be RELATED to the probe by numbering, in one of the two
+    // directions the resolver is allowed to offer: a container (its numbering
+    // is a prefix of the probe's), or a narrower provision under it (the
+    // probe's is a prefix of its). Equal numbering — the ambiguity case — is
+    // both. Anything else is a NEIGHBOUR: a different provision that merely
+    // looks similar, offered as though it answered the question. That is the
+    // fabrication this server exists not to do, one step removed.
+    const want = citationNumbers(probe);
+    const prefixOf = (a: string[], b: string[]): boolean =>
+      a.length > 0 && a.length <= b.length && a.every((n, i) => n === b[i]);
+    for (const c of body.candidates ?? []) {
+      const got = citationNumbers(c.citation ?? "");
+      if (prefixOf(got, want) || prefixOf(want, got)) continue;
+      findings.push({
+        id: "I9/candidate-unrelated",
+        severity: "fatal",
+        summary: `resolve_citation("${probe}") offers "${c.citation}" as a candidate, but its numbering neither contains nor sits under the citation asked for — a neighbouring provision presented as though it were related.`,
+        evidence: [`probe numbers ${JSON.stringify(want)}`, `candidate numbers ${JSON.stringify(got)}`, `id ${c.id}`],
+      });
+    }
+  }
+
+  return {
+    id: "I9",
+    title: "Citations in the human register are answered or explained",
+    applicable: bound > 0,
+    findings,
+  };
+}
+
+// ============================================================================
+// I10 — a decline is never empty
+// ============================================================================
+
+/**
+ * `resolve_citation` is allowed — required — to decline. What it may not do is
+ * decline in silence: `{match: null}` with no reason is indistinguishable from
+ * a malformed request, and it is returned at the exact moment the caller is
+ * deciding whether to look elsewhere or fill the gap from memory.
+ *
+ * The guard: the note must QUOTE the caller's own string or one of its numbers.
+ * One constant "not found in this corpus" would otherwise satisfy the check
+ * while carrying no information about what was asked.
+ */
+export async function declinesAreNeverEmpty(s: Session): Promise<InvariantResult> {
+  const findings: Finding[] = [];
+  const probes = [
+    "Article 999999",
+    "Regulation (EU) 2099/930",
+    "the RTS on economic downturn",
+    "Regulation (EU) xx/xx [RTS on economic downturn]",
+  ];
+  let bound = 0;
+  for (const probe of probes) {
+    const r = await s.call("resolve_citation", { text: probe });
+    if (r.isError) continue;
+    const body = (r.json ?? {}) as { match?: unknown; coverage_note?: string };
+    if ((body.match ?? null) !== null) continue; // resolved; not a decline
+    bound++;
+    const note = body.coverage_note ?? "";
+    if (note.length === 0) {
+      findings.push({
+        id: "I10/silent-decline",
+        severity: "fatal",
+        summary: `resolve_citation("${probe}") declines with no reason at all — the caller cannot tell a coverage boundary from a malformed citation.`,
+        evidence: [r.text.slice(0, 200)],
+      });
+      continue;
+    }
+    const numbers = citationNumbers(probe);
+    const quotesInput =
+      note.includes(probe) || numbers.some((n) => n.length > 1 && note.includes(n));
+    if (!quotesInput) {
+      findings.push({
+        id: "I10/generic-decline",
+        severity: "warn",
+        summary: `resolve_citation("${probe}") declines with a note that never refers to what was asked — boilerplate satisfies "has a reason" while explaining nothing.`,
+        evidence: [note.slice(0, 200)],
+      });
+    }
+  }
+  return { id: "I10", title: "A decline is never empty", applicable: bound > 0, findings };
+}
+
 export const ALL = [
   envelopeIsJson,
   describedIdsResolve,
@@ -648,4 +1050,7 @@ export const ALL = [
   costWithinBudget,
   missesAreActionable,
   selfRetrievalIsAffordable,
+  outputMatchesDeclaredSchema,
+  humanRegisterCitationsResolve,
+  declinesAreNeverEmpty,
 ] as const;

@@ -24,7 +24,7 @@ const ConciseCheckHit = z.object({
   name: z.string(),
   expectation_first_sentence: z.string(),
   derived_from: z.array(regulationIdSchema).describe("Regulations this check operationalises"),
-});
+}).passthrough();
 
 export function registerCheckTools(server: McpServer): void {
   server.registerTool(
@@ -68,7 +68,7 @@ export function registerCheckTools(server: McpServer): void {
           "A check id from search_checks, get_area_overview or a playbook reference — shape check://{document}/{slug}",
         ),
       },
-      outputSchema: CheckSchema,
+      outputSchema: CheckSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async ({ id }) => {

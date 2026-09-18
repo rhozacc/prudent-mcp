@@ -15,9 +15,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
-      - run: bun run typecheck
-      - run: bun test
-      # Lints the demo corpus. It prints one intentional staleness warning
-      # (advisory currency finding) and still exits 0 — warnings must never
-      # fail CI; only integrity violations do.
-      - run: bun run validate
+      # ONE definition of the gate: typecheck + tests + linter + context evals.
+      # CI used to run the first three as separate steps and never invoke
+      # test:ci, so `evals` — the only suite that measures what a model is
+      # actually handed — ran in no workflow at all, while the docs described
+      # it as a gate. Running the script itself is what stops the two drifting
+      # again: adding a check to test:ci now adds it to CI by construction.
+      #
+      # `validate` lints the demo corpus and prints one intentional staleness
+      # warning (an advisory currency finding) while still exiting 0 — warnings
+      # must never fail CI; only integrity violations do. Same rule for evals:
+      # a fatal finding fails, a warn does not.
+      #
+      # This runs against the DEMO corpus, which cannot bind I2 or I3 and
+      # reports them `n/a` rather than passing them. That is the honest limit
+      # of what an open-source repo holding no corpus can check; the real
+      # corpus is evaluated in prudent-corpus, where a failing log may name
+      # record content and this repo is public.
+      - run: bun run test:ci

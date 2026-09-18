@@ -192,9 +192,22 @@ export function searchInputShape(fieldsDoc: string) {
   };
 }
 
-/** The shared output shape for the four search_* tools. */
+/**
+ * The shared output schema for the four search_* tools.
+ *
+ * `.passthrough()` is load-bearing, not tidiness. The SDK publishes a declared
+ * output schema with `additionalProperties: false`, so a client that validates
+ * structured content REJECTS any response carrying a key the schema does not
+ * name. That makes every future additive field — a document stamp, a coverage
+ * note, a per-row provenance marker — a breaking change for exactly the callers
+ * who are strictest about correctness. Opening the envelope first means later
+ * fields are additive in fact and not only in intent.
+ *
+ * It does not weaken anything: the handler still builds the body, and the named
+ * keys below are still typed and still required.
+ */
 export function searchOutputShape(resultItem: z.ZodTypeAny) {
-  return {
+  return z.object({
     results: z.array(resultItem).describe("One page of ranked matches, best first."),
     returned: z.number().int().describe("Rows in this page."),
     total_matches: z
@@ -209,7 +222,7 @@ export function searchOutputShape(resultItem: z.ZodTypeAny) {
       .nullable()
       .describe("Offset for the next page; null when this page is the last."),
     notice: z.string().optional().describe("Guidance about this result set, when there is any."),
-  };
+  }).passthrough();
 }
 
 // --- Input leniency ----------------------------------------------------------

@@ -24,7 +24,7 @@ const ConciseTestHit = z.object({
   name: z.string(),
   family: z.string().optional().describe("Equivalence group across bank-specific variants"),
   purpose_first_sentence: z.string(),
-});
+}).passthrough();
 
 export function registerTestTools(server: McpServer): void {
   server.registerTool(
@@ -69,7 +69,7 @@ export function registerTestTools(server: McpServer): void {
           "A test id from search_tests or a playbook reference — shape test://{document}/{slug}",
         ),
       },
-      outputSchema: TestSchema,
+      outputSchema: TestSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async ({ id }) => {

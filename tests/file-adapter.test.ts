@@ -345,6 +345,50 @@ describe("regulation.get(id, asOf) with regulation_history", () => {
   });
 });
 
+describe("regulation.get(id, asOf) against a corpus with no history", () => {
+  // The registry knows when each document was published even when no provision
+  // carries version history, and that is enough to stop `as_of` lying. Serving
+  // today's text for a date before the document existed is the failure the
+  // tool's own description rules out ("never current text as historical"), and
+  // a validator's commonest question is what applied at an approval date.
+  const dated = {
+    ...fullCorpus,
+    sources: [
+      {
+        ...fullCorpus.sources[0]!,
+        id: "source://eba/gl-x",
+        framework: "eba",
+        document_id: "eba-gl-x",
+        published: "2020-01-01",
+      },
+    ],
+  };
+  const id = "regulation://eba/gl-x/1" as Parameters<
+    ReturnType<typeof createFileAdapters>["regulation"]["get"]
+  >[0];
+
+  it("refuses a date before the document was published", async () => {
+    const a = createFileAdapters(loadCorpusFile(writeCorpus("asof-dated.json", dated)));
+    expect(await a.regulation.get(id, "2016-01-01")).toBeNull();
+  });
+
+  it("serves the current text from the publication date onward", async () => {
+    const a = createFileAdapters(loadCorpusFile(writeCorpus("asof-dated.json", dated)));
+    expect((await a.regulation.get(id, "2020-01-01"))?.id).toBe(id);
+    expect((await a.regulation.get(id, "2026-01-01"))?.id).toBe(id);
+    expect((await a.regulation.get(id))?.id).toBe(id);
+  });
+
+  it("is unchanged when the registry gives no date for the document", async () => {
+    // A corpus that says nothing about when a document existed keeps its
+    // pre-existing behaviour exactly: absent is not a claim.
+    const undatedSource = { ...dated.sources[0]! };
+    delete (undatedSource as { published?: string }).published;
+    const a = createFileAdapters(loadCorpusFile(writeCorpus("asof-undated.json", { ...dated, sources: [undatedSource] })));
+    expect((await a.regulation.get(id, "1999-01-01"))?.id).toBe(id);
+  });
+});
+
 // ── resolveCitationDetailed — the deterministic citation matcher ──────────────
 //
 // The bar is honesty before recall: a citation this corpus cannot place must
@@ -423,6 +467,94 @@ describe("resolveCitationDetailed", () => {
     expect(foreign.coverage_note).toContain("9999/9999");
   });
 
+  it("sees post-2015 EU numbering, and cites each era the way it is written", () => {
+    // Acts were numbered serial/YEAR until 2015 and YEAR/serial after it. A gate
+    // requiring a four-digit SECOND number is blind to every act adopted since,
+    // and the miss then falls through to the numeric spine rules — which is how
+    // asking for a real instrument came back "nothing is numbered 2021.930",
+    // a malformed-citation shape rather than a coverage boundary.
+    const modern = resolveCitationDetailed(regs, "Commission Delegated Regulation (EU) 2021/930");
+    expect(modern.match).toBeNull();
+    expect(modern.coverage_note).toContain("holds no Regulation (EU) 2021/930");
+    // And never the pre-2015 "No" on a post-2015 act: that is a wrong citation
+    // of a real instrument, emitted by the one path whose job is not guessing.
+    expect(modern.coverage_note).not.toContain("No 2021/930");
+
+    const legacy = resolveCitationDetailed(regs, "Article 5 of Regulation (EU) No 1093/2010");
+    expect(legacy.match).toBeNull();
+    expect(legacy.coverage_note).toContain("Regulation (EU) No 1093/2010");
+  });
+
+  it("names the CONTAINING provision when the corpus is coarser than the citation", () => {
+    // The mirror of the narrower-relatives rule. The CRR is stored at whole-
+    // article granularity while most cross-references to it are bracketed
+    // sub-article points, so "Article 180(1)(b)" — a point served verbatim
+    // inside Article 180 — used to come back as a bare miss.
+    const r = resolveCitationDetailed(regs, "CRR Article 180(1)(b)");
+    expect(r.match).toBeNull(); // still a decline: matching is not loosened
+    expect(r.confidence).toBe("none");
+    expect(r.candidates.map((c) => c.id)).toContain("regulation://crr/180");
+    expect(r.coverage_note).toContain("Article 180");
+
+    // The NARROWEST container is offered first: 180(1)(a) is held, so a point
+    // under it leads with that rather than with the whole article.
+    const deeper = resolveCitationDetailed(regs, "CRR Article 180(1)(a)(2)");
+    expect(deeper.match).toBeNull();
+    expect(deeper.candidates.map((c) => c.id)).toEqual([
+      "regulation://crr/180/1/a",
+      "regulation://crr/180",
+    ]);
+  });
+
+  it("a bracketed point is not the same address as a concatenated number", () => {
+    // Tokens were joined with no separator, so "Article 4(1)" and "Article 41"
+    // both became "article41" — a sub-point silently became a different
+    // article. On the real corpus that offered EBA "Paragraph 41" as the answer
+    // to a question about CRR Article 4(1).
+    const both = [
+      cite("regulation://crr/4", "Article 4"),
+      cite("regulation://gl/41", "Paragraph 41", "eba-gl-2017-16"),
+    ];
+    const r = resolveCitationDetailed(both, "Article 4(1)");
+    expect(r.match).toBeNull();
+    expect(r.candidates.map((c) => c.id)).not.toContain("regulation://gl/41");
+    expect(r.candidates.map((c) => c.id)).toContain("regulation://crr/4");
+  });
+
+  it("resolves an inserted article, and refuses a point inside one", () => {
+    // The CRR is full of inserted articles — 325bd, 104a, 449a. A spine that
+    // keeps only bare digits drops the suffix, which does not lose precision so
+    // much as RENUMBER the citation: "Article 325az(7)" reduced to ["7"] and
+    // resolved, confidently, to Article 7.
+    const inserted = [cite("regulation://crr/325az", "Article 325az"), cite("regulation://crr/7", "Article 7")];
+    expect(resolveCitationDetailed(inserted, "Article 325az").match?.id).toBe("regulation://crr/325az");
+    const point = resolveCitationDetailed(inserted, "Article 325az(7)");
+    expect(point.match).toBeNull();
+    expect(point.candidates.map((c) => c.id)).toEqual(["regulation://crr/325az"]);
+  });
+
+  it("a record whose numbering the spine cannot represent contains nothing", () => {
+    // "Section P3.TIV.C1b.S2b-3" reduces to ["3"], which is a prefix of every
+    // longer spine — so it would offer itself as the provision containing
+    // anything numbered 3.
+    const structural = [
+      cite("regulation://crr/section-P3.TIV.C1b.S2b-3", "Section P3.TIV.C1b.S2b-3"),
+    ];
+    const r = resolveCitationDetailed(structural, "Chapter 3, paragraph 240(1)");
+    expect(r.match).toBeNull();
+    expect(r.candidates).toEqual([]);
+  });
+
+  it("a record whose citation carries no numbers contains nothing", () => {
+    // Without the guard an unnumbered record is a prefix of every spine, so it
+    // would claim to contain every citation in the corpus.
+    const withPreamble = [...regs, cite("regulation://crr/preamble", "Preamble")];
+    const r = resolveCitationDetailed(withPreamble, "CRR Article 999(1)");
+    expect(r.match).toBeNull();
+    expect(r.candidates).toEqual([]);
+    expect(r.coverage_note).toContain("Nothing in this corpus is numbered");
+  });
+
   it("reports ambiguity across documents rather than picking one", () => {
     const twoDocs = [
       cite("regulation://gl-2017-16/article-78", "Article 78", "eba-gl-2017-16"),
@@ -494,8 +626,44 @@ describe("resolveCitationDetailed", () => {
     ];
     const r = resolveCitationDetailed(citing, "CRR Article 178");
     expect(r.match).toBeNull();
-    expect(r.coverage_note).toContain("1 records do cite it");
-    expect(r.coverage_note).toContain("get_referrers");
+    // The refusal NAMES the records rather than counting them: a count tells
+    // the caller something exists, an id lets them open it.
+    expect(r.coverage_note).toContain("1 served record(s) name it");
+    expect(r.coverage_note).toContain("regulation://gl-2017-16/article-78");
+  });
+
+  it("names records that mention an instrument only in their text", () => {
+    // `cites[].framework` holds only the named frameworks the extractor knows,
+    // so it can never route out for a numbered act. Scanning the served text is
+    // what makes the other instruments reachable — and it is the moment that
+    // matters, because a refusal naming no way out is when a model stops
+    // looking and fills the gap from memory.
+    const mentions = [
+      cite("regulation://egim/3.298", "Chapter 3, paragraph 298", "ecb-guide-internal-models"),
+    ];
+    mentions[0]!.text =
+      "Characterise an economic downturn in accordance with the Commission Delegated " +
+      "Regulation (EU) No 2021/930.";
+    const r = resolveCitationDetailed(mentions, "Commission Delegated Regulation (EU) 2021/930");
+    expect(r.match).toBeNull();
+    expect(r.coverage_note).toContain("regulation://egim/3.298");
+    // And it says what the instrument IS — the half a model otherwise supplies
+    // from memory, and the half it gets wrong.
+    expect(r.coverage_note).toContain("regulatory technical standard");
+    expect(r.coverage_note).toContain("Article 181(3)(a)");
+    expect(r.coverage_note).toContain("do not state its requirements");
+  });
+
+  it("explains a citation with no provision number instead of returning a bare null", () => {
+    // A document name on its own used to return {match:null} and nothing else —
+    // strictly less than an instrument the corpus does NOT hold received.
+    const held = resolveCitationDetailed(regs, "eba-gl-2017-16");
+    expect(held.match).toBeNull();
+    expect(held.coverage_note).toContain("names a document this corpus holds");
+
+    const unknown = resolveCitationDetailed(regs, "the RTS on economic downturn");
+    expect(unknown.match).toBeNull();
+    expect(unknown.coverage_note).toContain("no provision number");
   });
 
   it("is what the file adapter's meta.resolveCitation delegates to", async () => {

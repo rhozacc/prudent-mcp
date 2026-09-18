@@ -330,7 +330,7 @@ export function registerMetaTools(server: McpServer): void {
         "whose verified date is older than 30 days; follow up with list_sources, then " +
         "list_review_areas to map a task onto the corpus.",
       inputSchema: {},
-      outputSchema: CorpusInfoSchema,
+      outputSchema: CorpusInfoSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async () => ok(await adapters.meta.info()),
@@ -354,7 +354,7 @@ export function registerMetaTools(server: McpServer): void {
       inputSchema: {
         id: z.string().describe("Any content-surface ID — regulation://, test://, check://, or playbook://."),
       },
-      outputSchema: ReferrersSchema,
+      outputSchema: ReferrersSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async ({ id }) => {
@@ -397,7 +397,7 @@ export function registerMetaTools(server: McpServer): void {
       inputSchema: {
         text: z.string().describe("A loose, human-prose citation."),
       },
-      outputSchema: CitationResolutionSchema.shape,
+      outputSchema: CitationResolutionSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async ({ text }) => ok(await adapters.meta.resolveCitation(text)),
@@ -408,15 +408,24 @@ export function registerMetaTools(server: McpServer): void {
     {
       title: "List review areas",
       description:
-        "The taxonomy of review areas — START HERE to map a real-world task " +
-        "('I'm reviewing LGD calibration') onto the corpus's structure, then feed an area id " +
-        "to get_area_overview for the one-shot bundle of playbooks, checks and regulation. " +
+        // "START HERE", plus an example phrased as the user's own question,
+        // made this the default first call for anything that sounded like a
+        // review task — and an area is only as wide as the playbooks that
+        // minted it, so the funnel ended in one document's table of contents
+        // with no signal that the rest of the corpus existed. The tool is still
+        // the right entry for a whole-area walkthrough; it is not the right
+        // entry for a specific question.
+        "The taxonomy of review areas — the entry point when the task is a WHOLE AREA and you want its " +
+        "playbooks, checks and regulation in one bundle: take an area id from here to get_area_overview. " +
+        "For a specific question, search the surfaces directly instead; an area is derived from the " +
+        "playbooks a backend authored, so it reflects how the corpus was written up rather than everything " +
+        "the corpus holds on a subject, and it may draw on fewer documents than the corpus covers. " +
         "Returns { areas: [{ id, name, parent, children }] }; ids are dotted slugs and a " +
         "child id is prefixed by its parent's. Backends that author no taxonomy get one " +
         "derived from the playbooks present, so this is never empty for a corpus that has " +
         "any.",
       inputSchema: {},
-      outputSchema: { areas: z.array(ReviewAreaSchema) },
+      outputSchema: z.object({ areas: z.array(ReviewAreaSchema) }).passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async () => ok({ areas: await adapters.meta.taxonomy() }),
@@ -628,13 +637,15 @@ export function registerMetaTools(server: McpServer): void {
         "coverage from its children. The aggregate inverse of get_referrers — follow up with " +
         "get_regulation on any uncovered id.",
       inputSchema: {},
-      outputSchema: {
-        total_regulations: z.number().int(),
-        covered: z.number().int(),
-        uncovered: z.array(
-          z.object({ id: regulationIdSchema, citation: z.string(), is_leaf: z.boolean() }),
-        ),
-      },
+      outputSchema: z
+        .object({
+          total_regulations: z.number().int(),
+          covered: z.number().int(),
+          uncovered: z.array(
+            z.object({ id: regulationIdSchema, citation: z.string(), is_leaf: z.boolean() }),
+          ),
+        })
+        .passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async () => {

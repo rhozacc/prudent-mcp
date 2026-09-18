@@ -65,7 +65,14 @@ export interface SearchMatch<T> {
   coverage: number;
   /** Distinct tokens in the query, so `coverage` can be read as a fraction. */
   query_tokens: number;
-  matched: { field: string; excerpt: string };
+  /**
+   * `field_chars` is the length of the field the excerpt was cut from, so a
+   * caller can derive whether it was truncated from server-side truth rather
+   * than from the presence of an ellipsis. The ellipses are a decoration
+   * makeExcerpt controls: deleting them would take any "is this excerpt
+   * complete?" check from 63% to 100% without changing a single excerpt.
+   */
+  matched: { field: string; excerpt: string; field_chars: number };
 }
 
 /**
@@ -138,6 +145,41 @@ function countOccurrences(
   }
   return { total, whole, first };
 }
+
+/**
+ * A position a quotation may end on — used ONLY by the long-sentence fallback
+ * in makeExcerpt, never by sentenceSpans.
+ *
+ * Sentence terminators, plus the `;` that ends a point of a legal enumeration:
+ * in an instrument that numbers its obligations "(a) …; (b) …;" the point, not
+ * the paragraph, is the unit of meaning.
+ *
+ * A colon is deliberately NOT one. "…shall apply the following requirements:"
+ * promises an enumeration the excerpt does not carry, and 7.9% of snapped
+ * excerpts land there. A comma is not one either: "…, where one" is not a
+ * statement.
+ *
+ * And sentenceSpans must keep its sentence-only rule. Delegating to this would
+ * split every enumerated paragraph into limbs, which raises excerpts that BEGIN
+ * on an orphaned "(c) …" — stripped of the chapeau carrying their addressee and
+ * trigger — from 3.3% to 15.4%. That is the same defect class as a confident
+ * wrong citation.
+ */
+function isClauseEnd(text: string, i: number): boolean {
+  const ch = text[i] ?? "";
+  if (ch !== "." && ch !== "!" && ch !== "?" && ch !== ";") return false;
+  const after = text[i + 1];
+  return after === undefined || after === " " || after === "\n" || after === "\t";
+}
+
+/**
+ * How far past the budget the fallback may run to reach a clause end, rather
+ * than stop mid-clause. Past this the caller is better served by the record.
+ */
+const EXCERPT_OVERRUN = 560;
+
+/** An enumeration marker at the head of a fragment: "(c) ", "(iv)", "3) ". */
+const ENUM_HEAD = /^\s*\(?[a-z0-9]{1,3}\)/i;
 
 /**
  * Sentence spans of a field, as [start, end) pairs covering the whole string.
@@ -224,6 +266,30 @@ function makeExcerpt(text: string, hits: number[]): string {
     end = Math.min(centreSpan[1], start + EXCERPT_WINDOW);
     while (start > centreSpan[0] && isAlphanumeric(text[start - 1] ?? "") && isAlphanumeric(text[start] ?? "")) start--;
     while (end < centreSpan[1] && isAlphanumeric(text[end - 1] ?? "") && isAlphanumeric(text[end] ?? "")) end++;
+
+    // Snap the tail back to a clause end inside the window, keeping the hit.
+    // Without this the excerpt ends wherever the character count ran out, which
+    // is why ~44% of hits — the share of regulation text living in enumerated
+    // paragraphs longer than the window — could never be quoted.
+    let snapped = false;
+    for (let i = end - 1; i > centre; i--) {
+      if (isClauseEnd(text, i)) { end = i + 1; snapped = true; break; }
+    }
+    if (!snapped) {
+      const reach = Math.min(centreSpan[1], centre + EXCERPT_OVERRUN);
+      for (let i = end; i < reach; i++) if (isClauseEnd(text, i)) { end = i + 1; break; }
+    }
+    // Snap the head forward, but never ONTO an enumerated limb: "(c) include an
+    // additional margin of conservatism…" without its chapeau has lost the
+    // addressee and the trigger. Keep the wider start instead.
+    for (let i = start; i < centre; i++) {
+      if (!isClauseEnd(text, i)) continue;
+      const cand = i + 1;
+      if (ENUM_HEAD.test(text.slice(cand, cand + 8))) break;
+      start = cand;
+      break;
+    }
+    while (start < end && /\s/.test(text[start] ?? "")) start++;
   }
 
   return `${start > 0 ? "…" : ""}${text.slice(start, end).trim()}${end < text.length ? "…" : ""}`;
@@ -291,7 +357,11 @@ export function rankedSearch<T>(
         score: total,
         coverage: covered.size,
         query_tokens: tokens.length,
-        matched: { field: best.field, excerpt: makeExcerpt(best.text, best.hits) },
+        matched: {
+          field: best.field,
+          excerpt: makeExcerpt(best.text, best.hits),
+          field_chars: best.text.length,
+        },
         order,
       });
     }

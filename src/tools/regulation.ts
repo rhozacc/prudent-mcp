@@ -34,7 +34,7 @@ const ConciseRegulationHit = z.object({
   // it states a requirement or guidance.
   kind: ProvisionKindSchema.optional(),
   obligation: z.enum(["must", "should", "may", "none"]).optional(),
-});
+}).passthrough();
 
 /**
  * Commentary a `detail: 'full'` search row carries before it starts crowding out
@@ -134,7 +134,7 @@ export function registerRegulationTools(server: McpServer): void {
         ),
         as_of: z.string().date().optional().describe("ISO date, e.g. 2019-03-01"),
       },
-      outputSchema: RegulationSchema,
+      outputSchema: RegulationSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async ({ id, as_of }) => {
