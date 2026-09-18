@@ -494,6 +494,7 @@ export async function missesAreActionable(s: Session): Promise<InvariantResult> 
     ["get_check", { id: "check://nope/nothing-here" }],
     ["get_area_overview", { area: "no-such-area-at-all" }],
   ];
+  const routed = new Map<string, string>();
   let bound = 0;
   for (const [tool, args] of probes) {
     const t = await s.call(tool, args);
@@ -507,16 +508,35 @@ export async function missesAreActionable(s: Session): Promise<InvariantResult> 
       });
       continue;
     }
-    const namesATool = s.tools.some((x) => x.name !== tool && t.text.includes(x.name));
-    if (!namesATool) {
+    const routes = s.tools.filter((x) => x.name !== tool && t.text.includes(x.name)).map((x) => x.name);
+    if (routes.length === 0) {
       findings.push({
         id: `I7/${tool}-unrouted`,
         severity: "warn",
         summary: `${tool}'s miss message does not name another tool to try.`,
         evidence: [t.text.slice(0, 160)],
       });
+      continue;
     }
+    routed.set(tool, routes.join(","));
   }
+
+  // The route has to DIFFER by probe class. Satisfying "names some tool" with
+  // one boilerplate string appended everywhere passes the check above while
+  // telling a caller nothing — the miss reads the same whether they asked for a
+  // bad id, a bad area, or a citation into an instrument that does not exist.
+  // Without this the check degrades into "does a constant contain a substring".
+  const distinct = new Set(routed.values());
+  if (routed.size > 1 && distinct.size === 1) {
+    findings.push({
+      id: "I7/undifferentiated",
+      severity: "warn",
+      summary:
+        "Every miss routes to the same tools regardless of what was asked — the message is boilerplate, not guidance.",
+      evidence: [...routed].map(([tool, r]) => `${tool} → ${r}`),
+    });
+  }
+
   return { id: "I7", title: "Misses are actionable", applicable: bound > 0, findings };
 }
 
@@ -828,6 +848,165 @@ export async function outputMatchesDeclaredSchema(s: Session): Promise<Invariant
   };
 }
 
+// ============================================================================
+// I9 — a citation written the way a regulator writes it is answered
+// ============================================================================
+
+/** The numbers in a citation, in order: "Article 181(1)(b)" → ["181","1","b"]. */
+const citationNumbers = (s: string): string[] =>
+  [...s.matchAll(/\d+[a-z]?|\([a-z0-9]{1,3}\)/gi)].map((m) => m[0].replace(/[()]/g, "").toLowerCase());
+
+/**
+ * A corpus stored at one granularity is asked for another, constantly. Every
+ * regulator, every bank and every supervisor writes "Article 181(1)(b)"; a
+ * corpus holding whole articles has no record at that address. Returning a bare
+ * miss for it is the single most consequential refusal this server makes,
+ * because the caller knows the provision exists and concludes the corpus is
+ * useless for it — then answers from memory.
+ *
+ * Corpus-agnostic: the probes are built by taking citations the server itself
+ * hands out and asking one level deeper than whatever it published.
+ *
+ * The guard is what keeps this from being satisfied cheaply. "Return the
+ * containing document for everything" would pass a bare does-it-answer check,
+ * so every candidate must be a NUMERIC PREFIX of the probe — a container, not
+ * a neighbour and not the whole document.
+ */
+export async function humanRegisterCitationsResolve(s: Session): Promise<InvariantResult> {
+  const findings: Finding[] = [];
+  const seen = new Set<string>();
+  for (const q of ["default", "estimation", "downturn", "validation"]) {
+    const t = await s.call("search_regulation", { query: q, limit: 10 });
+    for (const m of t.text.matchAll(/"citation"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
+      const c = m[1];
+      if (c !== undefined && /\d/.test(c) && !/\(/.test(c)) seen.add(c);
+    }
+  }
+  const bases = [...seen].slice(0, 8);
+  if (bases.length === 0) {
+    return {
+      id: "I9",
+      title: "Citations in the human register are answered or explained",
+      applicable: false,
+      findings: [
+        {
+          id: "I9/no-citations",
+          severity: "info",
+          summary: "No numbered, unbracketed citations were observed to deepen into a probe.",
+          evidence: ["searched 4 terms over search_regulation"],
+        },
+      ],
+    };
+  }
+
+  let bound = 0;
+  for (const base of bases) {
+    const probe = `${base}(1)`;
+    const r = await s.call("resolve_citation", { text: probe });
+    if (r.isError) continue;
+    bound++;
+    const body = (r.json ?? {}) as {
+      match?: { id?: string } | null;
+      candidates?: Array<{ id?: string; citation?: string }>;
+      coverage_note?: string;
+    };
+    const answered =
+      (body.match ?? null) !== null ||
+      (body.candidates ?? []).length > 0 ||
+      (body.coverage_note ?? "").length > 0;
+    if (!answered) {
+      findings.push({
+        id: "I9/bare-miss",
+        severity: "fatal",
+        summary: `resolve_citation("${probe}") returns nothing at all — no match, no candidate, no reason. The caller cannot tell "not in this corpus" from "I did not understand you".`,
+        evidence: [r.text.slice(0, 200)],
+      });
+      continue;
+    }
+    // A candidate must be RELATED to the probe by numbering, in one of the two
+    // directions the resolver is allowed to offer: a container (its numbering
+    // is a prefix of the probe's), or a narrower provision under it (the
+    // probe's is a prefix of its). Equal numbering — the ambiguity case — is
+    // both. Anything else is a NEIGHBOUR: a different provision that merely
+    // looks similar, offered as though it answered the question. That is the
+    // fabrication this server exists not to do, one step removed.
+    const want = citationNumbers(probe);
+    const prefixOf = (a: string[], b: string[]): boolean =>
+      a.length > 0 && a.length <= b.length && a.every((n, i) => n === b[i]);
+    for (const c of body.candidates ?? []) {
+      const got = citationNumbers(c.citation ?? "");
+      if (prefixOf(got, want) || prefixOf(want, got)) continue;
+      findings.push({
+        id: "I9/candidate-unrelated",
+        severity: "fatal",
+        summary: `resolve_citation("${probe}") offers "${c.citation}" as a candidate, but its numbering neither contains nor sits under the citation asked for — a neighbouring provision presented as though it were related.`,
+        evidence: [`probe numbers ${JSON.stringify(want)}`, `candidate numbers ${JSON.stringify(got)}`, `id ${c.id}`],
+      });
+    }
+  }
+
+  return {
+    id: "I9",
+    title: "Citations in the human register are answered or explained",
+    applicable: bound > 0,
+    findings,
+  };
+}
+
+// ============================================================================
+// I10 — a decline is never empty
+// ============================================================================
+
+/**
+ * `resolve_citation` is allowed — required — to decline. What it may not do is
+ * decline in silence: `{match: null}` with no reason is indistinguishable from
+ * a malformed request, and it is returned at the exact moment the caller is
+ * deciding whether to look elsewhere or fill the gap from memory.
+ *
+ * The guard: the note must QUOTE the caller's own string or one of its numbers.
+ * One constant "not found in this corpus" would otherwise satisfy the check
+ * while carrying no information about what was asked.
+ */
+export async function declinesAreNeverEmpty(s: Session): Promise<InvariantResult> {
+  const findings: Finding[] = [];
+  const probes = [
+    "Article 999999",
+    "Regulation (EU) 2099/930",
+    "the RTS on economic downturn",
+    "Regulation (EU) xx/xx [RTS on economic downturn]",
+  ];
+  let bound = 0;
+  for (const probe of probes) {
+    const r = await s.call("resolve_citation", { text: probe });
+    if (r.isError) continue;
+    const body = (r.json ?? {}) as { match?: unknown; coverage_note?: string };
+    if ((body.match ?? null) !== null) continue; // resolved; not a decline
+    bound++;
+    const note = body.coverage_note ?? "";
+    if (note.length === 0) {
+      findings.push({
+        id: "I10/silent-decline",
+        severity: "fatal",
+        summary: `resolve_citation("${probe}") declines with no reason at all — the caller cannot tell a coverage boundary from a malformed citation.`,
+        evidence: [r.text.slice(0, 200)],
+      });
+      continue;
+    }
+    const numbers = citationNumbers(probe);
+    const quotesInput =
+      note.includes(probe) || numbers.some((n) => n.length > 1 && note.includes(n));
+    if (!quotesInput) {
+      findings.push({
+        id: "I10/generic-decline",
+        severity: "warn",
+        summary: `resolve_citation("${probe}") declines with a note that never refers to what was asked — boilerplate satisfies "has a reason" while explaining nothing.`,
+        evidence: [note.slice(0, 200)],
+      });
+    }
+  }
+  return { id: "I10", title: "A decline is never empty", applicable: bound > 0, findings };
+}
+
 export const ALL = [
   envelopeIsJson,
   describedIdsResolve,
@@ -838,4 +1017,6 @@ export const ALL = [
   missesAreActionable,
   selfRetrievalIsAffordable,
   outputMatchesDeclaredSchema,
+  humanRegisterCitationsResolve,
+  declinesAreNeverEmpty,
 ] as const;

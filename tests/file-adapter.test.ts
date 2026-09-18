@@ -506,6 +506,45 @@ describe("resolveCitationDetailed", () => {
     ]);
   });
 
+  it("a bracketed point is not the same address as a concatenated number", () => {
+    // Tokens were joined with no separator, so "Article 4(1)" and "Article 41"
+    // both became "article41" — a sub-point silently became a different
+    // article. On the real corpus that offered EBA "Paragraph 41" as the answer
+    // to a question about CRR Article 4(1).
+    const both = [
+      cite("regulation://crr/4", "Article 4"),
+      cite("regulation://gl/41", "Paragraph 41", "eba-gl-2017-16"),
+    ];
+    const r = resolveCitationDetailed(both, "Article 4(1)");
+    expect(r.match).toBeNull();
+    expect(r.candidates.map((c) => c.id)).not.toContain("regulation://gl/41");
+    expect(r.candidates.map((c) => c.id)).toContain("regulation://crr/4");
+  });
+
+  it("resolves an inserted article, and refuses a point inside one", () => {
+    // The CRR is full of inserted articles — 325bd, 104a, 449a. A spine that
+    // keeps only bare digits drops the suffix, which does not lose precision so
+    // much as RENUMBER the citation: "Article 325az(7)" reduced to ["7"] and
+    // resolved, confidently, to Article 7.
+    const inserted = [cite("regulation://crr/325az", "Article 325az"), cite("regulation://crr/7", "Article 7")];
+    expect(resolveCitationDetailed(inserted, "Article 325az").match?.id).toBe("regulation://crr/325az");
+    const point = resolveCitationDetailed(inserted, "Article 325az(7)");
+    expect(point.match).toBeNull();
+    expect(point.candidates.map((c) => c.id)).toEqual(["regulation://crr/325az"]);
+  });
+
+  it("a record whose numbering the spine cannot represent contains nothing", () => {
+    // "Section P3.TIV.C1b.S2b-3" reduces to ["3"], which is a prefix of every
+    // longer spine — so it would offer itself as the provision containing
+    // anything numbered 3.
+    const structural = [
+      cite("regulation://crr/section-P3.TIV.C1b.S2b-3", "Section P3.TIV.C1b.S2b-3"),
+    ];
+    const r = resolveCitationDetailed(structural, "Chapter 3, paragraph 240(1)");
+    expect(r.match).toBeNull();
+    expect(r.candidates).toEqual([]);
+  });
+
   it("a record whose citation carries no numbers contains nothing", () => {
     // Without the guard an unnumbered record is a prefix of every spine, so it
     // would claim to contain every citation in the corpus.

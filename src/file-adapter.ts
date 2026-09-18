@@ -128,8 +128,31 @@ const STRUCTURAL = new Set([
  * Single letters are kept because a legal point IS a single letter; that is
  * also why no length-based filtering is used anywhere in this file.
  */
+/**
+ * The numeric spine of a citation: the numbering, without the words around it.
+ *
+ * A trailing letter is part of the NUMBER, not a sub-point. The CRR is full of
+ * inserted articles — 325bp, 104a, 449a — and dropping the suffix does not
+ * merely lose precision, it silently renumbers the citation: "Article 325bp(1)"
+ * reduced to ["1"], which then looks like a sub-point of anything numbered 1.
+ * Single letters stay separate because that is what a bracketed point is
+ * ("178(1)(a)" → 178, 1, a).
+ */
 const spineOf = (tokens: string[]): string[] =>
-  tokens.filter((t) => /^\d+$/.test(t) || /^[a-z]$/.test(t));
+  tokens.filter((t) => /^\d+[a-z]{0,2}$/.test(t) || /^[a-z]$/.test(t));
+
+/**
+ * Did `spineOf` capture this citation's numbering, or throw part of it away?
+ *
+ * A structural id like "Section P3.TIV.C1b.S2b-3" carries numbering in tokens
+ * the spine cannot represent, and reduces to ["3"]. That is fine for equality —
+ * nothing else reduces to exactly ["3"] by accident — but fatal for CONTAINMENT,
+ * where a short spine is a prefix of every longer one: the section would offer
+ * itself as the provision containing "Chapter 3, paragraph 240(1)", which it
+ * does not. Containment is only safe on citations whose numbering survived.
+ */
+const spineIsFaithful = (tokens: string[]): boolean =>
+  tokens.every((t) => !/\d/.test(t) || /^\d+[a-z]{0,2}$/.test(t));
 
 /** First path segment of a regulation id — the document, not the framework. */
 const idDocSegment = (id: RegulationId): string =>
@@ -494,8 +517,13 @@ export function resolveCitationDetailed(
 
   // (i) Exact equality of the whole citation, structural words included — so
   // "paragraph 78" does not match a record that says "Article 78".
-  const nq = rest.join("");
-  const exactHits = pool.filter((r) => bare(citationTokens(r.citation)).join("") === nq);
+  // Joined with a SEPARATOR, not concatenated. "Article 4(1)" and "Article 41"
+  // tokenise to ["article","4","1"] and ["article","41"]; run together they are
+  // both "article41", so a bracketed point silently became a different article
+  // number — and on this corpus that offered EBA "Paragraph 41" as the answer
+  // to a question about Article 4(1). Matching only ever gets stricter here.
+  const nq = rest.join(" ");
+  const exactHits = pool.filter((r) => bare(citationTokens(r.citation)).join(" ") === nq);
   if (exactHits.length === 1) {
     return { ...none(), match: exactHits[0] ?? null, confidence: "exact" };
   }
@@ -509,7 +537,7 @@ export function resolveCitationDetailed(
   // and also a real CRR article — the alias makes the loose spelling resolvable
   // without letting it be reported as the record's citation.
   const aliasHits = pool.filter((r) =>
-    (r.citation_aliases ?? []).some((a) => bare(citationTokens(a)).join("") === nq),
+    (r.citation_aliases ?? []).some((a) => bare(citationTokens(a)).join(" ") === nq),
   );
   if (aliasHits.length === 1) {
     const hit = aliasHits[0];
@@ -588,11 +616,16 @@ export function resolveCitationDetailed(
   // is not being loosened — the container is reported as a candidate, exactly
   // as a narrower relative is. Token-level prefix, so 1218 still cannot claim
   // to contain 121.
-  const containers = pool
-    .map((r) => ({ r, rs: recordSpine(r) }))
-    // A record whose citation carries no numbers is a prefix of everything;
-    // without this guard a "Preamble" would claim to contain every citation.
-    .filter(({ rs }) => rs.length > 0 && startsWithTokens(spine, rs))
+  const containerTokens = rest.filter((t) => !STRUCTURAL.has(t));
+  const containers = (spineIsFaithful(containerTokens) ? pool : [])
+    .map((r) => ({ r, rs: recordSpine(r), rt: bare(citationTokens(r.citation)).filter((t) => !STRUCTURAL.has(t)) }))
+    // Two guards, both against a SHORT spine claiming to contain a long one.
+    // A record whose citation carries no numbers is a prefix of everything, so
+    // a "Preamble" would contain every citation in the corpus. And a record
+    // whose numbering the spine could not represent reduces to a fragment of
+    // itself — "Section P3.TIV.C1b.S2b-3" becomes ["3"] and would offer itself
+    // as the container of anything numbered 3.
+    .filter(({ rs, rt }) => rs.length > 0 && spineIsFaithful(rt) && startsWithTokens(spine, rs))
     // Narrowest first: the most specific container is the most useful one.
     .sort((a, b) => b.rs.length - a.rs.length);
   if (containers.length > 0) {
