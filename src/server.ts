@@ -50,6 +50,35 @@ export function createServer(): McpServer {
         "never present one as though the text were found.\n" +
         "Sources are the currency registry (verified dates, supersession, milestones); they join regulation via " +
         "framework + document_id, never by URI reference.\n" +
+        // The three rules below are about the EDGE of the corpus, and they exist
+        // because a grounded answer once lost to an ungrounded one on exactly
+        // this: the server was authoritative about what it held and silent
+        // about everything else, so the model treated the corpus boundary as
+        // the boundary of the subject and filled the rest in from memory,
+        // unlabelled and wrong.
+        //
+        // They are RULES, not facts. This repo is public and corpus-agnostic;
+        // every fact a caller needs comes from get_corpus_info, list_sources
+        // and the records themselves at runtime.
+        "Scope: this is a BOUNDED corpus, not the regulatory universe — get_corpus_info names every document " +
+        "loaded. Absence from it is not absence from the law, and a miss from this server is a statement about " +
+        "this corpus only. get_coverage_gaps measures coverage of provisions BY checks and tests INSIDE the " +
+        "corpus; it does not measure coverage of the law by the corpus.\n" +
+        "Answering past the boundary: a real question often turns on an instrument this corpus does not hold. " +
+        "Search first — total_matches and next_offset tell you whether you actually looked. Then neither truncate " +
+        "the answer at the corpus boundary nor blend across it: give what the question needs and LABEL it, " +
+        "marking any statement not traceable to a record id as not corpus-backed and naming what it rests on. " +
+        "Where a record's own text defers to an instrument this corpus lacks — including a pre-adoption " +
+        "placeholder of the form 'Regulation (EU) xx/xx [...]' — say the reference is unresolved here, and never " +
+        "present the placeholder as the current state of the law.\n" +
+        "Legal force and drafting register are DIFFERENT AXES. `obligation` (must/should/may) is how ONE provision " +
+        "is worded; it says nothing about what the document IS, and `doc_type` is a format label that carries no " +
+        "tier. Never infer binding force from either: a supervisory guide that is not a legal act can carry " +
+        "hundreds of `must` provisions. Resolve force from the empowering provision's served text instead — an " +
+        "article delegating power to adopt regulatory technical standards creates a delegated act, one directing " +
+        "an authority to issue guidelines under Article 16 of Regulation (EU) No 1093/2010 creates comply-or-" +
+        "explain guidance — and a provision RESTATING a higher instrument carries that instrument's force, not " +
+        "its host document's. A tier claim you cannot quote from a record is not corpus-backed.\n" +
         // Guidance, not enforcement: instructions are advisory and no string here can
         // compel a client model to leave a quote alone. The machine-checked half of
         // this promise is the verbatim invariant in src/validate.ts, which keeps

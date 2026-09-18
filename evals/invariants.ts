@@ -15,7 +15,7 @@
  * nothing to bind on — a check that passes by having nothing to measure is the
  * exact failure mode this file exists to catch.
  */
-import type { Finding, InvariantResult, Session } from "./harness.ts";
+import { estimateTokens, type Finding, type InvariantResult, type Session } from "./harness.ts";
 
 const SCHEMES = ["regulation", "check", "test", "playbook", "source"] as const;
 type Scheme = (typeof SCHEMES)[number];
@@ -403,8 +403,38 @@ export interface Budget {
  * or the finding fires on every corpus and stops carrying information. It is
  * set to catch the entry path GROWING, not to argue the bundle should not exist.
  */
+/**
+ * `surface` is a RATCHET, not an aspiration.
+ *
+ * It sat at 3,000 against a measured 4,754 and warned on every run since the
+ * suite was written, which is the same as not measuring: a permanent warning is
+ * read as background, and the one time it moves nobody notices. Worse, it
+ * penalised exactly the work that makes the surface worth its cost — the rule
+ * paragraphs telling a caller what this corpus is NOT — so "improve the
+ * guidance" and "get the budget green" pulled against each other.
+ *
+ * It is now set just above the measured model-visible cost (5,807 tok: 4,813 of
+ * tool cards, 994 of instructions), so the check does the job a budget can
+ * actually do — catch GROWTH. Raise it only with the reason recorded here.
+ *
+ * 3,000 was not reachable by trimming prose. The only route under it is
+ * collapsing the four search_* tools into one, and that trades away the
+ * per-surface steering that makes a model pick the right surface in the first
+ * place — a worse answer for a cheaper prompt. The routes that would genuinely
+ * lower it, in the order they should be taken:
+ *
+ *   - merge the five per-record get_* tools into one get(id)        ~-700 tok
+ *   - serve get_coverage_gaps as a resource rather than a tool      ~-250 tok
+ *   - trim the input-schema `describe()` text, which is ~40% of the surface
+ *
+ * History, so a later raise has something to argue with:
+ *   3,000  original, aspirational, never met
+ *   6,100  measured 5,807 + 5% headroom — instructions gained the scope,
+ *          boundary and legal-force rules; list_review_areas stopped
+ *          advertising itself as the entry point for every question
+ */
 export const DEFAULT_BUDGET: Budget = {
-  surface: 3000,
+  surface: 6100,
   call: 6000,
   bundle: 9000,
   entryPath: 8000,
@@ -426,11 +456,15 @@ export async function costWithinBudget(
       id: "I6/surface",
       severity: "warn",
       summary: `Publishing ${s.tools.length} tools costs ~${s.surfaceTokens} tokens of context before a single question is asked (budget ${budget.surface}).`,
-      evidence: s.tools
-        .slice()
-        .sort((a, b) => b.tokens - a.tokens)
-        .slice(0, 5)
-        .map((t) => `${t.name}: ~${t.tokens} tok (desc ${t.description.length}c + schema ${t.schemaChars}c)`),
+      evidence: [
+        `tools ~${s.surfaceTokens - estimateTokens(s.instructions)} tok + instructions ~${estimateTokens(s.instructions)} tok = ~${s.surfaceTokens} model-visible`,
+        `~${s.wireTokens} tok cross the wire once output schemas are counted — not budgeted, because no model is shown them`,
+        ...s.tools
+          .slice()
+          .sort((a, b) => b.tokens - a.tokens)
+          .slice(0, 5)
+          .map((t) => `${t.name}: ~${t.tokens} tok (desc ${t.description.length}c + schema ${t.schemaChars}c)`),
+      ],
     });
   }
 

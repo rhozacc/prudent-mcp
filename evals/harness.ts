@@ -70,8 +70,21 @@ export interface ToolCard {
 
 export interface Session {
   tools: ToolCard[];
-  /** Standing context cost of connecting the server, before any call. */
+  /**
+   * MODEL-VISIBLE standing cost before any call: tool cards plus the server's
+   * `instructions`. This is what a budget should bound — it is what the model
+   * actually pays.
+   */
   surfaceTokens: number;
+  /**
+   * Everything the surface puts on the wire, including the output schemas a
+   * client may validate against but no model is shown. Reported, never gated:
+   * budgeting it would make "reduce the surface" mean deleting bytes that cost
+   * the model nothing.
+   */
+  wireTokens: number;
+  /** The server's instructions block, counted inside surfaceTokens. */
+  instructions: string;
   call(tool: string, args?: Record<string, unknown>): Promise<CallTrace>;
   traces: CallTrace[];
   close(): Promise<void>;
@@ -126,7 +139,25 @@ export async function openSession(opts: OpenOptions = {}): Promise<Session> {
       ...(out === undefined ? {} : { outputSchema: out }),
     };
   });
-  const surfaceTokens = tools.reduce((n, t) => n + t.tokens, 0);
+  // MODEL-VISIBLE standing cost: the tool cards a client puts in the prompt,
+  // plus the server's `instructions`, which every client is told to surface and
+  // which this one can read back. That is what the model pays before a single
+  // question is asked, and it is the number to budget.
+  //
+  // Output schemas, resource templates and prompt scaffolds are deliberately
+  // NOT in it. They cross the wire and a client may validate against them, but
+  // no model is shown them, so folding them in would inflate the budget with
+  // bytes the model never sees — and then "reduce the surface" would mean
+  // deleting things that cost the model nothing. They are reported separately.
+  const instructions = client.getInstructions() ?? "";
+  const toolTokens = tools.reduce((n, t) => n + t.tokens, 0);
+  const surfaceTokens = toolTokens + estimateTokens(instructions);
+  const wireTokens =
+    surfaceTokens +
+    tools.reduce(
+      (n, t) => n + (t.outputSchema === undefined ? 0 : estimateTokens(JSON.stringify(t.outputSchema))),
+      0,
+    );
 
   const traces: CallTrace[] = [];
 
@@ -170,6 +201,8 @@ export async function openSession(opts: OpenOptions = {}): Promise<Session> {
   return {
     tools,
     surfaceTokens,
+    wireTokens,
+    instructions,
     call,
     traces,
     close: () => client.close(),
