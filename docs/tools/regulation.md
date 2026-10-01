@@ -46,11 +46,23 @@ Fetch a regulation paragraph by URI.
 | Parameter | Type | Required | Notes |
 |---|---|---|---|
 | `id` | `RegulationId` | yes | e.g. `regulation://crr/178/1/a` |
-| `as_of` | `string` (ISO date) | no | Returns the version in force on this date |
+| `as_of` | `string` (ISO date) | no | Returns the version in force on this date; carries an `as_of_note` when the corpus records no version for it (below) |
 
 **Returns:** `Regulation` — unknown ids are an `isError` result pointing at `search_regulation`.
 
-The `as_of` rule (see [Corpus structure → Versioning](../corpus/#versioning)): with no history for the id, the backend serves the only version it knows — the current one; with history, the version in force on the date is returned, and an `as_of` predating every recorded version is a miss explaining the rule — never current text masquerading as historical.
+The `as_of` rule (see [Corpus structure → Versioning](../corpus/#versioning)): with no history for the id, the backend serves the only version it knows — the current one — **and says so**; with history, the version in force on the date is returned, and an `as_of` predating every recorded version is a miss explaining the rule — never current text masquerading as historical. A date before the source document existed is also a miss.
+
+**`as_of_note`.** When `as_of` is given and the text served is the current record because the corpus records no version of the provision for that date, the response carries an additive string key `as_of_note` ahead of the record fields:
+
+```ts
+get_regulation("regulation://crr/180/1/a", as_of: "2024-12-31")   // an id with no recorded history
+→ {
+    as_of_note: "This corpus records no version of this provision for the requested as_of date (2024-12-31). The text served is the version named in document_version (2024-01-09), which may differ from the text in force on that date. Do not present it as the historical text.",
+    id: "regulation://crr/180/1/a", document_version: "2024-01-09", text: "...", ...
+  }
+```
+
+The record is still the best text the corpus has, so it is served and not turned into a miss — but it must not be cited as the text of that date. The key is **absent** (never present and empty) when `as_of` is not given, when a recorded version covers the date, and on a miss. It is declared optional in the tool's published output schema, which stays open. `expand_regulation` carries the same note next to its record fields, and counts any regulation children that were also served from current text; `get_regulation_tree` puts one note on the root envelope and counts any other nodes that were also served from current text rather than stamping each node. A miss says in its message that a date the corpus has no version for is otherwise answered with the current text and a note.
 
 ```ts
 type Regulation = {

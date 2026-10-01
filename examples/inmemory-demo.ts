@@ -14,6 +14,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 
 import { adapters } from "../src/adapters.ts";
 import type {
+  AsOfResolution,
   CheckAdapter,
   MetaAdapter,
   PlaybookAdapter,
@@ -455,6 +456,25 @@ const SOURCES: Record<SourceId, Source> = {
 // Adapter implementations
 // ============================================================================
 
+// The one as-of selection, reporting the basis it served on. `get` delegates to
+// it, so the record a tool qualifies with an as_of_note is the record `get`
+// would have returned.
+const resolveRegulationAsOf = async (id: RegulationId, asOf: string): Promise<AsOfResolution> => {
+  const history = HISTORICAL_REGULATIONS[id];
+  if (history === undefined) {
+    // No recorded versions for this id: the current text is all the demo has,
+    // and `basis: "current"` is how the tool says it is not the text of `asOf`.
+    const current = REGULATIONS[id] ?? null;
+    return current === null ? { record: null } : { record: current, basis: "current" };
+  }
+  let chosen: Regulation | null = null;
+  for (const { effectiveFrom, reg } of history) {
+    if (effectiveFrom <= asOf) chosen = reg;
+    else break;
+  }
+  return chosen === null ? { record: null } : { record: chosen, basis: "history" };
+};
+
 const inMemoryRegulation: RegulationAdapter = {
   async search(query) {
     return rankedSearch(Object.values(REGULATIONS), query, regulationSearchFields(query)).map(
@@ -462,16 +482,10 @@ const inMemoryRegulation: RegulationAdapter = {
     );
   },
   async get(id, asOf) {
-    if (asOf && HISTORICAL_REGULATIONS[id]) {
-      let chosen: Regulation | null = null;
-      for (const { effectiveFrom, reg } of HISTORICAL_REGULATIONS[id]!) {
-        if (effectiveFrom <= asOf) chosen = reg;
-        else break;
-      }
-      return chosen;
-    }
-    return REGULATIONS[id] ?? null;
+    if (!asOf) return REGULATIONS[id] ?? null;
+    return (await resolveRegulationAsOf(id, asOf)).record;
   },
+  resolveAsOf: resolveRegulationAsOf,
   async list() {
     return Object.values(REGULATIONS);
   },

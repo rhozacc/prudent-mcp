@@ -107,9 +107,13 @@ In the file-adapter format, history lives under the optional top-level `regulati
 | Situation | Result |
 |---|---|
 | no `as_of` | the current record (or `null` if the id is unknown) |
-| `as_of`, no history for the id | the current record — the only version the corpus knows; corpora without `regulation_history` behave exactly as before |
-| `as_of`, history present | the last entry with `effective_from <= as_of` (boundary dates inclusive) |
+| `as_of`, no history for the id | the current record — the only version the corpus knows — **flagged**: the adapter reports `basis: "current"` and the tools attach an `as_of_note`. The exception is a date before the source document existed, which is a miss (see below) |
+| `as_of`, history present | the last entry with `effective_from <= as_of` (boundary dates inclusive), `basis: "history"`, no note |
 | `as_of` predates every entry | `null` — the tool layer explains the rule in its miss message |
+
+"The only version the corpus knows" is not "the version in force then", and the record alone cannot say which it is, so a hit served from current text under a past date says so in an additive `as_of_note` (which names the `document_version` served and tells the reader not to present it as the historical text). The note is absent without `as_of`, when history covers the date, and on a miss. The adapter side of this is the optional `resolveAsOf` method — see [Adapters](../adapters/#saying-which-basis-an-as-of-record-was-served-on).
+
+For an id with no history, the registry still bounds the answer: an `as_of` earlier than the earliest `published` (else `effective_from`) of any source with that record's `document_id` is a miss, because the document did not exist yet. A source that carries neither date makes no claim, and the id behaves as before.
 
 ---
 

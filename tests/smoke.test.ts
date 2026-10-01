@@ -567,6 +567,69 @@ describe("MCP wire contracts (in-memory transport)", () => {
     }
   });
 
+  // as_of, over the wire. A record with no recorded history is served from its
+  // current text under any date the document existed on — and without a note
+  // that is indistinguishable from the text of that date. The demo's only
+  // history is on crr/178/1/b, so crr/180 and crr/180/1/a stand in for "no
+  // version recorded".
+  it("as_of on a record with no history serves current text WITH an as_of_note; a recorded version has none", async () => {
+    const noHistory = await client.callTool({
+      name: "get_regulation",
+      arguments: { id: "regulation://crr/180/1/a", as_of: "2019-01-01" },
+    });
+    expect(noHistory.isError).not.toBe(true);
+    const served = noHistory.structuredContent as { as_of_note?: string; document_version: string; text: string };
+    expect(served.text).toContain("long-run averages");
+    expect(served.as_of_note).toContain("2019-01-01");
+    expect(served.as_of_note).toContain(served.document_version);
+    // It reaches the text block a client reads, too.
+    const body = JSON.parse((noHistory.content as Array<{ text: string }>)[0]!.text) as { as_of_note?: string };
+    expect(body.as_of_note).toBe(served.as_of_note);
+
+    // No as_of, no note — the key is absent rather than empty.
+    const latest = await client.callTool({ name: "get_regulation", arguments: { id: "regulation://crr/180/1/a" } });
+    expect("as_of_note" in (latest.structuredContent as object)).toBe(false);
+
+    // A recorded version covers the date: that version, no note.
+    const covered = await client.callTool({
+      name: "get_regulation",
+      arguments: { id: "regulation://crr/178/1/b", as_of: "2015-06-01" },
+    });
+    const old = covered.structuredContent as { document_version: string };
+    expect(old.document_version).toBe("2013-06-26");
+    expect("as_of_note" in old).toBe(false);
+
+    // Predating every recorded version is still a miss.
+    const before = await client.callTool({
+      name: "get_regulation",
+      arguments: { id: "regulation://crr/178/1/b", as_of: "2010-01-01" },
+    });
+    expect(before.isError).toBe(true);
+  });
+
+  it("expand_regulation and get_regulation_tree carry the as_of_note too", async () => {
+    const expanded = await client.callTool({
+      name: "expand_regulation",
+      arguments: { id: "regulation://crr/180", as_of: "2019-01-01" },
+    });
+    expect((expanded.structuredContent as { as_of_note?: string }).as_of_note).toContain("2019-01-01");
+
+    // crr/180 and its sub-paragraph crr/180/1/a are both served from current text.
+    const tree = await client.callTool({
+      name: "get_regulation_tree",
+      arguments: { id: "regulation://crr/180", as_of: "2019-01-01" },
+    });
+    const note = (tree.structuredContent as { as_of_note?: string }).as_of_note;
+    expect(note).toContain("1 other provision");
+    expect(JSON.stringify(tree.structuredContent).match(/as_of_note/g)).toHaveLength(1);
+
+    const plainTree = await client.callTool({
+      name: "get_regulation_tree",
+      arguments: { id: "regulation://crr/180" },
+    });
+    expect("as_of_note" in (plainTree.structuredContent as object)).toBe(false);
+  });
+
   it("resolve_citation declines rather than answering with a near-numbered provision", async () => {
     const hit = await client.callTool({
       name: "resolve_citation",

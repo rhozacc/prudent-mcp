@@ -9,12 +9,14 @@
  * The failure they are all aimed at is the same one: **a model believing
  * something the corpus did not say.** Volume is a cost; a confident wrong
  * answer is a defect. So the fatal findings here are about truthfulness
- * (I1–I4, I7) and the budgeted ones about cost (I5–I6).
+ * (I1–I4, I7, I11) and the budgeted ones about cost (I5–I6).
  *
  * Every invariant reports `applicable: false` rather than passing when it had
  * nothing to bind on — a check that passes by having nothing to measure is the
  * exact failure mode this file exists to catch.
  */
+import { readFileSync } from "node:fs";
+
 import { estimateTokens, type Finding, type InvariantResult, type Session } from "./harness.ts";
 
 const SCHEMES = ["regulation", "check", "test", "playbook", "source"] as const;
@@ -1041,6 +1043,217 @@ export async function declinesAreNeverEmpty(s: Session): Promise<InvariantResult
   return { id: "I10", title: "A decline is never empty", applicable: bound > 0, findings };
 }
 
+// ============================================================================
+// I11 — as_of is never silently substituted
+// ============================================================================
+
+/**
+ * A corpus with no recorded version of a provision serves its CURRENT text under
+ * any as_of the document already existed on. That is the best text it has, so
+ * it is a hit and not a miss — but the record alone cannot say so: today's text
+ * asked for under a past date is byte-for-byte what a historical version looks
+ * like. A validator asking what applied at an approval date, and the model
+ * relaying the answer, both read it as the text of that date and cite it with a
+ * date it was never in force on.
+ *
+ * So whenever the text served under as_of IS the current text, the reply must
+ * say it is not the text of that date. Observed from outside: take a record,
+ * read it with no date, then read it under a ladder of dates; every reply that
+ * is a hit identical to the undated one must carry an `as_of_note`.
+ *
+ * The invariant binds only on a record that has no recorded history, and it has
+ * two ways to know. When the session was opened on a corpus file, the ids named
+ * in its `regulation_history` are read (ids only, no content) and skipped: a
+ * record with even one history entry — the current-boundary entry the corpus
+ * format asks for — is correctly served without a note whenever an entry covers
+ * the date, and from outside that looks exactly like an unrecorded provision
+ * whenever the entry starts before the first ladder date. The second guard is
+ * black-box and works with no file (the seeded demo): a record whose reply ever
+ * differs from the current text, or ever misses, is skipped, because that is
+ * history that starts later or a document published later. Neither guard can
+ * hide a substitution on a record that never misses, never differs and has no
+ * history, which is exactly what the unfixed server did. The cost is that
+ * records of documents published after the earliest ladder date are not probed
+ * here; the adapter tests cover the registry-dated boundary.
+ *
+ * `expand_regulation` also resolves the record's regulation children under the
+ * same date, so on a record that has children the embedded children are checked
+ * to be the versions `get_regulation` serves for that date.
+ *
+ * A note that is present but names neither the date asked about nor the version
+ * served is a warning: it satisfies "has a note" while telling the caller nothing
+ * (the same shape as I10's generic decline).
+ */
+/**
+ * The ids the corpus file records history for. Structural metadata only: which
+ * ids have a `regulation_history` entry, never what the entries say. Empty when
+ * there is no file (the demo) or it cannot be read; the black-box guard in the
+ * invariant still applies then.
+ */
+function idsWithRecordedHistory(corpusFile: string | undefined): Set<string> {
+  if (corpusFile === undefined) return new Set();
+  try {
+    const parsed = JSON.parse(readFileSync(corpusFile, "utf8")) as { regulation_history?: Array<{ id?: unknown }> };
+    return new Set((parsed.regulation_history ?? []).flatMap((e) => (typeof e.id === "string" ? [e.id] : [])));
+  } catch {
+    return new Set();
+  }
+}
+
+export async function asOfIsNeverSilentlySubstituted(s: Session): Promise<InvariantResult> {
+  const findings: Finding[] = [];
+  const title = "as_of is never silently substituted";
+
+  type Row = { id?: string; document_id?: string };
+  const rowsOf = (json: unknown): Row[] =>
+    ((json as { results?: Row[] } | null)?.results ?? []).filter((r) => typeof r.id === "string");
+  const asRecord = (json: unknown): Record<string, unknown> | null =>
+    json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : null;
+  const same = (a: Record<string, unknown>, b: Record<string, unknown>): boolean =>
+    a["id"] === b["id"] && a["document_version"] === b["document_version"] && a["text"] === b["text"];
+
+  // Records from the server's own search output, at most two per document so one
+  // large document does not take every probe.
+  const perDocument = new Map<string, number>();
+  const ids: string[] = [];
+  for (const q of ["default", "estimation", "risk", "data", "model", "validation"]) {
+    const t = await s.call("search_regulation", { query: q, limit: 10 });
+    for (const row of rowsOf(t.json)) {
+      const doc = row.document_id ?? "";
+      if (row.id === undefined || ids.includes(row.id) || (perDocument.get(doc) ?? 0) >= 2) continue;
+      perDocument.set(doc, (perDocument.get(doc) ?? 0) + 1);
+      ids.push(row.id);
+    }
+  }
+
+  const withHistory = idsWithRecordedHistory(s.corpusFile);
+  const today = new Date().toISOString().slice(0, 10);
+  const ladder = [...new Set(["2014-06-30", "2019-06-30", "2024-12-31", today])];
+
+  const dateAndVersionNamed = (note: string, asOf: string, version: unknown): boolean =>
+    note.includes(asOf) && (typeof version !== "string" || version === "" || note.includes(version));
+
+  let bound = 0;
+  let crossChecked = 0;
+  for (const id of ids.slice(0, 8)) {
+    if (withHistory.has(id)) continue; // the corpus records a version of it; see the docstring
+    const current = await s.call("get_regulation", { id });
+    const cur = asRecord(current.json);
+    if (current.isError || cur === null) continue;
+
+    const served: Array<{ asOf: string; body: Record<string, unknown> }> = [];
+    let hasHistory = false;
+    for (const asOf of ladder) {
+      const r = await s.call("get_regulation", { id, as_of: asOf });
+      const body = asRecord(r.json);
+      if (r.isError || body === null || !same(body, cur)) {
+        hasHistory = true;
+        break;
+      }
+      served.push({ asOf, body });
+    }
+    if (hasHistory) continue;
+
+    const silent: string[] = [];
+    for (const { asOf, body } of served) {
+      bound++;
+      const note = body["as_of_note"];
+      if (typeof note !== "string" || note.trim() === "") {
+        silent.push(asOf);
+      } else if (!dateAndVersionNamed(note, asOf, body["document_version"])) {
+        findings.push({
+          id: "I11/note-generic",
+          severity: "warn",
+          summary: "as_of_note does not name the date that was asked about and the version that was served — it says a note exists and nothing about this reply.",
+          evidence: [`id ${id}`, `as_of ${asOf}`, `note: ${note.slice(0, 200)}`],
+        });
+      }
+    }
+    if (silent.length > 0) {
+      findings.push({
+        id: "I11/get_regulation",
+        severity: "fatal",
+        summary: "get_regulation served the current text of a record with no recorded history under as_of and said nothing — it reads as the text in force on the date asked for.",
+        evidence: [
+          `id ${id}`,
+          `as_of dates answered without a note: ${silent.join(", ")}`,
+          `document_version served: ${String(cur["document_version"])}`,
+          `reply keys: ${Object.keys(served[0]?.body ?? {}).join(", ")}`,
+        ],
+      });
+    }
+
+    // The other two tools that serve a regulation under as_of must agree. Two
+    // records are enough: the point is that the three are wired to the same
+    // resolution, not that every id is probed three ways.
+    const last = served[served.length - 1];
+    if (last !== undefined && crossChecked < 2) {
+      crossChecked++;
+      const probes: Array<[string, Record<string, unknown>]> = [
+        ["expand_regulation", { id, as_of: last.asOf }],
+        ["get_regulation_tree", { id, as_of: last.asOf, depth: 0 }],
+      ];
+      for (const [tool, args] of probes) {
+        const r = await s.call(tool, args);
+        const body = asRecord(r.json);
+        if (r.isError || body === null) continue;
+        bound++;
+        const note = body["as_of_note"];
+        if (typeof note !== "string" || note.trim() === "") {
+          findings.push({
+            id: `I11/${tool}`,
+            severity: "fatal",
+            summary: `${tool} served the current text of a record with no recorded history under as_of ${last.asOf} and said nothing — every tool that serves a regulation under as_of must say so.`,
+            evidence: [`id ${id}`, `reply keys: ${Object.keys(body).join(", ")}`],
+          });
+        }
+      }
+
+      // The embedded children are resolved under the same date, so each must be
+      // the version get_regulation serves for it — not its latest text under the
+      // date asked about.
+      const full = await s.call("expand_regulation", { id, as_of: last.asOf, detail: "full" });
+      const kids = (asRecord(full.json)?.["children"] ?? []) as Array<{ type?: string; id?: string; record?: unknown }>;
+      for (const kid of kids.filter((k) => k.type === "regulation" && typeof k.id === "string").slice(0, 3)) {
+        bound++;
+        const direct = await s.call("get_regulation", { id: kid.id, as_of: last.asOf });
+        const want = asRecord(direct.json);
+        const got = asRecord(kid.record);
+        const agrees =
+          direct.isError || want === null
+            ? kid.record === null || kid.record === undefined
+            : got !== null && same(got, want);
+        if (!agrees) {
+          findings.push({
+            id: "I11/expand_regulation-children",
+            severity: "fatal",
+            summary: "expand_regulation embedded a child at a different version than get_regulation serves for the same as_of — the child is shown as the text of a date it may not be.",
+            evidence: [`parent ${id}`, `child ${String(kid.id)}`, `as_of ${last.asOf}`, `expand version: ${String(got?.["document_version"])}`, `get_regulation version: ${String(want?.["document_version"])}`],
+          });
+        }
+      }
+    }
+  }
+
+  if (bound === 0) {
+    return {
+      id: "I11",
+      title,
+      applicable: false,
+      findings: [
+        ...findings,
+        {
+          id: "I11/no-record-without-history",
+          severity: "info",
+          summary: "No record was observed that is served in full under every probe date and never differs from its current text, so as_of substitution could not be tested.",
+          evidence: [`${ids.length} record(s) sampled`, `probe dates ${ladder.join(", ")}`],
+        },
+      ],
+    };
+  }
+  return { id: "I11", title, applicable: true, findings };
+}
+
 export const ALL = [
   envelopeIsJson,
   describedIdsResolve,
@@ -1053,4 +1266,5 @@ export const ALL = [
   outputMatchesDeclaredSchema,
   humanRegisterCitationsResolve,
   declinesAreNeverEmpty,
+  asOfIsNeverSilentlySubstituted,
 ] as const;

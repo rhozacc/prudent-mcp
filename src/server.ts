@@ -43,8 +43,9 @@ export function createServer(): McpServer {
         "Concise search results carry a quotable excerpt (whole sentences around the match); quote it rather than " +
         "re-fetching the record to confirm a hit.\n" +
         "Misses come back as isError results pointing at the right search/list tool — never a bare 'null'.\n" +
-        "Regulation is the only versioned surface: pass as_of (ISO date) for the text in force on that date; backends " +
-        "without history serve current text, and an as_of predating all recorded versions is a miss.\n" +
+        "Regulation is the only versioned surface: pass as_of (ISO date) for the text in force on that date; where no " +
+        "version is recorded for it, current text comes back with an as_of_note — never present that as the text of " +
+        "that date. An as_of predating all recorded versions is a miss.\n" +
         "resolve_citation declines rather than guesses: a citation naming an instrument or provision this corpus does " +
         "not hold comes back with match null plus candidates and a coverage_note. A null match is not a citation — " +
         "never present one as though the text were found.\n" +

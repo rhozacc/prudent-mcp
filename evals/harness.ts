@@ -85,6 +85,12 @@ export interface Session {
   wireTokens: number;
   /** The server's instructions block, counted inside surfaceTokens. */
   instructions: string;
+  /**
+   * The corpus JSON file the session was opened on; absent for the seeded demo.
+   * Lets an invariant read STRUCTURAL metadata (which ids carry history) that no
+   * tool reply states, without storing any content.
+   */
+  corpusFile?: string;
   call(tool: string, args?: Record<string, unknown>): Promise<CallTrace>;
   traces: CallTrace[];
   close(): Promise<void>;
@@ -203,6 +209,7 @@ export async function openSession(opts: OpenOptions = {}): Promise<Session> {
     surfaceTokens,
     wireTokens,
     instructions,
+    ...(opts.corpusFile === undefined ? {} : { corpusFile: opts.corpusFile }),
     call,
     traces,
     close: () => client.close(),

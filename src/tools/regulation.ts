@@ -9,14 +9,17 @@ import type { Regulation } from "../schema.ts";
 import { ProvisionKindSchema, RegulationSchema, regulationIdSchema } from "../schema.ts";
 import { rankedSearch, regulationSearchFields } from "../search.ts";
 import {
+  AS_OF_MISS_CONTEXT,
   READ_ONLY_HINTS,
   lenient,
   miss,
   ok,
   paginate,
+  resolveRegulation,
   searchInputShape,
   searchOutputShape,
   searchResult,
+  withAsOfNote,
 } from "./shared.ts";
 
 // Concise projection served by search_regulation (detail: "concise").
@@ -124,28 +127,41 @@ export function registerRegulationTools(server: McpServer): void {
       description:
         "Fetch one regulation paragraph by URI. Returns the full record: citation, verbatim " +
         "text, and attached commentary (supervisor Q&A, interpretive letters). Latest version " +
-        "by default; pass as_of (ISO date) for the text in force on that date — backends " +
-        "without history for the id serve the current text, and an as_of predating every " +
-        "recorded version is a miss, never current text as historical. Unknown ids return " +
-        "isError with a pointer. Use get_referrers to find operationalising checks/playbooks.",
+        "by default; pass as_of (ISO date) for the text in force on that date. Where the corpus " +
+        "records no version for that date the current text is served with an as_of_note saying " +
+        "so — it may not be the text of that date, so do not present it as historical. An as_of " +
+        "predating every recorded version is a miss. Unknown ids return isError with a " +
+        "pointer. Use get_referrers to find operationalising checks/playbooks.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(
           "A regulation id from search_regulation or resolve_citation — shape regulation://{document}/{provision}",
         ),
         as_of: z.string().date().optional().describe("ISO date, e.g. 2019-03-01"),
       },
-      outputSchema: RegulationSchema.passthrough(),
+      // Open at the declaration site only: the canonical RegulationSchema stays
+      // closed. `as_of_note` is published so a caller reading the schema learns
+      // that a hit under as_of can carry a caveat about what it is.
+      outputSchema: RegulationSchema.extend({
+        as_of_note: z
+          .string()
+          .optional()
+          .describe(
+            "Present only when as_of was given and the corpus records no version for that date, so the " +
+              "current text was served. Says which version (document_version) and that it must not be " +
+              "presented as the historical text.",
+          ),
+      }).passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async ({ id, as_of }) => {
-      const record = await adapters.regulation.get(id, as_of);
-      if (record !== null) return ok(record);
+      const { record, note } = await resolveRegulation(id, as_of);
+      if (record !== null) return ok(withAsOfNote(record, note));
       if (as_of !== undefined && (await adapters.regulation.get(id)) !== null) {
         return miss(
           `No version of ${id} was in force on ${as_of} according to this corpus's history. ` +
             "Historical coverage rule: as_of resolves against recorded versions only — a date " +
-            "predating every recorded version returns nothing (backends without history for an " +
-            "id always serve the current text). Retry without as_of for the current text.",
+            `predating every recorded version returns nothing. ${AS_OF_MISS_CONTEXT} ` +
+            "Retry without as_of for the current text.",
         );
       }
       return miss(`No record for ${id}. Verify the id with search_regulation or list_review_areas.`);

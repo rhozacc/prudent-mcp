@@ -261,7 +261,7 @@ Fetch a regulation with its children resolved inline — sub-regulations plus th
 | Parameter | Type | Notes |
 |---|---|---|
 | `id` | `RegulationId` | e.g. `regulation://crr/180/1/a` |
-| `as_of` | `string` (ISO date) | Optional — resolve the regulation as of this date (same rule as `get_regulation`) |
+| `as_of` | `string` (ISO date) | Optional — resolve the regulation as of this date (same rule as `get_regulation`, including the `as_of_note`) |
 | `detail` | `"concise" \| "full"` | Optional, default `"concise"` |
 
 **Returns:** `ExpandedRegulation` — unknown ids are an `isError` result pointing at `search_regulation`.
@@ -275,8 +275,11 @@ type ExpandedRegulation = {
   text: string;
   parent: RegulationId | null;
   children: { type, id, label }[];   // stubs by default; detail: "full" embeds the complete records
+  as_of_note?: string;               // only with as_of, when the current text was served because no version is recorded for that date
 }
 ```
+
+With `as_of`, regulation children are resolved under the same date as the record, so a child with a recorded version for that date is embedded at that version (the same one [`get_regulation`](./regulation#get-regulation) serves), not at its latest. The note is the one `get_regulation` attaches, and it also counts any children served from current text because the corpus records no version of them for the date, so a record covered by history still carries a note when one of its children is not. Checks and tests are not versioned and are resolved as always.
 
 **Example:**
 ```ts
@@ -302,7 +305,7 @@ Walk a regulation's children recursively into a dossier: the branch of law (sect
 |---|---|---|
 | `id` | `RegulationId` | Root of the tree, e.g. `regulation://crr/180` |
 | `depth` | `number` | Optional — max regulation recursion depth (default 5, max 10) |
-| `as_of` | `string` (ISO date) | Optional — resolve regulations as of this date |
+| `as_of` | `string` (ISO date) | Optional — resolve regulations as of this date; an `as_of_note` on the root says when nodes were served from current text |
 | `detail` | `"concise" \| "full"` | Optional, default `"concise"` |
 
 **Returns:** `RegulationTreeNode` — unknown roots are an `isError` result pointing at `search_regulation`.
@@ -317,8 +320,11 @@ type RegulationTreeNode = {
   record?: Regulation | null;        // detail: "full" only
   children: (RegulationTreeNode | { type: "test" | "check"; id; label })[];
   truncated?: boolean;
+  as_of_note?: string;               // root envelope only, with as_of — see below
 }
 ```
+
+**`as_of_note`.** Each regulation node resolves as of the date on its own. Where no version is recorded for a node's date, its current text is served — and the root envelope carries one `as_of_note` saying so. If the root itself was served that way the note is the same as `get_regulation`'s, followed by a count of the other nodes treated the same; if only other nodes were, it says how many. There is no per-node field: a walk can reach 200 nodes and the same sentence 200 times is the cost the note exists to avoid. `detail: "full"` shows each node's `document_version`. No note without `as_of`, or when every node came from a recorded version.
 
 **Example:**
 ```ts

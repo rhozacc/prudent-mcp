@@ -28,7 +28,18 @@ import {
   playbookIdSchema,
   regulationIdSchema,
 } from "../schema.ts";
-import { READ_ONLY_HINTS, fitOrCompact, lenient, miss, ok, stripEdgeNoise } from "./shared.ts";
+import {
+  READ_ONLY_HINTS,
+  AS_OF_MISS_CONTEXT,
+  asOfGroupNote,
+  fitOrCompact,
+  lenient,
+  miss,
+  ok,
+  resolveRegulation,
+  stripEdgeNoise,
+  withAsOfNote,
+} from "./shared.ts";
 
 // ── Local return types ────────────────────────────────────────────────────────
 
@@ -134,9 +145,20 @@ const MAX_TREE_NODES = 200;
 
 // TypeScript can't narrow template literal types from startsWith, so each
 // branch requires an explicit `as` cast after the prefix guard.
-async function resolveReference(id: AnyId): Promise<ResolvedReference> {
-  if (id.startsWith("regulation://"))
-    return { type: "regulation", id: id as RegulationId, record: await adapters.regulation.get(id as RegulationId) };
+//
+// `asOf` applies to regulation references only (the one versioned surface). When
+// it is given, `fromCurrent` collects the regulation ids that were answered from
+// current text because no version is recorded for the date.
+async function resolveReference(
+  id: AnyId,
+  asOf?: string,
+  fromCurrent?: Set<RegulationId>,
+): Promise<ResolvedReference> {
+  if (id.startsWith("regulation://")) {
+    const served = await resolveRegulation(id as RegulationId, asOf);
+    if (served.fromCurrent) fromCurrent?.add(id as RegulationId);
+    return { type: "regulation", id: id as RegulationId, record: served.record };
+  }
   if (id.startsWith("test://"))
     return { type: "test", id: id as TestId, record: await adapters.test.get(id as TestId) };
   if (id.startsWith("check://"))
@@ -161,7 +183,7 @@ async function expandPlaybook(raw: Playbook): Promise<ExpandedPlaybook> {
     raw.phases.map(async (ph) => ({
       name: ph.name,
       description: ph.description,
-      references: await Promise.all(ph.references.map(resolveReference)),
+      references: await Promise.all(ph.references.map((r) => resolveReference(r))),
     })),
   );
   return {
@@ -209,8 +231,16 @@ function toConcisePlaybook(pb: ExpandedPlaybook): ConciseExpandedPlaybook {
 
 // Fetch a regulation's children resolved one level deep. The reverse-direction
 // companion to expandPlaybook — children may now be checks/tests, not just regs.
-export async function expandRegulation(raw: Regulation): Promise<ExpandedRegulation> {
-  const children = await Promise.all(raw.children.map(resolveReference));
+//
+// With `asOf`, regulation children are resolved under the SAME date as the
+// record they hang from (a child's recorded version is served, not its latest),
+// and `fromCurrent` collects those answered from current text.
+export async function expandRegulation(
+  raw: Regulation,
+  asOf?: string,
+  fromCurrent?: Set<RegulationId>,
+): Promise<ExpandedRegulation> {
+  const children = await Promise.all(raw.children.map((c) => resolveReference(c, asOf, fromCurrent)));
   return {
     id: raw.id,
     citation: raw.citation,
@@ -229,15 +259,22 @@ function toConciseRegulation(expanded: ExpandedRegulation): ConciseExpandedRegul
 // Recursive dossier walk. Regulation children recurse (bounded by depth, a
 // visited-set cycle guard, and a shared node budget); checks/tests are
 // resolved leaves. Nodes cut off by any bound are flagged truncated.
+//
+// `fromCurrent` collects the ids of nodes whose as_of was answered from current
+// text because no version is recorded for the date. The tree reports that once,
+// on its root envelope, rather than stamping every node.
 export async function buildRegulationTree(
   id: RegulationId,
   depth: number,
   visited: Set<RegulationId>,
   asOf?: string,
   budget: { remaining: number } = { remaining: MAX_TREE_NODES },
+  fromCurrent: Set<RegulationId> = new Set(),
 ): Promise<RegulationTreeNode> {
   budget.remaining -= 1; // this node
-  const record = await adapters.regulation.get(id, asOf);
+  const served = await resolveRegulation(id, asOf);
+  const record = served.record;
+  if (served.fromCurrent) fromCurrent.add(id);
   const node: RegulationTreeNode = {
     type: "regulation",
     id,
@@ -257,7 +294,9 @@ export async function buildRegulationTree(
       break;
     }
     if (childId.startsWith("regulation://")) {
-      node.children.push(await buildRegulationTree(childId as RegulationId, depth - 1, visited, asOf, budget));
+      node.children.push(
+        await buildRegulationTree(childId as RegulationId, depth - 1, visited, asOf, budget, fromCurrent),
+      );
     } else if (childId.startsWith("test://")) {
       budget.remaining -= 1;
       node.children.push({ type: "test", id: childId as TestId, record: await adapters.test.get(childId as TestId) });
@@ -560,8 +599,10 @@ export function registerMetaTools(server: McpServer): void {
         "checks/tests that operationalize it; the reverse-direction companion to " +
         "expand_playbook. Returns the regulation fields plus children as { type, id, label } " +
         "stubs (default) or complete records (detail: 'full'). Supports as_of like " +
-        "get_regulation. Unknown ids return isError with a pointer. Use get_regulation_tree " +
-        "to walk the whole sub-tree.",
+        "get_regulation, resolving regulation children under the same date; an as_of_note says when " +
+        "the record or any child is current text standing in for a version the corpus does not " +
+        "record. Unknown ids return isError with a pointer. Use " +
+        "get_regulation_tree to walk the whole sub-tree.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(
           "A regulation id from search_regulation or resolve_citation — shape regulation://{document}/{provision}",
@@ -572,19 +613,32 @@ export function registerMetaTools(server: McpServer): void {
       annotations: READ_ONLY_HINTS,
     },
     async ({ id, as_of, detail }) => {
-      const raw = await adapters.regulation.get(id, as_of);
+      const { record: raw, fromCurrent: rootFromCurrent } = await resolveRegulation(id, as_of);
       if (raw === null) {
         if (as_of !== undefined && (await adapters.regulation.get(id)) !== null) {
           return miss(
             `No version of ${id} was in force on ${as_of} according to this corpus's history — ` +
-              "an as_of predating every recorded version returns nothing. Retry without as_of " +
-              "for the current text.",
+              `an as_of predating every recorded version returns nothing. ${AS_OF_MISS_CONTEXT} ` +
+              "Retry without as_of for the current text.",
           );
         }
         return miss(`No record for ${id}. Verify the id with search_regulation or list_review_areas.`);
       }
-      const expanded = await expandRegulation(raw);
-      return ok(detail === "full" ? expanded : toConciseRegulation(expanded));
+      // Children are resolved under the same date. The note covers the record and
+      // any children that came from current text, so a history-covered parent
+      // with a child the corpus has no version of still says so.
+      const fromCurrent = new Set<RegulationId>();
+      const expanded = await expandRegulation(raw, as_of, fromCurrent);
+      const note =
+        as_of === undefined
+          ? undefined
+          : asOfGroupNote(
+              as_of,
+              { record: raw, fromCurrent: rootFromCurrent },
+              [...fromCurrent].filter((n) => n !== raw.id).length,
+              "children",
+            );
+      return ok(withAsOfNote(detail === "full" ? expanded : toConciseRegulation(expanded), note));
     },
   );
 
@@ -598,8 +652,10 @@ export function registerMetaTools(server: McpServer): void {
         "as leaves. Returns a tree of { type, id, citation, children } nodes — concise " +
         "(default) keeps citations and leaf labels only; detail: 'full' embeds each node's " +
         "complete record. depth defaults to 5 and the walk is capped at 200 total nodes; " +
-        "nodes cut off by depth, a cycle, or the cap carry truncated: true. Unknown roots " +
-        "return isError — verify with search_regulation.",
+        "nodes cut off by depth, a cycle, or the cap carry truncated: true. With as_of, an " +
+        "as_of_note on the root says when nodes were served from current text because the " +
+        "corpus records no version for that date. Unknown roots return isError — verify " +
+        "with search_regulation.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(
           "Root of the tree: a regulation id from search_regulation — shape regulation://{document}/{provision}",
@@ -611,17 +667,26 @@ export function registerMetaTools(server: McpServer): void {
       annotations: READ_ONLY_HINTS,
     },
     async ({ id, depth, as_of, detail }) => {
-      const node = await buildRegulationTree(id, depth ?? 5, new Set<RegulationId>(), as_of);
+      const fromCurrent = new Set<RegulationId>();
+      const node = await buildRegulationTree(id, depth ?? 5, new Set<RegulationId>(), as_of, undefined, fromCurrent);
       if (node.record === null) {
         if (as_of !== undefined && (await adapters.regulation.get(id)) !== null) {
           return miss(
             `No version of ${id} was in force on ${as_of} according to this corpus's history. ` +
-              "Retry without as_of for the current tree.",
+              `${AS_OF_MISS_CONTEXT} Retry without as_of for the current tree.`,
           );
         }
         return miss(`No record for ${id}. Verify the id with search_regulation or list_review_areas.`);
       }
-      return ok(detail === "full" ? node : toConciseTree(node));
+      const note =
+        as_of === undefined
+          ? undefined
+          : asOfGroupNote(
+              as_of,
+              { record: node.record, fromCurrent: fromCurrent.has(id) },
+              [...fromCurrent].filter((n) => n !== id).length,
+            );
+      return ok(withAsOfNote(detail === "full" ? node : toConciseTree(node), note));
     },
   );
 

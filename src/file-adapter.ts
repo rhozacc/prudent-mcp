@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import type {
+  AsOfResolution,
   CheckAdapter,
   MetaAdapter,
   PlaybookAdapter,
@@ -705,40 +706,57 @@ export function createFileAdapters(corpus: CorpusFile): {
     if (prev === undefined || at < prev) documentFirstKnown.set(s.document_id, at);
   }
 
+  // As-of semantics (mirrors the in-memory demo's HISTORICAL_REGULATIONS
+  // selection logic exactly):
+  //   - no asOf                  → current record (or null if unknown);
+  //   - asOf, no history for id  → current record — the only version the
+  //     corpus knows; corpora without history keep their pre-history behavior;
+  //   - asOf, history present    → the last entry with effective_from <= asOf
+  //     (entries sorted ascending). The current version is selectable only
+  //     when the corpus includes a history entry carrying it; if asOf
+  //     predates every known version the answer is null, never current text
+  //     masquerading as historical.
+  //
+  // This is the ONE implementation, and it reports the basis alongside the
+  // record. `get` below delegates to it rather than repeating the rules: the
+  // basis is what tells a caller whether a hit is the text in force on the date
+  // or only the best text the corpus has, and two copies of the selection logic
+  // could disagree about which of those it served.
+  const resolveAsOf = async (id: RegulationId, asOf: string): Promise<AsOfResolution> => {
+    const history = historyMap.get(id);
+    if (history === undefined) {
+      const current = regMap.get(id) ?? null;
+      if (current === null) return { record: null };
+      // No per-provision history, so the current text is the only version
+      // this corpus knows — but "the only version I know" is not "the version
+      // in force then". If the asked-for date predates the document itself,
+      // the honest answer is nothing, not today's text wearing a past date.
+      const firstKnown = documentFirstKnown.get(current.document_id);
+      if (firstKnown !== undefined && asOf < firstKnown) return { record: null };
+      // The document existed, so the current text is served — and it is the
+      // `current` basis that lets the tool layer say it is not the text of
+      // that date. Before this was reported, a validator asking what applied
+      // at an approval date was handed today's text indistinguishable from a
+      // historical version.
+      return { record: current, basis: "current" };
+    }
+    let chosen: Regulation | null = null;
+    for (const entry of history) {
+      if (entry.effective_from <= asOf) chosen = entry.record;
+      else break;
+    }
+    return chosen === null ? { record: null } : { record: chosen, basis: "history" };
+  };
+
   const regulation: RegulationAdapter = {
     async search(query) {
       return rankedSearch(corpus.regulation, query, regulationSearchFields(query)).map(m => m.record);
     },
-    // As-of semantics (mirrors the in-memory demo's HISTORICAL_REGULATIONS
-    // selection logic exactly):
-    //   - no asOf                  → current record (or null if unknown);
-    //   - asOf, no history for id  → current record — the only version the
-    //     corpus knows; corpora without history keep their pre-history behavior;
-    //   - asOf, history present    → the last entry with effective_from <= asOf
-    //     (entries sorted ascending). The current version is selectable only
-    //     when the corpus includes a history entry carrying it; if asOf
-    //     predates every known version the answer is null, never current text
-    //     masquerading as historical.
     async get(id, asOf) {
-      const current = regMap.get(id) ?? null;
-      if (asOf === undefined) return current;
-      const history = historyMap.get(id);
-      if (history === undefined) {
-        // No per-provision history, so the current text is the only version
-        // this corpus knows — but "the only version I know" is not "the version
-        // in force then". If the asked-for date predates the document itself,
-        // the honest answer is nothing, not today's text wearing a past date.
-        const firstKnown = current === null ? undefined : documentFirstKnown.get(current.document_id);
-        if (firstKnown !== undefined && asOf < firstKnown) return null;
-        return current;
-      }
-      let chosen: Regulation | null = null;
-      for (const entry of history) {
-        if (entry.effective_from <= asOf) chosen = entry.record;
-        else break;
-      }
-      return chosen;
+      if (asOf === undefined) return regMap.get(id) ?? null;
+      return (await resolveAsOf(id, asOf)).record;
     },
+    resolveAsOf,
     async list() { return corpus.regulation; },
   };
 

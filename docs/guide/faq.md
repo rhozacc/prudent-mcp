@@ -75,6 +75,8 @@ Same reason. `check://calibration/pd/lra-derived` makes the area and topic visib
 
 Internally, the adapter is expected to hold the full version history per `RegulationId`. The MCP picks the right one and returns its `document_version` field on the response.
 
+Where the corpus records no version of a provision for the date you asked about, it serves the current text rather than nothing — and the response carries an `as_of_note` saying that this is the version named in `document_version`, that it may differ from the text in force on that date, and that it must not be presented as the historical text. `expand_regulation` and `get_regulation_tree` carry the same note. A date before the source document existed is a miss.
+
 ### Does the corpus distinguish CRR vs CRR2 vs CRR3?
 
 No — `regulation://crr/178/1/b` is a stable ID. The `document_version` field tracks which textual revision is in force. So the 2013, 2019, and 2024 versions of CRR Article 178(1)(b) all share the same ID and differ only in `document_version` and `text`.

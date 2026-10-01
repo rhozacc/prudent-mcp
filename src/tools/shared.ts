@@ -1,5 +1,6 @@
 /**
- * Shared tool plumbing — result envelopes, annotations, and input leniency.
+ * Shared tool plumbing — result envelopes, annotations, input leniency, and the
+ * one as_of resolution the regulation tools share.
  *
  * Conventions enforced here (and documented in the server instructions):
  *   - every tool is read-only/idempotent/closed-world, declared via annotations;
@@ -8,10 +9,15 @@
  *   - misses are isError results with a next-step pointer, never the string
  *     "null";
  *   - search tools share one envelope: { results, total_matches, offset,
- *     truncated } with a text hint when truncated.
+ *     truncated } with a text hint when truncated;
+ *   - a regulation served under as_of from its CURRENT text says so
+ *     (`as_of_note`), because the record alone cannot.
  */
 import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+
+import { adapters } from "../adapters.ts";
+import type { Regulation, RegulationId } from "../schema.ts";
 
 // Every tool on this server reads a local knowledge base and nothing else.
 export const READ_ONLY_HINTS: ToolAnnotations = {
@@ -223,6 +229,126 @@ export function searchOutputShape(resultItem: z.ZodTypeAny) {
       .describe("Offset for the next page; null when this page is the last."),
     notice: z.string().optional().describe("Guidance about this result set, when there is any."),
   }).passthrough();
+}
+
+// --- as_of: say when the current text stands in for a historical one -----------
+
+/** A regulation as resolved for a tool, and whether `as_of` was answered from its current text. */
+export interface ServedRegulation {
+  record: Regulation | null;
+  /**
+   * True only when the adapter REPORTED that the current record was served
+   * because no version is recorded for the date. An adapter that cannot say
+   * (no `resolveAsOf`) yields false: unknown is not asserted as a substitution,
+   * and the tools behave as they did before the method existed.
+   */
+  fromCurrent: boolean;
+  /** The `as_of_note` for this one record; undefined unless `fromCurrent`. */
+  note: string | undefined;
+}
+
+/**
+ * The one way the regulation tools read a record, so `get_regulation`,
+ * `expand_regulation` and every node of `get_regulation_tree` agree on what
+ * "served from current text" means.
+ */
+export async function resolveRegulation(id: RegulationId, asOf: string | undefined): Promise<ServedRegulation> {
+  const adapter = adapters.regulation;
+  if (asOf === undefined || adapter.resolveAsOf === undefined) {
+    return { record: await adapter.get(id, asOf), fromCurrent: false, note: undefined };
+  }
+  const resolved = await adapter.resolveAsOf(id, asOf);
+  if (resolved.record === null) return { record: null, fromCurrent: false, note: undefined };
+  const fromCurrent = resolved.basis === "current";
+  return { record: resolved.record, fromCurrent, note: fromCurrent ? asOfNote(resolved.record, asOf) : undefined };
+}
+
+const versionOf = (r: Regulation): string => (r.document_version.trim() === "" ? "blank" : r.document_version);
+
+/**
+ * The statement that goes with a record served from current text under `as_of`.
+ *
+ * It exists because the failure is invisible from inside the record: today's
+ * text asked for under a past date is byte-for-byte what a historical version
+ * would look like, so a validator asking what applied at an approval date, and
+ * the model relaying the answer, both read it as the text of that date. It says
+ * what the corpus lacks, which version it served instead (by the field that
+ * names it), and what not to do with the result.
+ */
+export function asOfNote(record: Regulation, asOf: string): string {
+  return (
+    `This corpus records no version of this provision for the requested as_of date (${asOf}). ` +
+    `The text served is the version named in document_version (${versionOf(record)}), which may differ from ` +
+    "the text in force on that date. Do not present it as the historical text."
+  );
+}
+
+/**
+ * Where a group of records shares one envelope: a tree (every node reached by
+ * the walk) or an expansion (the regulation children embedded under one record).
+ */
+export type AsOfGroup = "tree" | "children";
+
+/**
+ * The same statement for a group, where one envelope covers many records.
+ *
+ * Nodes other than the root are not given a field each: a tree can reach 200 of
+ * them, and the same sentence 200 times is the cost the note exists to avoid.
+ * They are counted in the one note instead. Returns undefined when nothing in
+ * the group was served from current text — no note, rather than an empty one.
+ */
+export function asOfGroupNote(
+  asOf: string,
+  root: { record: Regulation; fromCurrent: boolean },
+  otherNodesFromCurrent: number,
+  group: AsOfGroup = "tree",
+): string | undefined {
+  const n = otherNodesFromCurrent;
+  if (!root.fromCurrent && n === 0) return undefined;
+  if (n === 0) return asOfNote(root.record, asOf);
+  const detail = "(detail: 'full' shows each one's document_version)";
+  const tree = group === "tree";
+  // "2 other provisions in this tree" / "2 of its children": the same count, said
+  // in the words that fit what the group is.
+  const others = tree ? (n === 1 ? "1 other provision" : `${n} other provisions`) : n === 1 ? "1 of its children" : `${n} of its children`;
+  if (root.fromCurrent) {
+    return (
+      `${asOfNote(root.record, asOf)} The same holds for ${others}${tree ? " in this tree" : ""}: ` +
+      `${n === 1 ? "it was" : "each was"} served from its current text, which may differ from the text in force on that date ${detail}.`
+    );
+  }
+  const subject = tree
+    ? `${n === 1 ? "1 provision" : `${n} provisions`} in this tree other than the root`
+    : `${n === 1 ? "1 child" : `${n} children`} of this provision`;
+  return (
+    `${subject} ${n === 1 ? "was" : "were"} served from current text, because this corpus records no version of ` +
+    `${n === 1 ? "it" : "them"} for the requested as_of date (${asOf}). ` +
+    `${n === 1 ? "It" : "Each"} may differ from the text in force on that date; do not present ` +
+    `${n === 1 ? "it" : "them"} as the historical text ${detail}.`
+  );
+}
+
+/**
+ * The tail every as_of miss shares. A miss is the one answer that carries no
+ * text, so it says what the same call does elsewhere: a date the corpus holds no
+ * version for is answered with the current text AND an as_of_note, not refused.
+ * Without that the miss reads as "as_of is unsupported" and a caller drops the
+ * date, which loses the note too.
+ */
+export const AS_OF_MISS_CONTEXT =
+  "Where the corpus records no version for a date but the document already existed, the current text is " +
+  "served together with an as_of_note; this date is earlier than anything the corpus records for it.";
+
+/**
+ * Attach `as_of_note` to a response body, leading it so the caveat is read
+ * before the text it qualifies. With no note the body is returned untouched —
+ * the key is absent, never present and empty (absent is not empty).
+ */
+export function withAsOfNote<T extends Record<string, unknown>>(
+  body: T,
+  note: string | undefined,
+): T | (T & { as_of_note: string }) {
+  return note === undefined ? body : { as_of_note: note, ...body };
 }
 
 // --- Input leniency ----------------------------------------------------------

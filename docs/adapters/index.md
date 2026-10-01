@@ -8,8 +8,14 @@ The MCP server reaches its corpus through a small set of adapter interfaces defi
 interface RegulationAdapter {
   search(query: string): Promise<Regulation[]>;
   get(id: RegulationId, asOf?: string): Promise<Regulation | null>;
+  /** Optional — see "Saying which basis an as_of record was served on" below. */
+  resolveAsOf?(id: RegulationId, asOf: string): Promise<AsOfResolution>;
   list(): Promise<Regulation[]>;
 }
+
+type AsOfResolution =
+  | { record: Regulation; basis: "history" | "current" }
+  | { record: null };
 
 interface TestAdapter {
   search(query: string): Promise<Test[]>;
@@ -99,6 +105,27 @@ adapters.meta       = fa.meta;
 
 The JSON is validated against the full zod schemas on load. `createFileAdapters` returns all six adapters backed by in-memory maps — `search` delegates to the shared `rankedSearch`, `get` is a direct map lookup, `list` returns the surface array. The optional `regulation_history` corpus key powers `get(id, asOf)` — see [Corpus structure → Versioning](../corpus/#versioning) for the file shape and the resolution rule. The MCPB entry point additionally runs the structural linter at startup: violations abort with exit 1, staleness warnings print to stderr without blocking.
 
+## Saying which basis an `as_of` record was served on
+
+`get(id, asOf)` returns a record, and a record cannot say whether it is the text in force on the date or only the best text the backend has: today's text served under a past date looks exactly like a historical version. A validator asking what applied at an approval date, and the model relaying the answer, would both take it for the text of that date.
+
+`resolveAsOf(id, asOf)` is the optional method that closes this. It resolves exactly as `get(id, asOf)` does and also reports the **basis**:
+
+| `basis` | Meaning |
+|---|---|
+| `"history"` | a recorded version covers the date — the text is the one then in force |
+| `"current"` | no version is recorded for the date, so the current record was served as the best text available |
+
+A miss is `{ record: null }`; it has no basis because nothing was served.
+
+When the basis is `"current"`, `get_regulation`, `expand_regulation` and `get_regulation_tree` attach an additive `as_of_note` string saying that the corpus records no version for the requested date, which version was served (by its `document_version`), that it may differ from the text in force on that date, and that it must not be presented as the historical text. `expand_regulation` also resolves its regulation children through `resolveAsOf` under the same date and counts those served from current text. There is no note without `as_of`, when history covers the date (for the record and its children), or on a miss.
+
+Rules for implementers:
+
+- **Make it the one implementation and have `get` delegate to it.** The record must be exactly what `get(id, asOf)` returns; only `basis` is new. Two copies of the selection logic can disagree about what was served. `createFileAdapters` and the in-memory demo both do this.
+- **The method is optional.** An adapter without it keeps compiling and behaving as before: the tools fall back to `get`, and no note is attached, because nothing says the text was substituted. Absent is not `"history"` — it is "unknown".
+- **Report `"current"` honestly.** An adapter that has no history but cannot tell the tool layer so serves a validator today's text under a past date with nothing to say it is not that date's text. Implement the method if your backend ever serves current text for a past `asOf`.
+
 ## The in-memory demo as a template
 
 `examples/inmemory-demo.ts` is the reference implementation for hand-coded adapters. It seeds a small slice of PD-calibration content into in-memory maps and implements all six adapter interfaces against them. Use it as the template when building your own backend.
@@ -106,7 +133,7 @@ The JSON is validated against the full zod schemas on load. `createFileAdapters`
 Key things the demo shows:
 
 - **`search(query)`** — delegates to `rankedSearch` with the surface's exported field set
-- **`get(id, asOf?)`** — direct map lookup; `asOf` selects from per-id version history (the last entry whose `effectiveFrom` ≤ `asOf`; predating all entries → `null`; no history → current)
+- **`get(id, asOf?)`** — direct map lookup; `asOf` selects from per-id version history (the last entry whose `effectiveFrom` ≤ `asOf`; predating all entries → `null`; no history → current). It delegates to **`resolveAsOf`**, which reports `basis: "history" | "current"` so the tools can attach an `as_of_note`
 - **`list()`** — returns every record on the surface; the sources variant filters by status
 - **`resolveCitation(text)`** — delegates to `resolveCitationIn` from the file adapter, the deterministic citation matcher
 - **`referrers(id)`** — delegates to `computeReferrers` from `src/referrers.ts`, the ONE reverse index over parent/children, `derived_from`, `regulatory_basis`, `regulatory_scope`, and playbook phase references
