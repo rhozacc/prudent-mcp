@@ -443,6 +443,109 @@ describe("as_of_note on the regulation tools", () => {
     });
   });
 
+  describe("members the corpus lists but has no version of for the date", () => {
+    // A child whose recorded history starts after the date, or whose document was
+    // published after it, resolves to nothing under as_of. It used to come back as
+    // a bare id with a null label - the same shape as a reference to a record the
+    // corpus does not hold at all - and the note counted only the children served
+    // from current text. The corpus lists these records; it has nothing for the
+    // date. That is a gap in its history, and the note says so.
+    const DATE = "2016-01-01";
+    const gappy = record("regulation://acme/gappy", "Acme Gappy", CURRENT, {
+      // art-1/b: history starts 2018. young: its document was published 2020.
+      // art-1/a: no history, document existed (current text). dangling: not held.
+      children: [art1b.id, young.id, art1a.id, "regulation://acme/dangling"],
+    });
+    const lone = record("regulation://acme/lone", "Acme Lone", CURRENT, { children: [art1b.id] });
+    const rooted = (...roots: Array<typeof gappy>): RegulationAdapter => ({
+      ...fileAdapters.regulation,
+      get: (i, asOf) => {
+        const root = roots.find((r) => r.id === i);
+        return root === undefined ? fileAdapters.regulation.get(i, asOf) : Promise.resolve(root as never);
+      },
+      resolveAsOf: (i, asOf) => {
+        const root = roots.find((r) => r.id === i);
+        return root === undefined
+          ? fileAdapters.regulation.resolveAsOf!(i, asOf)
+          : Promise.resolve({ record: root as never, basis: "history" as const });
+      },
+    });
+
+    beforeEach(async () => {
+      await connect(rooted(gappy, lone));
+    });
+
+    it("expand_regulation counts the children with no version, apart from the ones served from current text", async () => {
+      const r = await call("expand_regulation", { id: gappy.id, as_of: DATE });
+      expect(r.isError).toBe(false);
+      const note = r.body["as_of_note"] as string;
+      expect(typeof note).toBe("string");
+      expect(note).toContain("1 child of this provision was served from current text");
+      expect(note).toContain("2 children of this provision have no recorded version for the requested as_of date (2016-01-01)");
+      expect(note).toContain("listed by id only, with no label or text");
+      expect(note).toContain("not evidence that they did not exist or did not apply on that date");
+      // The id the corpus does not hold at all is a dangling reference, not a gap.
+      expect(note).not.toContain("3 children");
+    });
+
+    it("the children without a version are still listed, by id, with no label or record", async () => {
+      const concise = await call("expand_regulation", { id: gappy.id, as_of: DATE });
+      const stubs = concise.body["children"] as Array<{ id: string; label: string | null }>;
+      expect(stubs.map((c) => c.id)).toEqual([art1b.id, young.id, art1a.id, "regulation://acme/dangling"]);
+      expect(stubs.map((c) => c.label)).toEqual([null, null, "Acme Article 1(a)", null]);
+      const full = await call("expand_regulation", { id: gappy.id, as_of: DATE, detail: "full" });
+      const kids = full.body["children"] as Array<{ id: string; record: unknown }>;
+      expect(kids.map((c) => c.record === null)).toEqual([true, true, false, true]);
+    });
+
+    it("says so when the children with no version are the only thing to say, and in the singular", async () => {
+      const r = await call("expand_regulation", { id: lone.id, as_of: DATE });
+      const note = r.body["as_of_note"] as string;
+      expect(note).toContain("1 child of this provision has no recorded version for the requested as_of date (2016-01-01)");
+      expect(note).toContain("it is listed by id only");
+      expect(note).not.toContain("served from current text");
+      expect(Object.keys(r.body)[0]).toBe("as_of_note");
+    });
+
+    it("adds nothing without as_of, or when a recorded version covers every child", async () => {
+      expect("as_of_note" in (await call("expand_regulation", { id: lone.id })).body).toBe(false);
+      // At 2019 art-1/b has a recorded version, so it is not a gap.
+      expect("as_of_note" in (await call("expand_regulation", { id: lone.id, as_of: "2019-01-01" })).body).toBe(false);
+    });
+
+    it("get_regulation_tree counts them on the root and says the walk stops there", async () => {
+      const r = await call("get_regulation_tree", { id: gappy.id, as_of: DATE });
+      expect(r.isError).toBe(false);
+      const note = r.body["as_of_note"] as string;
+      expect(note).toContain("1 provision in this tree other than the root was served from current text");
+      expect(note).toContain("2 provisions in this tree other than the root have no recorded version for the requested as_of date (2016-01-01)");
+      expect(note).toContain("by id only, with no label or text, and the walk goes no further there");
+      expect(r.text.match(/as_of_note/g)).toHaveLength(1);
+      const kids = (r.body as unknown as { children: Array<{ id: string; citation: string }> }).children;
+      // A node with nothing to serve is its bare id - the note is what says why.
+      expect(kids.find((k) => k.id === young.id)?.citation).toBe(young.id);
+    });
+
+    it("get_regulation_tree says it in the singular as well", async () => {
+      const note = (await call("get_regulation_tree", { id: lone.id, as_of: DATE })).body["as_of_note"] as string;
+      expect(note).toContain("1 provision in this tree other than the root has no recorded version");
+      expect(note).toContain("it appears by id only");
+    });
+
+    it("an adapter without resolveAsOf is told the same, because the gap is observable from get alone", async () => {
+      const legacy: RegulationAdapter = {
+        search: (q) => fileAdapters.regulation.search(q),
+        get: (i, asOf) => rooted(gappy, lone).get(i, asOf),
+        list: () => fileAdapters.regulation.list(),
+      };
+      await connect(legacy);
+      const note = (await call("expand_regulation", { id: lone.id, as_of: DATE })).body["as_of_note"] as string;
+      expect(note).toContain("1 child of this provision has no recorded version");
+      // ...and still asserts no substitution of its own: nothing here says the root was current text.
+      expect(note).not.toContain("served from current text");
+    });
+  });
+
   describe("an adapter without resolveAsOf", () => {
     // Adapters outside this repo predate the method. They must keep compiling
     // and keep behaving as before: the record under as_of, and no note — nothing
@@ -482,7 +585,7 @@ describe("as_of_note on the regulation tools", () => {
       expect("as_of_note" in tree.body).toBe(false);
     });
 
-    it("resolves expand children through get(id, asOf), as before", async () => {
+    it("resolves expand children through get(id, asOf)", async () => {
       const r = await call("expand_regulation", { id: art1.id, as_of: "2019-01-01", detail: "full" });
       expect(r.isError).toBe(false);
       const kids = r.body["children"] as Array<{ id: string; record: { text: string } }>;

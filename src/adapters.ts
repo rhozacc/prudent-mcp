@@ -86,9 +86,11 @@ export interface RegulationAdapter {
    * the two cannot disagree about what was served. The record must be exactly
    * what `get(id, asOf)` returns; only `basis` is new information.
    *
-   * An adapter without it keeps compiling and behaving as before: the tools
-   * fall back to `get`, and no note is attached because nothing says the text
-   * was substituted. Absent is not "history" — it is "unknown".
+   * An adapter without it keeps compiling: the tools fall back to
+   * `get(id, asOf)`, and no substitution note is attached because nothing says
+   * the text was substituted. Absent is not "history" — it is "unknown". (A
+   * record that `get(id, asOf)` cannot serve while `get(id)` can is still a gap
+   * the tools report, since that is observable from `get` alone.)
    */
   resolveAsOf?(id: RegulationId, asOf: string): Promise<AsOfResolution>;
   /** ALL regulation records — enumeration/traversal contract, not search. */

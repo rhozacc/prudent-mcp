@@ -150,15 +150,19 @@ const MAX_TREE_NODES = 200;
 //
 // `asOf` applies to regulation references only (the one versioned surface). When
 // it is given, `fromCurrent` collects the regulation ids that were answered from
-// current text because no version is recorded for the date.
+// current text because no version is recorded for the date, and `noVersion` the
+// ones the corpus lists but has nothing for at that date (they resolve to a null
+// record, which on its own reads as an id the corpus does not hold).
 async function resolveReference(
   id: AnyId,
   asOf?: string,
   fromCurrent?: Set<RegulationId>,
+  noVersion?: Set<RegulationId>,
 ): Promise<ResolvedReference> {
   if (id.startsWith("regulation://")) {
     const served = await resolveRegulation(id as RegulationId, asOf);
     if (served.fromCurrent) fromCurrent?.add(id as RegulationId);
+    if (served.noVersion) noVersion?.add(id as RegulationId);
     return { type: "regulation", id: id as RegulationId, record: served.record };
   }
   if (id.startsWith("test://"))
@@ -236,13 +240,15 @@ function toConcisePlaybook(pb: ExpandedPlaybook): ConciseExpandedPlaybook {
 //
 // With `asOf`, regulation children are resolved under the SAME date as the
 // record they hang from (a child's recorded version is served, not its latest),
-// and `fromCurrent` collects those answered from current text.
+// `fromCurrent` collects those answered from current text and `noVersion` those
+// the corpus has no version of for the date.
 export async function expandRegulation(
   raw: Regulation,
   asOf?: string,
   fromCurrent?: Set<RegulationId>,
+  noVersion?: Set<RegulationId>,
 ): Promise<ExpandedRegulation> {
-  const children = await Promise.all(raw.children.map((c) => resolveReference(c, asOf, fromCurrent)));
+  const children = await Promise.all(raw.children.map((c) => resolveReference(c, asOf, fromCurrent, noVersion)));
   return {
     id: raw.id,
     citation: raw.citation,
@@ -263,8 +269,10 @@ function toConciseRegulation(expanded: ExpandedRegulation): ConciseExpandedRegul
 // resolved leaves. Nodes cut off by any bound are flagged truncated.
 //
 // `fromCurrent` collects the ids of nodes whose as_of was answered from current
-// text because no version is recorded for the date. The tree reports that once,
-// on its root envelope, rather than stamping every node.
+// text because no version is recorded for the date, and `noVersion` those the
+// corpus lists but has nothing for at that date (a null record the walk cannot
+// descend into). The tree reports both once, on its root envelope, rather than
+// stamping every node.
 export async function buildRegulationTree(
   id: RegulationId,
   depth: number,
@@ -272,11 +280,13 @@ export async function buildRegulationTree(
   asOf?: string,
   budget: { remaining: number } = { remaining: MAX_TREE_NODES },
   fromCurrent: Set<RegulationId> = new Set(),
+  noVersion: Set<RegulationId> = new Set(),
 ): Promise<RegulationTreeNode> {
   budget.remaining -= 1; // this node
   const served = await resolveRegulation(id, asOf);
   const record = served.record;
   if (served.fromCurrent) fromCurrent.add(id);
+  if (served.noVersion) noVersion.add(id);
   const node: RegulationTreeNode = {
     type: "regulation",
     id,
@@ -297,7 +307,7 @@ export async function buildRegulationTree(
     }
     if (childId.startsWith("regulation://")) {
       node.children.push(
-        await buildRegulationTree(childId as RegulationId, depth - 1, visited, asOf, budget, fromCurrent),
+        await buildRegulationTree(childId as RegulationId, depth - 1, visited, asOf, budget, fromCurrent, noVersion),
       );
     } else if (childId.startsWith("test://")) {
       budget.remaining -= 1;
@@ -624,18 +634,22 @@ export function registerMetaTools(server: McpServer): void {
         }
         return unknownRegulationMiss(id);
       }
-      // Children are resolved under the same date. The note covers the record and
-      // any children that came from current text, so a history-covered parent
-      // with a child the corpus has no version of still says so.
+      // Children are resolved under the same date. The note covers the record, the
+      // children that came from current text and the ones the corpus has no
+      // version of, so a history-covered parent with such a child still says so.
       const fromCurrent = new Set<RegulationId>();
-      const expanded = await expandRegulation(raw, as_of, fromCurrent);
+      const noVersion = new Set<RegulationId>();
+      const expanded = await expandRegulation(raw, as_of, fromCurrent, noVersion);
       const note =
         as_of === undefined
           ? undefined
           : asOfGroupNote(
               as_of,
               { record: raw, fromCurrent: rootFromCurrent },
-              [...fromCurrent].filter((n) => n !== raw.id).length,
+              {
+                fromCurrent: [...fromCurrent].filter((n) => n !== raw.id).length,
+                noVersion: [...noVersion].filter((n) => n !== raw.id).length,
+              },
               "children",
             );
       return ok(withAsOfNote(withPlaceholderFlag(detail === "full" ? expanded : toConciseRegulation(expanded)), note));
@@ -667,7 +681,8 @@ export function registerMetaTools(server: McpServer): void {
     },
     async ({ id, depth, as_of, detail }) => {
       const fromCurrent = new Set<RegulationId>();
-      const node = await buildRegulationTree(id, depth ?? 5, new Set<RegulationId>(), as_of, undefined, fromCurrent);
+      const noVersion = new Set<RegulationId>();
+      const node = await buildRegulationTree(id, depth ?? 5, new Set<RegulationId>(), as_of, undefined, fromCurrent, noVersion);
       if (node.record === null) {
         if (as_of !== undefined && (await adapters.regulation.get(id)) !== null) {
           return miss(
@@ -683,7 +698,10 @@ export function registerMetaTools(server: McpServer): void {
           : asOfGroupNote(
               as_of,
               { record: node.record, fromCurrent: fromCurrent.has(id) },
-              [...fromCurrent].filter((n) => n !== id).length,
+              {
+                fromCurrent: [...fromCurrent].filter((n) => n !== id).length,
+                noVersion: [...noVersion].filter((n) => n !== id).length,
+              },
             );
       return ok(withAsOfNote(detail === "full" ? node : toConciseTree(node), note));
     },

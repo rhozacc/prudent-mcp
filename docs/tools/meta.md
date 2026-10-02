@@ -324,7 +324,7 @@ type ExpandedRegulation = {
 
 `pre_adoption_placeholders` and `notice` are the same flag [`get_regulation`](./regulation#get-regulation) attaches (one scan, `src/placeholders.ts`), computed over the record asked for and not over the children it embeds.
 
-With `as_of`, regulation children are resolved under the same date as the record, so a child with a recorded version for that date is embedded at that version (the same one [`get_regulation`](./regulation#get-regulation) serves), not at its latest. The note is the one `get_regulation` attaches, and it also counts any children served from current text because the corpus records no version of them for the date, so a record covered by history still carries a note when one of its children is not. Checks and tests are not versioned and are resolved as always.
+With `as_of`, regulation children are resolved under the same date as the record, so a child with a recorded version for that date is embedded at that version (the same one [`get_regulation`](./regulation#get-regulation) serves), not at its latest. The note is the one `get_regulation` attaches, and it also counts any children served from current text because the corpus records no version of them for the date, so a record covered by history still carries a note when one of its children is not. A child the corpus lists but has no version of for the date (its recorded history starts later, or its document was published later) is listed by id with a null label or record; the note counts those too, apart from the others, and says that this is a gap in the corpus's history and not a statement about the law. An id the corpus does not hold at all is a dangling reference and is not counted. Checks and tests are not versioned and are resolved as always.
 
 **Example:**
 ```ts
@@ -350,7 +350,7 @@ Walk a regulation's children recursively into a dossier: the branch of law (sect
 |---|---|---|
 | `id` | `RegulationId` | Root of the tree, e.g. `regulation://crr/180` |
 | `depth` | `number` | Optional — max regulation recursion depth (default 5, max 10) |
-| `as_of` | `string` (ISO date) | Optional — resolve regulations as of this date; an `as_of_note` on the root says when nodes were served from current text |
+| `as_of` | `string` (ISO date) | Optional — resolve regulations as of this date; an `as_of_note` on the root says when nodes were served from current text, and counts nodes the corpus has no version of for the date (shown by id only, the walk does not continue below them) |
 | `detail` | `"concise" \| "full"` | Optional, default `"concise"` |
 
 **Returns:** `RegulationTreeNode` — unknown roots are an `isError` result pointing at `search_regulation`.

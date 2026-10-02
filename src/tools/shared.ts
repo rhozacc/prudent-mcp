@@ -390,6 +390,16 @@ export interface ServedRegulation {
    * and the tools behave as they did before the method existed.
    */
   fromCurrent: boolean;
+  /**
+   * True only when `as_of` was given, no version was found for the date
+   * (`record` is null), and the corpus nevertheless holds the id's current
+   * record. That is a gap in the recorded history - the provision is listed in
+   * the corpus, it just has nothing for the date - which a dangling reference
+   * (an id the corpus does not hold at all) is not. A root miss is told apart
+   * from a dangling id the same way; a child or tree node needs the same
+   * distinction, or it comes back as a bare id and reads as a broken link.
+   */
+  noVersion: boolean;
   /** The `as_of_note` for this one record; undefined unless `fromCurrent`. */
   note: string | undefined;
 }
@@ -401,13 +411,21 @@ export interface ServedRegulation {
  */
 export async function resolveRegulation(id: RegulationId, asOf: string | undefined): Promise<ServedRegulation> {
   const adapter = adapters.regulation;
+  // Asked once, only for a miss under a date: does the corpus hold the id at all?
+  const gap = async (): Promise<boolean> => asOf !== undefined && (await adapter.get(id)) !== null;
   if (asOf === undefined || adapter.resolveAsOf === undefined) {
-    return { record: await adapter.get(id, asOf), fromCurrent: false, note: undefined };
+    const record = await adapter.get(id, asOf);
+    return { record, fromCurrent: false, noVersion: record === null && (await gap()), note: undefined };
   }
   const resolved = await adapter.resolveAsOf(id, asOf);
-  if (resolved.record === null) return { record: null, fromCurrent: false, note: undefined };
+  if (resolved.record === null) return { record: null, fromCurrent: false, noVersion: await gap(), note: undefined };
   const fromCurrent = resolved.basis === "current";
-  return { record: resolved.record, fromCurrent, note: fromCurrent ? asOfNote(resolved.record, asOf) : undefined };
+  return {
+    record: resolved.record,
+    fromCurrent,
+    noVersion: false,
+    note: fromCurrent ? asOfNote(resolved.record, asOf) : undefined,
+  };
 }
 
 const versionOf = (r: Regulation): string => (r.document_version.trim() === "" ? "blank" : r.document_version);
@@ -436,21 +454,42 @@ export function asOfNote(record: Regulation, asOf: string): string {
  */
 export type AsOfGroup = "tree" | "children";
 
+/** The other members of a group, by what became of them under the requested date. */
+export interface AsOfGroupCounts {
+  /** Served from their current text, because no version is recorded for the date. */
+  fromCurrent: number;
+  /** Listed by the corpus but with no version for the date, so shown by id alone. */
+  noVersion: number;
+}
+
 /**
  * The same statement for a group, where one envelope covers many records.
  *
  * Nodes other than the root are not given a field each: a tree can reach 200 of
  * them, and the same sentence 200 times is the cost the note exists to avoid.
- * They are counted in the one note instead. Returns undefined when nothing in
- * the group was served from current text — no note, rather than an empty one.
+ * They are counted in the one note instead - both the ones served from current
+ * text and the ones with nothing to serve, which come back as a bare id and
+ * would otherwise read as a dangling reference. Returns undefined when nothing
+ * in the group needs saying - no note, rather than an empty one.
  */
 export function asOfGroupNote(
   asOf: string,
   root: { record: Regulation; fromCurrent: boolean },
-  otherNodesFromCurrent: number,
+  others: AsOfGroupCounts,
   group: AsOfGroup = "tree",
 ): string | undefined {
-  const n = otherNodesFromCurrent;
+  const parts = [currentTextPart(asOf, root, others.fromCurrent, group), noVersionPart(asOf, others.noVersion, group)];
+  const said = parts.filter((p): p is string => p !== undefined);
+  return said.length === 0 ? undefined : said.join(" ");
+}
+
+/** The members, and the root, served from current text. */
+function currentTextPart(
+  asOf: string,
+  root: { record: Regulation; fromCurrent: boolean },
+  n: number,
+  group: AsOfGroup,
+): string | undefined {
   if (!root.fromCurrent && n === 0) return undefined;
   if (n === 0) return asOfNote(root.record, asOf);
   const detail = "(detail: 'full' shows each one's document_version)";
@@ -472,6 +511,29 @@ export function asOfGroupNote(
     `${n === 1 ? "it" : "them"} for the requested as_of date (${asOf}). ` +
     `${n === 1 ? "It" : "Each"} may differ from the text in force on that date; do not present ` +
     `${n === 1 ? "it" : "them"} as the historical text ${detail}.`
+  );
+}
+
+/**
+ * The members the corpus lists but has no version of for the date. They carry no
+ * label and no text, which is exactly what a reference to a record that is not in
+ * the corpus looks like, so the note says which of the two this is - and that it
+ * is a statement about the corpus's history, never about the law.
+ */
+function noVersionPart(asOf: string, m: number, group: AsOfGroup): string | undefined {
+  if (m === 0) return undefined;
+  const one = m === 1;
+  const subject =
+    group === "tree"
+      ? `${one ? "1 provision" : `${m} provisions`} in this tree other than the root`
+      : `${one ? "1 child" : `${m} children`} of this provision`;
+  const shown =
+    group === "tree"
+      ? `${one ? "it appears" : "they appear"} by id only, with no label or text, and the walk goes no further there`
+      : `${one ? "it is" : "they are"} listed by id only, with no label or text`;
+  return (
+    `${subject} ${one ? "has" : "have"} no recorded version for the requested as_of date (${asOf}), so ${shown}. ` +
+    `That is a gap in what this corpus records, not evidence that ${one ? "it" : "they"} did not exist or did not apply on that date.`
   );
 }
 

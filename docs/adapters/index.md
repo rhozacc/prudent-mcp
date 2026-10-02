@@ -118,14 +118,14 @@ The JSON is validated against the full zod schemas on load. `createFileAdapters`
 
 A miss is `{ record: null }`; it has no basis because nothing was served.
 
-When the basis is `"current"`, `get_regulation`, `expand_regulation` and `get_regulation_tree` attach an additive `as_of_note` string saying that the corpus records no version for the requested date, which version was served (by its `document_version`), that it may differ from the text in force on that date, and that it must not be presented as the historical text. `expand_regulation` also resolves its regulation children through `resolveAsOf` under the same date and counts those served from current text. There is no note without `as_of`, when history covers the date (for the record and its children), or on a miss.
+When the basis is `"current"`, `get_regulation`, `expand_regulation` and `get_regulation_tree` attach an additive `as_of_note` string saying that the corpus records no version for the requested date, which version was served (by its `document_version`), that it may differ from the text in force on that date, and that it must not be presented as the historical text. `expand_regulation` also resolves its regulation children through `resolveAsOf` under the same date (up to 0.8 it embedded their latest text whatever the date) and counts those served from current text. A child, or a `get_regulation_tree` node, that the corpus holds but has no version of for the date resolves to nothing and comes back as a bare id, which reads like a dangling reference; the note counts those separately and says so. There is no note without `as_of`, when history covers the date (for the record and its children), or on a miss.
 
 The pre-adoption placeholder flag (`pre_adoption_placeholders` + `notice` on `get_regulation` and `expand_regulation`) needs nothing from an adapter: the tool layer computes it from the served `text` (`src/placeholders.ts`), so every adapter, including an out-of-tree one, gets it.
 
 Rules for implementers:
 
 - **Make it the one implementation and have `get` delegate to it.** The record must be exactly what `get(id, asOf)` returns; only `basis` is new. Two copies of the selection logic can disagree about what was served. `createFileAdapters` and the in-memory demo both do this.
-- **The method is optional.** An adapter without it keeps compiling and behaving as before: the tools fall back to `get`, and no note is attached, because nothing says the text was substituted. Absent is not `"history"` — it is "unknown".
+- **The method is optional.** An adapter without it keeps compiling: the tools fall back to `get(id, asOf)`, and no substitution note is attached, because nothing says the text was substituted. Absent is not `"history"` — it is "unknown". A record `get(id, asOf)` cannot serve while `get(id)` can is still reported as having no version for the date.
 - **Report `"current"` honestly.** An adapter that has no history but cannot tell the tool layer so serves a validator today's text under a past date with nothing to say it is not that date's text. Implement the method if your backend ever serves current text for a past `asOf`.
 
 ## Saying how much of a document is held

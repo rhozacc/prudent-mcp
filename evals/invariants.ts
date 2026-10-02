@@ -1292,6 +1292,11 @@ export async function declinesAreNeverEmpty(s: Session): Promise<InvariantResult
  * A note that is present but names neither the date asked about nor the version
  * served is a warning: it satisfies "has a note" while telling the caller nothing
  * (the same shape as I10's generic decline).
+ *
+ * The other half of the same belief: a child the corpus holds but has no version
+ * of for the date comes back as a bare id, which reads as a reference to nothing.
+ * Wherever `expand_regulation` embeds one, its reply must carry a note naming the
+ * date (`I11/expand_regulation-gap`).
  */
 /**
  * The ids the corpus file records history for. Structural metadata only: which
@@ -1440,6 +1445,44 @@ export async function asOfIsNeverSilentlySubstituted(s: Session): Promise<Invari
             evidence: [`parent ${id}`, `child ${String(kid.id)}`, `as_of ${last.asOf}`, `expand version: ${String(got?.["document_version"])}`, `get_regulation version: ${String(want?.["document_version"])}`],
           });
         }
+      }
+    }
+  }
+
+  // A child the corpus LISTS but has no version of for the date resolves to
+  // nothing, and a null record with no label is exactly what a reference to a
+  // record the corpus does not hold looks like. So whenever expand_regulation
+  // embeds such a child, the reply must say there is a gap and for which date.
+  // Observed from outside: a regulation child that comes back with no record
+  // under as_of although get_regulation serves it without one. Unlike the
+  // substitution check above this does not depend on the parent having no
+  // history - the parent can be fully recorded and the child not.
+  const gapNames = (note: unknown, asOf: string): boolean =>
+    typeof note === "string" && note.trim() !== "" && note.includes(asOf);
+  let gapsProbed = 0;
+  for (const id of ids.slice(0, 8)) {
+    for (const asOf of ladder) {
+      if (gapsProbed >= 12) break;
+      const r = await s.call("expand_regulation", { id, as_of: asOf, detail: "full" });
+      const body = asRecord(r.json);
+      if (r.isError || body === null) continue;
+      const kids = (body["children"] ?? []) as Array<{ type?: string; id?: string; record?: unknown }>;
+      const gaps: string[] = [];
+      for (const kid of kids.filter((k) => k.type === "regulation" && typeof k.id === "string" && (k.record ?? null) === null).slice(0, 3)) {
+        const held = await s.call("get_regulation", { id: kid.id });
+        if (!held.isError) gaps.push(String(kid.id));
+      }
+      if (gaps.length === 0) continue;
+      gapsProbed++;
+      bound++;
+      if (!gapNames(body["as_of_note"], asOf)) {
+        findings.push({
+          id: "I11/expand_regulation-gap",
+          severity: "fatal",
+          summary:
+            "expand_regulation embedded a child the corpus holds but has no version of for the date as a bare id, and said nothing - it reads as a dangling reference rather than a gap in the recorded history.",
+          evidence: [`parent ${id}`, `as_of ${asOf}`, `children with no version: ${gaps.join(", ")}`, `reply keys: ${Object.keys(body).join(", ")}`],
+        });
       }
     }
   }
