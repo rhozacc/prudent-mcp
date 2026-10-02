@@ -256,6 +256,30 @@ const INSTRUMENT_PATTERNS: Array<{ key: string; re: RegExp }> = [
 const isYearNumber = (s: string): boolean => /^(?:19|20)\d{2}$/.test(s);
 
 /**
+ * How an EU act is numbered in prose: kind, "(EU)", then serial/YEAR or
+ * YEAR/serial. Defined ONCE, because the gate (`namedInstrument`) and the
+ * mention scan (`instrumentMentions`) must agree on what a numbered act is, or
+ * the refusal names an instrument the scan then cannot find. `guideline` is here
+ * because ECB guidelines are numbered the same way ("Guideline (EU) 2017/697").
+ */
+const NUMBERED_ACT =
+  /\b(regulation|directive|decision|guideline)\s*\((?:eu|ec|euratom)\)\s*(?:no\.?\s*)?(\d{1,4})\s*\/\s*(\d{1,4})\b/gi;
+
+/** One key per instrument, whichever numbering era the citation is written in. */
+function numberedActKeys(text: string): string[] {
+  const keys: string[] = [];
+  for (const m of text.matchAll(NUMBERED_ACT)) {
+    const kind = m[1];
+    const first = m[2];
+    const second = m[3];
+    if (kind === undefined || first === undefined || second === undefined) continue;
+    const [year, serial] = isYearNumber(first) ? [first, second] : [second, first];
+    keys.push(`${kind.toLowerCase()}-${year}-${serial}`);
+  }
+  return keys;
+}
+
+/**
  * A numbered EU instrument the citation names, in either numbering era.
  *
  * EU acts were numbered serial/YEAR until 2015 ("Regulation (EU) No 575/2013")
@@ -273,20 +297,154 @@ const isYearNumber = (s: string): boolean => /^(?:19|20)\d{2}$/.test(s);
  */
 const namedInstrument = (text: string): string | null => {
   for (const { key, re } of INSTRUMENT_PATTERNS) if (re.test(text)) return key;
-  const m =
-    /\b(regulation|directive|decision)\s*\((?:eu|ec|euratom)\)\s*(?:no\.?\s*)?(\d{1,4})\s*\/\s*(\d{1,4})\b/i.exec(
-      text,
-    );
-  if (m === null) return null;
-  const kind = m[1];
-  const first = m[2];
-  const second = m[3];
-  if (kind === undefined || first === undefined || second === undefined) return null;
-  // Normalise to kind-YEAR-serial whichever era the citation is written in, so
-  // one instrument has one key however it was spelled.
-  const [year, serial] = isYearNumber(first) ? [first, second] : [second, first];
-  return `${kind.toLowerCase()}-${year}-${serial}`;
+  return numberedActKeys(text)[0] ?? null;
 };
+
+/**
+ * Instruments a citation can name by DESCRIPTION rather than by number, and how
+ * to recognise each in prose. The single table: `describedInstruments` reads it
+ * to find what a citation names, `holdsKind` reads `held` to ask whether the
+ * corpus has a document identifying as that kind.
+ *
+ * Conservative on purpose, and case-aware where the word is also a pronoun: RTS
+ * and ITS match only in upper case ("its" is a pronoun in half the prose ever
+ * written), so those two carry `caseSensitive`. A bare "delegated"/"implementing"
+ * is not a description of an instrument; it has to be followed by what the act
+ * is. And a descriptor that goes on to give the act's NUMBER in the form the
+ * number gate reads ("Delegated Regulation (EU) 2022/439") is not a description
+ * at all: that gate owns the citation, and re-reading it here would flip one the
+ * corpus resolves today. A number the gate CANNOT read ("Delegated Regulation
+ * 2022/439", no "(EU)") is still a description, and is declined as one: it is
+ * the same unheld instrument, and falling through is how a same-numbered
+ * provision of an unrelated document got offered for it.
+ *
+ * `held` lists token windows; a corpus document "identifies as" the kind when
+ * its framework, document id or id segment contains one as a contiguous run.
+ * Tokens, never substrings — "its" is inside "limits", "rts" inside "reports".
+ */
+const DESCRIBED_INSTRUMENTS: Array<{
+  key: string;
+  re: RegExp;
+  held: string[][];
+  caseSensitive?: boolean;
+  /** Also an ordinary English word, so an all-capitals citation cannot be trusted to mean the acronym. */
+  pronoun?: boolean;
+}> = [
+  { key: "rts", re: /\bRTS\b/g, held: [["rts"]], caseSensitive: true },
+  {
+    key: "rts",
+    re: /\bregulatory\s+technical\s+standards?\b/gi,
+    held: [["rts"], ["regulatory", "technical", "standard"], ["regulatory", "technical", "standards"]],
+  },
+  { key: "its", re: /\bITS\b/g, held: [["its"]], caseSensitive: true, pronoun: true },
+  {
+    key: "its",
+    re: /\bimplementing\s+technical\s+standards?\b/gi,
+    held: [["its"], ["implementing", "technical", "standard"], ["implementing", "technical", "standards"]],
+  },
+  {
+    key: "delegated",
+    re: new RegExp(`\\b(?:commission\\s+)?delegated\\s+(?:regulation|decision|act)s?\\b`, "gi"),
+    held: [["delegated"]],
+  },
+  {
+    key: "implementing",
+    re: new RegExp(`\\b(?:commission\\s+)?implementing\\s+(?:regulation|decision|act)s?\\b`, "gi"),
+    held: [["implementing"]],
+  },
+  ...(["regulation", "guideline", "decision", "recommendation"] as const).map((kind) => ({
+    key: `ecb-${kind}`,
+    re: new RegExp(`\\becb\\s+${kind}s?\\b`, "gi"),
+    held: [["ecb", kind], ["ecb", `${kind}s`]],
+  })),
+  {
+    key: "ecb-guideline",
+    re: /\bguidelines?\s+of\s+the\s+(?:ecb|european\s+central\s+bank)\b/gi,
+    held: [["ecb", "guideline"], ["ecb", "guidelines"]],
+  },
+];
+
+interface DescribedInstrument {
+  /** The citation's own words for it, quoted back. */
+  quote: string;
+  held: string[][];
+  /** Written as a numbered identifier ("RTS/2016/03"), not as a description. */
+  identifier: boolean;
+}
+
+/** Does the number gate read a number starting at the kind word that ends this match? */
+function numberGateReads(text: string, start: number, matched: string): boolean {
+  const sticky = new RegExp(NUMBERED_ACT.source, "iy");
+  sticky.lastIndex = start + matched.search(/\S+$/);
+  return sticky.test(text);
+}
+
+/**
+ * Instruments the citation names by description, and the citation with those
+ * words removed (so the rest can be scoped to a held document without "ECB" in
+ * "ECB Regulation" being read as the held ECB guide).
+ */
+function describedInstruments(text: string): { found: DescribedInstrument[]; residual: string } {
+  // An all-capitals citation has lost the case that tells ITS from a shouted
+  // pronoun. RTS has no pronoun reading, so it stays recognised.
+  const caseLost = !/[a-z]/.test(text);
+  const found: DescribedInstrument[] = [];
+  let residual = text;
+  for (const { re, held, caseSensitive, pronoun } of DESCRIBED_INSTRUMENTS) {
+    if (caseSensitive === true && caseLost && pronoun === true) continue;
+    for (const m of text.matchAll(re)) {
+      const start = m.index;
+      const end = start + m[0].length;
+      if (numberGateReads(text, start, m[0])) continue;
+      // "EBA/RTS/2016/03" is an identifier. It names its instrument by number, in
+      // a shape the number gate does not read, so it is declined for what it is.
+      const id = /^\s*\/\s*(\d{4})\s*\/\s*(\d{1,4})\b/.exec(text.slice(end));
+      if (id !== null) {
+        const lead = /(?:\b[A-Za-z]+\s*\/\s*)*$/.exec(text.slice(0, start))?.[0] ?? "";
+        const whole = `${lead}${m[0]}${id[0]}`.replace(/\s+/g, "");
+        if (!found.some((f) => f.quote === whole)) {
+          found.push({
+            quote: whole,
+            held: [citationTokens(`${m[0]} ${id[1] ?? ""} ${id[2] ?? ""}`)],
+            identifier: true,
+          });
+        }
+        residual = residual.replace(`${lead}${m[0]}${id[0]}`, " ");
+        continue;
+      }
+      // Quote from the descriptor to the end of its clause: "RTS on the IRB
+      // assessment methodology" is what the caller wrote, not "RTS".
+      const tail = (text.slice(start).split(/[,;()[\]]/)[0] ?? m[0]).trim();
+      const quote = tail.length > 80 ? m[0] : tail;
+      if (!found.some((f) => f.quote === quote)) found.push({ quote, held, identifier: false });
+      residual = residual.replace(m[0], " ");
+    }
+  }
+  return { found, residual };
+}
+
+/**
+ * Does any document identify as this kind? A document does when its framework,
+ * its document id, its id segment or "framework document_id" carries one of the
+ * windows as a contiguous run of tokens. Exported because the eval that checks the
+ * gate must decide "held" exactly as the gate does, or it reports a fatal defect
+ * on a corpus the resolver handles correctly.
+ */
+export function holdsKind(
+  regulations: Array<Pick<Regulation, "id" | "framework" | "document_id">>,
+  held: string[][],
+): boolean {
+  return regulations.some((r) =>
+    [r.framework, r.document_id, idDocSegment(r.id), `${r.framework} ${r.document_id}`].some((field) => {
+      const tokens = citationTokens(field);
+      return held.some((window) => windowAt(tokens, window) !== -1);
+    }),
+  );
+}
+
+/** The kinds a citation names by description, read from the one table. For the eval. */
+export const describedKindWindows = (text: string): string[][] =>
+  describedInstruments(text).found.flatMap((f) => f.held);
 
 /**
  * Instruments this corpus does NOT hold, and what they are.
@@ -339,18 +497,8 @@ function instrumentMentions(regulations: Regulation[]): Map<string, string[]> {
   const cached = mentionCache.get(regulations);
   if (cached !== undefined) return cached;
   const index = new Map<string, string[]>();
-  const re =
-    /\b(regulation|directive|decision)\s*\((?:eu|ec|euratom)\)\s*(?:no\.?\s*)?(\d{1,4})\s*\/\s*(\d{1,4})\b/gi;
   for (const r of regulations) {
-    const seen = new Set<string>();
-    for (const m of r.text.matchAll(re)) {
-      const kind = m[1];
-      const a = m[2];
-      const b = m[3];
-      if (kind === undefined || a === undefined || b === undefined) continue;
-      const [year, serial] = isYearNumber(a) ? [a, b] : [b, a];
-      seen.add(`${kind.toLowerCase()}-${year}-${serial}`);
-    }
+    const seen = new Set<string>(numberedActKeys(r.text));
     for (const key of seen) {
       const at = index.get(key);
       if (at === undefined) index.set(key, [r.id]);
@@ -389,7 +537,7 @@ const asCandidate = (r: Regulation): CitationCandidate => ({
  * not a thing to emit from a refusal whose whole purpose is not guessing.
  */
 const instrumentLabel = (instrument: string): string => {
-  const m = /^(regulation|directive|decision)-(\d{4})-(\d+)$/.exec(instrument);
+  const m = /^(regulation|directive|decision|guideline)-(\d{4})-(\d+)$/.exec(instrument);
   if (m === null) return instrument.toUpperCase();
   const kind = `${(m[1] ?? "").charAt(0).toUpperCase()}${(m[1] ?? "").slice(1)}`;
   const year = m[2] ?? "";
@@ -431,7 +579,8 @@ function ambiguousResolution(text: string, hits: Regulation[]): CitationResoluti
  *
  *   (0) instrument gate — a citation naming an instrument the corpus does not
  *       hold resolves to null with a coverage note, never into another
- *       document that shares a number;
+ *       document that shares a number. Named by number, or by description
+ *       ("the RTS on …", "an ECB Guideline") when no held document is that kind;
  *   (i) exact normalized-citation equality;
  *   (ii) exact equality of the numeric SPINE (article/paragraph/point numbers,
  *        structural words dropped), scoped to the document the citation names.
@@ -506,6 +655,75 @@ export function resolveCitationDetailed(
             `${mentions.length > shown.length ? ", …" : ""} — open those for what this corpus ` +
             "says about it. Its own text is not here, so do not state its requirements from this corpus."
           : "Use get_corpus_info for the documents actually loaded."),
+    });
+  }
+
+  // (0b) The descriptive gate. The same defence for an instrument named by what
+  // it IS rather than by number: "Article 49(3) of the RTS on the IRB assessment
+  // methodology" carries no number the gate above can read, so the instrument was
+  // dropped and the bare "49(3)" went looking — and was offered paragraph 49 of
+  // two unrelated guidelines as the containing provision. A decline is cheap; a
+  // citation into the wrong body of law is the worst thing this server produces.
+  //
+  // Fires only for a description the corpus has no document identifying as, so a
+  // corpus that does hold an RTS falls through to normal resolution. When the
+  // citation ALSO names a held document, which of the two the "Article 49(3)"
+  // belongs to is not something this resolver can know: decline, naming both.
+  const described = describedInstruments(text);
+  const unheld = described.found.filter((d) => !holdsKind(regulations, d.held));
+  // Only when there is a provision number to place. Without one nothing can be
+  // sourced from a same-numbered provision, and the "no provision number" note
+  // below already says the instrument may be described without being held.
+  const placeable =
+    spineOf(citationTokens(described.residual).filter((t) => !STRUCTURAL.has(t))).length > 0;
+  if (unheld.length > 0 && placeable) {
+    const quoted = unheld.map((d) => `"${d.quote}"`).join(" and ");
+    const identifiers = unheld.every((d) => d.identifier);
+    const heldNames: string[] = [];
+    if (instrument !== null) heldNames.push(instrumentLabel(instrument));
+    const { docs: namedDocs } = scopeToDocument(
+      citationTokens(described.residual),
+      documentAliases(regulations),
+    );
+    // `crr` the instrument and `crr` the document are one thing named twice.
+    for (const d of namedDocs ?? []) {
+      if (!heldNames.some((n) => n.toLowerCase() === d.toLowerCase())) heldNames.push(d);
+    }
+    // An alias naming several documents is a framework ("EBA"), not a document:
+    // listing its members would say the citation named each of them.
+    const group = instrument === null && (namedDocs?.size ?? 0) > 1;
+    const heldList = group
+      ? `documents under a framework or name it shares (${heldNames.slice(0, 3).join(", ")}${heldNames.length > 3 ? ", …" : ""})`
+      : `a document this corpus holds (${heldNames.slice(0, 3).join(", ")})`;
+    // A number the number gate cannot read is not a reason to say "cite it by
+    // number": the caller did, and the form is what was missing.
+    const numberedDescription = !identifiers && unheld.some((d) => /\d\s*\/\s*\d/.test(d.quote));
+    const wayOut =
+      (identifiers
+        ? ""
+        : numberedDescription
+          ? "Cite the instrument in full, kind then \"(EU)\" then its number (for example " +
+            "\"Regulation (EU) YYYY/NNN\"), so the corpus can say whether it is held; "
+          : "Cite the instrument by number so the corpus can say whether it is held; ") +
+      (identifiers ? "Use" : "use") +
+      " search_regulation with its name for what served records say about it, or " +
+      "get_corpus_info for what is loaded. This note states nothing about what it requires.";
+    const how = identifiers ? "an identifier" : "description";
+    return none({
+      coverage_note:
+        heldNames.length === 0
+          ? identifiers
+            ? `"${text}" names an instrument by an identifier (${quoted}), and this corpus holds no ` +
+              "document identified as such. Nothing was matched, rather than sourcing a " +
+              `same-numbered provision from another document. ${wayOut}`
+            : `"${text}" names an instrument by description (${quoted}), and this corpus holds no ` +
+              "document identified as such. Nothing was matched, rather than sourcing a same-numbered " +
+              `provision from another document. ${wayOut}`
+          : `"${text}" names ${heldList} ` +
+            `and also an instrument by ${how} (${quoted}) that it holds no document identified ` +
+            "as, so which of the two the provision belongs to cannot be told. Nothing was matched, " +
+            `rather than sourcing a same-numbered provision from either. Name one instrument per ` +
+            `citation. ${wayOut}`,
     });
   }
 

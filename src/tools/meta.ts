@@ -429,7 +429,8 @@ export function registerMetaTools(server: McpServer): void {
         "Matching is EXACT, in this order: the record's own citation, then its numeric spine " +
         "(article/paragraph/point numbers) scoped to the document the citation names. There is " +
         "no fuzzy fallback — 1218 is not 121, and a citation naming an instrument this corpus " +
-        "does not hold resolves to null rather than to a same-numbered provision elsewhere.\n" +
+        "does not hold, by number or by description (\"the RTS on …\"), resolves to null with no " +
+        "candidates rather than to a same-numbered provision elsewhere.\n" +
         "Returns { match, confidence, candidates, ambiguous, unmatched_segments, coverage_note }:\n" +
         "  match null + candidates non-empty → several records fit (ambiguous: true) or the " +
         "corpus holds only narrower provisions under the one asked for; open a candidate by id.\n" +

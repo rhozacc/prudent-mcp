@@ -17,7 +17,7 @@ The unit is the **call trace**: for every tool call, the bytes that land in the 
 |---|---|---|
 | I1 | Response bodies are valid JSON | the body has the shape the schema promises |
 | I2 | Ids shown in tool descriptions resolve | the addressing scheme the model infers is the real one |
-| I3 | Citation resolution is honest | a returned citation is the one that was asked for |
+| I3 | Citation resolution is honest | a returned citation is the one that was asked for; an instrument named by number or by description that the corpus does not hold never returns a match or candidates |
 | I4 | Reported totals are true | "I have seen all the matches" |
 | I5 | Ids handed out are fetchable | an id from a search result can be opened |
 | I6 | Context cost stays within budget | there is context left for the actual task |
@@ -64,6 +64,7 @@ That sentence was true of the script and false in effect for longer than it shou
 Two invariants report `applicable: false` against the demo and that is the honest state, not a gap to paper over:
 
 - **I2** binds only when a tool description or input schema contains a literal id. There are none: every example is a template shape naming the tool that hands out real ids. If someone reintroduces a literal, I2 binds again and checks it — which is the point of the check.
+- **I3/descriptive-instrument** reads which kinds of document the corpus holds from `get_corpus_info` (document ids, frameworks, coverage) plus, for a file-backed session, the corpus file's id segments, using the resolver's own `holdsKind` so the two cannot disagree, never from the reply, and skips a probe for a kind it holds; with all four kinds held it is not applicable (an info finding says so). It runs even where the article-number half cannot.
 - **I3** needs article-numbered ids to derive a provably-absent article number from, and the demo seed has none. It binds against a real corpus. This is the case the two rules above exist for: a bar that only holds for one corpus is a fixture, so run the suite against the corpus you ship.
 
 The cost warning (`I6/surface`) stands deliberately. Nineteen tools cost ~4,700 tokens of standing context against a 3,000 budget, and the fix is not to cut the guidance — descriptions are how a model learns not to make the wrong call, and a wrong call costs more than the words that would have prevented it. Closing it properly means publishing fewer tools.

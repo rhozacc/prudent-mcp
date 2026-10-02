@@ -92,6 +92,7 @@ Loose, human-prose citation string → the Regulation record it names, **or an h
 Passes, in order, and nothing below them:
 
 1. **Instrument gate.** A citation naming an instrument the corpus does not hold (`CRR`, `CRD`, `Regulation (EU) No 9999/9999`) resolves to `match: null` with a `coverage_note`, rather than into another document that happens to share a number. A wrong instrument is not a near miss; it is a different body of law.
+   The gate also reads an instrument named by **description**: `RTS` and `ITS` (upper case only, since `its` is a pronoun), *regulatory/implementing technical standards*, *(Commission) delegated/implementing regulation, decision or act*, *ECB regulation/guideline/decision/recommendation*, *guideline of the ECB*. When the corpus holds no document identified as that kind (an `rts`, `its`, `delegated`, `implementing` or ECB-kind token in a held document's id segment, document id or framework), the citation resolves to `match: null` with **no candidates**, and the note quotes the description, says nothing was matched, and points to citing the instrument by number, `search_regulation` with its name, and `get_corpus_info`. It states nothing about what the instrument requires. A descriptor that is followed by the act's number is left to the number gate. If the citation names a held document **and** an unheld described instrument, the note names both and asks for one instrument per citation. A corpus that does hold a document of that kind resolves normally. `Guideline (EU) YYYY/NNN` is recognised as a numbered instrument alongside regulations, directives and decisions.
 2. **Exact citation equality** — lowercased, punctuation stripped, abbreviations expanded (`art` → `article`, `para` → `paragraph`, `gl` → `guidelines`), with the document's own name removed from both sides so `Art. 180` matches a record whose citation reads `CRR Article 180`.
 3. **Exact numeric-spine equality**, scoped to the document the citation names. The spine is the article/paragraph/point numbers with structural words dropped, so `Chapter 5, paragraph 12`, `chapter 5 para 12` and `5.12` all compare equal — while `1218` is still not `121`, and `178` is not `178(1)(a)`. The document's own numbers are stripped first: `EBA GL 2017/16 paragraph 78` looks for provision 78, not for one numbered 2017.
 4. **Narrower relatives.** If the corpus holds provisions *under* the citation but not the node itself, they come back as `candidates` with `match` still `null` — "the corpus holds 178(1)(a) and 178(1)(b), but no Article 178" is useful; "Article 178 is 178(1)(a)" is false.
@@ -130,6 +131,18 @@ resolve_citation("CRR Article 178")
 resolve_citation("Article 78")
 → { match: null, ambiguous: true, candidates: [<gl-2017-16/…>, <gl-2019-03/…>],
     coverage_note: "\"Article 78\" matches 2 records across 2 document(s). Name the document to disambiguate…" }
+
+// An instrument named by description, which this corpus holds no document identified as:
+// no match, no candidates (even though held guidelines carry a paragraph 49).
+resolve_citation("Article 49(3) of the RTS on the IRB assessment methodology")
+→ { match: null, confidence: "none", candidates: [],
+    coverage_note: "\"Article 49(3) of the RTS on …\" names an instrument by description (\"RTS on the IRB
+                    assessment methodology\"), and this corpus holds no document identified as such. Nothing was
+                    matched, rather than sourcing a same-numbered provision from another document. Cite the
+                    instrument by number…" }
+// The same decline for a descriptor with a number the number gate cannot read
+// ("the Delegated Regulation 2022/439", no "(EU)"), and for an identifier such as
+// "EBA/RTS/2016/03" (worded as an identifier). With "(EU)" the number gate owns it.
 
 // An instrument this corpus does not hold.
 resolve_citation("Article 1 of Regulation (EU) No 9999/9999")

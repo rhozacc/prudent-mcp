@@ -17,6 +17,7 @@
  */
 import { readFileSync } from "node:fs";
 
+import { describedKindWindows, holdsKind, loadCorpusFile } from "../src/file-adapter.ts";
 import { estimateTokens, type Finding, type InvariantResult, type Session } from "./harness.ts";
 
 const SCHEMES = ["regulation", "check", "test", "playbook", "source"] as const;
@@ -138,6 +139,94 @@ export async function describedIdsResolve(s: Session): Promise<InvariantResult> 
 // ============================================================================
 
 /**
+ * An instrument named by DESCRIPTION ("the RTS on …", "an ECB Guideline") must
+ * be declined, never sourced from a same-numbered provision of another document.
+ *
+ * The number gate cannot read these, so before the descriptive gate the
+ * instrument was dropped and the bare article number went looking in whatever
+ * held a provision with it.
+ *
+ * Whether a probe BINDS depends on the corpus holding no document of that kind,
+ * and that is read from what the server itself says it loaded (`get_corpus_info`
+ * document ids, frameworks and coverage), never inferred from the reply: a reply
+ * that returns nothing is what a correctly held kind and a correctly declined one
+ * look like from outside, so equality of replies cannot tell them apart. A corpus
+ * that does hold such a document makes that probe not applicable.
+ */
+const DESCRIPTIVE_PROBES: string[] = [
+  "Article 1 of the RTS on the assessment methodology",
+  "Article 1 of the ITS on supervisory reporting",
+  "Article 1 of the Commission Delegated Regulation on a subject",
+  "Article 1 of an ECB Guideline on a subject",
+];
+
+export async function descriptiveInstrumentGateHolds(
+  s: Session,
+): Promise<{ applicable: boolean; findings: Finding[] }> {
+  const findings: Finding[] = [];
+  const info = await s.call("get_corpus_info");
+  // What the corpus holds, as the resolver reads it: framework, document id, id
+  // segment and "framework document_id" (`holdsKind`, the gate's own definition,
+  // so the two cannot disagree about a kind carried only by the framework or the
+  // id segment). `holdings` gives framework and document id for any server; the
+  // id segments need the corpus file, which a file-backed session has.
+  const docs: Array<{ id: `regulation://${string}`; framework: string; document_id: string }> = [];
+  const body = (info.json ?? {}) as { coverage?: unknown; holdings?: unknown };
+  if (Array.isArray(body.holdings)) {
+    for (const h of body.holdings as Array<Record<string, unknown>>) {
+      if (typeof h["document_id"] === "string" && typeof h["framework"] === "string") {
+        docs.push({ id: `regulation://${h["document_id"]}/x`, framework: h["framework"], document_id: h["document_id"] });
+      }
+    }
+  }
+  if (Array.isArray(body.coverage)) {
+    for (const c of body.coverage) {
+      if (typeof c === "string") docs.push({ id: `regulation://${c}/x`, framework: "", document_id: c });
+    }
+  }
+  if (s.corpusFile !== undefined) {
+    for (const r of loadCorpusFile(s.corpusFile).regulation) docs.push(r);
+  }
+  let bound = 0;
+  for (const text of DESCRIPTIVE_PROBES) {
+    if (holdsKind(docs, describedKindWindows(text))) continue;
+    bound++;
+    const r = await s.call("resolve_citation", { text });
+    const j = (r.json ?? {}) as { match?: unknown; candidates?: unknown; coverage_note?: unknown };
+    const candidates = Array.isArray(j.candidates) ? j.candidates.length : 0;
+    if ((j.match !== null && j.match !== undefined) || candidates > 0) {
+      findings.push({
+        id: "I3/descriptive-instrument",
+        severity: "fatal",
+        summary:
+          "resolve_citation answers a citation into an instrument named by description, which the corpus does not hold, out of a same-numbered provision of another document.",
+        evidence: [
+          `resolve_citation("${text}") → match ${j.match === null || j.match === undefined ? "null" : "set"}, ${candidates} candidate(s)`,
+          "the model will attribute that text to the instrument the caller described",
+        ],
+      });
+    } else if (typeof j.coverage_note !== "string" || !/by description/i.test(j.coverage_note)) {
+      findings.push({
+        id: "I3/descriptive-refusal-not-shaped",
+        severity: "warn",
+        summary:
+          "resolve_citation declines an instrument named by description but the note does not say it was read as a description, so it reads as a malformed citation rather than a coverage boundary.",
+        evidence: [`resolve_citation("${text}") → ${r.text.slice(0, 220)}`],
+      });
+    }
+  }
+  if (bound === 0) {
+    findings.push({
+      id: "I3/descriptive-instrument-na",
+      severity: "info",
+      summary: "The corpus holds a document of every kind the descriptive probes name, so the descriptive gate could not be tested.",
+      evidence: [`${docs.length} document name(s) read from get_corpus_info and the corpus file`],
+    });
+  }
+  return { applicable: bound > 0, findings };
+}
+
+/**
  * The hardest defect to see from inside the code: a resolver that always
  * resolves. Fuzzy containment turns "Article 501" into article 50 and an
  * instrument the corpus does not hold into one it does — and returns it with no
@@ -150,6 +239,8 @@ export async function describedIdsResolve(s: Session): Promise<InvariantResult> 
  */
 export async function citationResolutionIsHonest(s: Session): Promise<InvariantResult> {
   const findings: Finding[] = [];
+  const descriptive = await descriptiveInstrumentGateHolds(s);
+  findings.push(...descriptive.findings);
 
   // Discover real article numbers from ids the server itself hands out.
   const seen = new Set<number>();
@@ -164,8 +255,9 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
     return {
       id: "I3",
       title: "Citation resolution is honest",
-      applicable: false,
+      applicable: descriptive.applicable,
       findings: [
+        ...findings,
         {
           id: "I3/no-articles",
           severity: "info",
