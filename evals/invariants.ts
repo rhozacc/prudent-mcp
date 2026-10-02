@@ -17,7 +17,7 @@
  */
 import { readFileSync } from "node:fs";
 
-import { describedKindWindows, holdsKind, loadCorpusFile } from "../src/file-adapter.ts";
+import { describedKindWindows, holdsKind, loadCorpusFile, textCarriesPoint } from "../src/file-adapter.ts";
 import { estimateTokens, type Finding, type InvariantResult, type Session } from "./harness.ts";
 
 const SCHEMES = ["regulation", "check", "test", "playbook", "source"] as const;
@@ -227,6 +227,112 @@ export async function descriptiveInstrumentGateHolds(
 }
 
 /**
+ * When resolve_citation places a citation inside the record that contains it,
+ * the note may say that record's text carries the point. That is a claim about
+ * the SERVED text, and it used to be made without looking: an article of seven
+ * paragraphs was said to carry point 9, and a caller told so goes looking and
+ * quotes around the gap.
+ *
+ * Corpus-agnostic: citations the server hands out are deepened to points it is
+ * unlikely to hold at that granularity, and every note that says "carries point
+ * X" is checked against the text `get_regulation` serves for the container it
+ * names. Two checks, deliberately not the same code: the resolver's own reader
+ * (so the note and the record cannot drift apart) and a loose marker test
+ * written independently (so a reader that is wrong in the same way as the
+ * claim does not agree with itself). Whether a citation reached this rule is
+ * read from the reply's structure (a null match, unplaced segments, a
+ * candidate), never from equality of replies.
+ */
+export async function containerClaimsAreTrue(
+  s: Session,
+): Promise<{ applicable: boolean; findings: Finding[] }> {
+  const findings: Finding[] = [];
+  const bases = new Set<string>();
+  for (const q of ["default", "estimation", "downturn", "validation", "model", "risk"]) {
+    const t = await s.call("search_regulation", { query: q, limit: 10 });
+    for (const m of t.text.matchAll(/"citation"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
+      const c = m[1];
+      if (c !== undefined && /\d/.test(c) && !/\(/.test(c)) bases.add(c);
+    }
+  }
+  const markerFor = (seg: string): RegExp =>
+    /^\d+$/.test(seg)
+      ? new RegExp(`(?:^|[\\s;:.])(?:\\(${seg}\\)|${seg}[.)])\\s`)
+      : new RegExp(`\\(${seg}\\)`);
+  // Scoped like the claim: each deeper segment is looked for only between its
+  // parent's marker and the parent's next sibling, so "(b)" found anywhere in
+  // the article does not vouch for "3.b".
+  const nextSibling = (seg: string): string =>
+    /^\d+$/.test(seg) ? String(Number(seg) + 1) : String.fromCharCode(seg.charCodeAt(0) + 1);
+  const looselyCarries = (text: string, segs: string[]): boolean => {
+    let span = text;
+    for (const seg of segs) {
+      const at = markerFor(seg).exec(span);
+      if (at === null) return false;
+      const rest = span.slice(at.index + at[0].length);
+      const next = markerFor(nextSibling(seg)).exec(rest);
+      span = next === null ? rest : rest.slice(0, next.index);
+    }
+    return true;
+  };
+  let reached = 0;
+  for (const base of [...bases].slice(0, 12)) {
+    for (const suffix of ["(1)", "(9)", "(99)", "(2)(b)"]) {
+      const probe = `${base}${suffix}`;
+      const r = await s.call("resolve_citation", { text: probe });
+      if (r.isError) continue;
+      const j = (r.json ?? {}) as {
+        match?: unknown;
+        unmatched_segments?: unknown;
+        candidates?: Array<{ id?: string }>;
+        coverage_note?: unknown;
+      };
+      const candidate = Array.isArray(j.candidates) ? j.candidates[0] : undefined;
+      if (
+        (j.match ?? null) !== null ||
+        !Array.isArray(j.unmatched_segments) ||
+        j.unmatched_segments.length === 0 ||
+        candidate?.id === undefined
+      ) {
+        continue; // did not reach the containing-provision rule
+      }
+      reached++;
+      const note = typeof j.coverage_note === "string" ? j.coverage_note : "";
+      const claim = /carries point ([0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)\./.exec(note)?.[1];
+      if (claim === undefined) continue;
+      const rec = await s.call("get_regulation", { id: candidate.id });
+      const text = typeof (rec.json as { text?: unknown } | null)?.text === "string" ? (rec.json as { text: string }).text : null;
+      if (rec.isError || text === null) continue;
+      const segs = claim.split(".");
+      const reads = textCarriesPoint(text, segs);
+      const loose = looselyCarries(text, segs);
+      if (reads !== "yes" || !loose) {
+        findings.push({
+          id: "I3/container-claim",
+          severity: "fatal",
+          summary:
+            "resolve_citation says the containing record's text carries a point, and the text the server serves for that record does not.",
+          evidence: [
+            `resolve_citation("${probe}") claims point ${claim} in ${candidate.id}`,
+            `the resolver's reader of the served text: ${reads}; independent marker test: ${loose ? "found" : "not found"}`,
+            "a caller told the point exists goes looking for it and quotes around the gap",
+          ],
+        });
+      }
+    }
+  }
+  if (reached === 0) {
+    findings.push({
+      id: "I3/container-claim-na",
+      severity: "info",
+      summary: "No probed citation reached the containing-provision rule, so its claim about the container's text could not be tested.",
+      evidence: [`${bases.size} citation(s) observed through search_regulation`],
+    });
+  }
+  return { applicable: reached > 0, findings };
+}
+
+/**
  * The hardest defect to see from inside the code: a resolver that always
  * resolves. Fuzzy containment turns "Article 501" into article 50 and an
  * instrument the corpus does not hold into one it does — and returns it with no
@@ -241,6 +347,8 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
   const findings: Finding[] = [];
   const descriptive = await descriptiveInstrumentGateHolds(s);
   findings.push(...descriptive.findings);
+  const container = await containerClaimsAreTrue(s);
+  findings.push(...container.findings);
 
   // Discover real article numbers from ids the server itself hands out.
   const seen = new Set<number>();
@@ -255,7 +363,7 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
     return {
       id: "I3",
       title: "Citation resolution is honest",
-      applicable: descriptive.applicable,
+      applicable: descriptive.applicable || container.applicable,
       findings: [
         ...findings,
         {
