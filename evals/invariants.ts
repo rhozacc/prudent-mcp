@@ -158,6 +158,15 @@ const DESCRIPTIVE_PROBES: string[] = [
   "Article 1 of the ITS on supervisory reporting",
   "Article 1 of the Commission Delegated Regulation on a subject",
   "Article 1 of an ECB Guideline on a subject",
+  // The same kinds in the spellings a writer has for them. A gate that reads one
+  // spelling is walked round by the next, and the canonical four cannot show it.
+  "Article 1 of the rts on the assessment methodology",
+  "Article 1 of the RTSs on the assessment methodology",
+  "Article 1 of the R.T.S. on the assessment methodology",
+  "Article 1 of the regulatory-technical-standards on the assessment methodology",
+  "Article 1 of the technical standards on the assessment methodology",
+  "Article 1 of the implementing-technical-standards on supervisory reporting",
+  "Article 1 of the European Central Bank Guideline on a subject",
 ];
 
 export async function descriptiveInstrumentGateHolds(

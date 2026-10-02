@@ -204,17 +204,123 @@ describe("descriptive instrument gate: numbered identifiers", () => {
   });
 });
 
+describe("descriptive instrument gate: every spelling of a kind it names", () => {
+  // The gate used to read a kind in one spelling only (RTS in capitals, the long
+  // form in single-spaced words), so respelling it was enough to walk round it:
+  // the bare article number then went looking in every held document and was
+  // answered with a same-numbered provision of an unrelated one - the failure
+  // the gate exists to prevent, one keystroke away.
+  const respelled = [
+    // RTS: case, plural, dots
+    "Article 49 of the rts on the assessment methodology",
+    "Article 49 of the Rts on the assessment methodology",
+    "Article 49 of the RTSs",
+    "Article 49 of the rtss on assessment",
+    "Article 49(3) of the R.T.S. on the assessment methodology",
+    "Article 49(3) of the r.t.s. on the assessment methodology",
+    "ARTICLE 49(3) OF THE R.T.S. ON THE ASSESSMENT METHODOLOGY",
+    "paragraph 49 of the rts",
+    "RTS, Article 49",
+    // the long form: hyphens, runs of white space, either case
+    "Article 49 of the regulatory-technical-standards on assessment",
+    "Article 49 of the Regulatory Technical-Standards on assessment",
+    "Article 49 of the regulatory   technical\tstandards on assessment",
+    "Article 49 of the REGULATORY TECHNICAL STANDARDS on assessment",
+    "Article 49 of the regulatory\u2011technical\u2011standards on assessment",
+    // a technical standard named without saying which kind
+    "Article 49 of the technical standards on the assessment methodology",
+    "Article 49 of the Technical Standard on assessment",
+    "Article 49 of the technical-standards on assessment",
+    "technical standards, Article 49",
+    // ITS
+    "Article 49 of the ITSs on reporting",
+    "Article 49 of the I.T.S. on reporting",
+    "Article 49 of the implementing-technical-standards on reporting",
+    "Article 49 of the implementing  technical   standards on reporting",
+    // "its" is a pronoun, except where it cannot be one: straight after a determiner
+    "Article 49 of the its on reporting",
+    "Article 49 of an Its on reporting",
+    // the other descriptors, with the same freedoms
+    "Article 49 of the Commission Delegated-Regulation on assessment",
+    "Article 49 of the commission  delegated   act on assessment",
+    "Article 49 of the Commission Implementing-Regulation on reporting",
+    "Article 49 of the European Central Bank Guideline on reporting",
+    "Article 49 of the European Central Bank's Regulation on x",
+    "Article 49 of the E.C.B. Decision on reporting",
+  ];
+  for (const text of respelled) {
+    it(`declines: ${text.replace(/\t/g, "<tab>")}`, () => {
+      const r = resolveCitationDetailed(base(), text);
+      declined(r);
+      expect(r.coverage_note, text).toContain("by description");
+    });
+  }
+
+  it("never reads the letters of a dotted acronym as points of the provision", () => {
+    // "R.T.S." tokenises to r, t, s - single letters, which the spine keeps as points.
+    const r = resolveCitationDetailed(base(), "Article 49(3) of the R.T.S. on the assessment methodology");
+    expect(r.coverage_note ?? "").not.toMatch(/point 3\.r|could not be established/);
+    expect(r.unmatched_segments).toEqual([]);
+  });
+
+  it("quotes the descriptor's own words and nothing else", () => {
+    const quoted = (text: string): string | undefined =>
+      (resolveCitationDetailed(base(), text).coverage_note ?? "").match(/by (?:description|an identifier) \(("[^)]*")\)/)?.[1];
+    expect(quoted("see 206(3) of R.T.S..")).toBe('"R.T.S."');
+    expect(quoted("Rts - Annex 190")).toBe('"Rts"');
+    expect(quoted("the RTSs: Section 16")).toBe('"RTSs"');
+    expect(quoted('"Art. 210 Rts"')).toBe('"Rts"');
+    expect(quoted("see Article 172(2) of RTSs.")).toBe('"RTSs"');
+    expect(quoted("Article 49 of the RTS on the assessment methodology in Article 5")).toBe('"RTS on the assessment methodology"');
+    expect(quoted("Article 35 of the technical standards referred to in the Directive")).toBe('"technical standards"');
+    expect(quoted("Article 49 of the E.C.B. Decision on reporting. See Article 6")).toBe('"E.C.B. Decision on reporting"');
+  });
+
+  it("quotes one description when the same kind is named twice in one phrase", () => {
+    const r = resolveCitationDetailed(base(), "Article 49 of the regulatory technical standards (RTS) on assessment");
+    declined(r);
+    expect((r.coverage_note ?? "").match(/by description \(([^)]*)\)/)?.[1]).toBe('"regulatory technical standards"');
+  });
+
+  it("is released by a document of the kind, whichever way the kind is spelled", () => {
+    const regs = [...base(), reg("regulation://rts-2021-1/article-49", "Article 49", "acme-rts-2021-1", "acme")];
+    for (const text of ["Article 49 of the rts", "Article 49 of the RTSs", "Article 49 of the R.T.S.", "Article 49 of the technical standards"]) {
+      expect(resolveCitationDetailed(regs, text).coverage_note ?? "", text).not.toContain("by description");
+    }
+    // An ITS is not released by an RTS: the bare technical standard is, because it may be either.
+    expect(resolveCitationDetailed(regs, "Article 49 of the I.T.S.").coverage_note ?? "").toContain("by description");
+  });
+});
+
 describe("descriptive instrument gate: does not fire", () => {
   it("on prose that merely contains the pronoun its", () => {
-    for (const text of ["paragraph 49 of its guidelines", "Article 180 CRR and its annexes", "its Article 49"]) {
+    for (const text of [
+      "paragraph 49 of its guidelines",
+      "Article 180 CRR and its annexes",
+      "its Article 49",
+      "Article 49 and its technical annex",
+      "Article 49, and of its",
+      "paragraph 49 in its entirety",
+      "Article 49 of a rule that its text amends",
+    ]) {
       const r = resolveCitationDetailed(base(), text);
       expect(r.coverage_note ?? "").not.toContain("by description");
     }
   });
 
-  it("on lower-case rts", () => {
-    const r = resolveCitationDetailed(base(), "paragraph 49 of the rts");
-    expect(r.coverage_note ?? "").not.toContain("by description");
+  it("on words that merely contain a kind's letters", () => {
+    // Whole words, never substrings: "reports" holds rts, "limits" holds its.
+    for (const text of ["Article 49 of the reports", "Article 49 of the limits", "paragraph 49 of the parts", "Article 49 of the Charts", "Article 49 of the Smarts"]) {
+      expect(resolveCitationDetailed(base(), text).coverage_note ?? "", text).not.toContain("by description");
+    }
+  });
+
+  it("when a literal rts sits inside another word and the real descriptor follows it", () => {
+    // The residual used to be cut by literal text, so the "rts" inside "reports" went first.
+    const r = resolveCitationDetailed(base(), "Article 49 of the reports and the rts on assessment");
+    declined(r);
+    expect(r.coverage_note).toContain("by description");
+    expect(r.coverage_note).not.toContain("a document this corpus holds");
   });
 
   it("on citations naming only held documents", () => {
@@ -427,6 +533,39 @@ describe("eval I3/descriptive-instrument", () => {
     const r = await runDescriptive("none.json", [["acme", "acme-gl-a"], ["acme", "acme-gl-b"]]);
     expect(r.applicable).toBe(true);
     expect(r.findings.filter((f) => f.severity === "fatal")).toEqual([]);
+  });
+
+  it("probes the respelled kinds too, and fails a gate that reads only the canonical spellings", async () => {
+    // A stand-in for the gate as it was: the four canonical phrasings are declined,
+    // anything respelled is answered out of a same-numbered provision.
+    const asked: string[] = [];
+    const trace = (tool: string, args: Record<string, unknown>, json: unknown): CallTrace => ({
+      tool, args, text: JSON.stringify(json), chars: 0, tokens: 0, ms: 0, isError: false, json,
+    });
+    const canonical = [
+      "Article 1 of the RTS on the assessment methodology",
+      "Article 1 of the ITS on supervisory reporting",
+      "Article 1 of the Commission Delegated Regulation on a subject",
+      "Article 1 of an ECB Guideline on a subject",
+    ];
+    const old: Session = {
+      tools: [], surfaceTokens: 0, wireTokens: 0, instructions: "", traces: [],
+      async close() {},
+      async call(tool, args = {}) {
+        if (tool === "get_corpus_info") return trace(tool, args, { coverage: [], holdings: [] });
+        const text = String(args["text"] ?? "");
+        asked.push(text);
+        return canonical.includes(text)
+          ? trace(tool, args, { match: null, candidates: [], coverage_note: `"${text}" names an instrument by description` })
+          : trace(tool, args, { match: null, candidates: [{ id: "regulation://other/p1" }] });
+      },
+    };
+    const r = await descriptiveInstrumentGateHolds(old);
+    const fatal = r.findings.filter((f) => f.severity === "fatal");
+    expect(fatal.length).toBe(asked.length - canonical.length);
+    expect(fatal.map((f) => f.evidence.join(" ")).join(" ")).toContain("rts on the assessment methodology");
+    expect(fatal.map((f) => f.evidence.join(" ")).join(" ")).toContain("R.T.S.");
+    expect(fatal.map((f) => f.evidence.join(" ")).join(" ")).toContain("technical standards");
   });
 
   it("is not applicable when the corpus holds a document of every described kind", async () => {

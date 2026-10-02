@@ -457,120 +457,203 @@ const namedInstrument = (text: string): string | null => {
  * to find what a citation names, `holdsKind` reads `held` to ask whether the
  * corpus has a document identifying as that kind.
  *
- * Conservative on purpose, and case-aware where the word is also a pronoun: RTS
- * and ITS match only in upper case ("its" is a pronoun in half the prose ever
- * written), so those two carry `caseSensitive`. A bare "delegated"/"implementing"
- * is not a description of an instrument; it has to be followed by what the act
- * is. And a descriptor that goes on to give the act's NUMBER in the form the
- * number gate reads ("Delegated Regulation (EU) 2022/439") is not a description
- * at all: that gate owns the citation, and re-reading it here would flip one the
- * corpus resolves today. A number the gate CANNOT read ("Delegated Regulation
- * 2022/439", no "(EU)") is still a description, and is declined as one: it is
- * the same unheld instrument, and falling through is how a same-numbered
- * provision of an unrelated document got offered for it.
+ * Every kind is recognised in every spelling a writer has for it, because the
+ * gate is only as good as its weakest spelling: respell the kind and the
+ * instrument is dropped, and the bare article number goes looking in whatever
+ * held a provision with it. So the acronyms take any case, a plural and dots
+ * ("rts", "RTSs", "R.T.S."), and the spelled-out forms take any run of white
+ * space or dashes between their words. The one place case still matters is ITS,
+ * because "its" is a pronoun in half the prose ever written: ITS matches in
+ * upper case, and in any case straight after a determiner ("the its on
+ * reporting"), where a pronoun cannot stand. A bare "technical standards" names
+ * one of the two without saying which, so either kind releases it. A bare
+ * "delegated"/"implementing" is not a description of an instrument; it has to be
+ * followed by what the act is. And a descriptor that goes on to give the act's
+ * NUMBER in the form the number gate reads ("Delegated Regulation (EU)
+ * 2022/439") is not a description at all: that gate owns the citation, and
+ * re-reading it here would flip one the corpus resolves today. A number the gate
+ * CANNOT read ("Delegated Regulation 2022/439", no "(EU)") is still a
+ * description, and is declined as one: it is the same unheld instrument, and
+ * falling through is how a same-numbered provision of an unrelated document got
+ * offered for it.
  *
  * `held` lists token windows; a corpus document "identifies as" the kind when
  * its framework, document id or id segment contains one as a contiguous run.
- * Tokens, never substrings — "its" is inside "limits", "rts" inside "reports".
+ * Tokens, never substrings - "its" is inside "limits", "rts" inside "reports" -
+ * and the patterns below are anchored to whole words for the same reason.
  */
+const KIND_GAP = String.raw`[\s\-‐-―]+`;
+const kindWords = (...words: string[]): string => words.join(KIND_GAP);
+
 const DESCRIBED_INSTRUMENTS: Array<{
   key: string;
   re: RegExp;
   held: string[][];
-  caseSensitive?: boolean;
   /** Also an ordinary English word, so an all-capitals citation cannot be trusted to mean the acronym. */
   pronoun?: boolean;
+  /** Who issues it, for kinds that name an issuer ("ECB Guideline"): lets a held document of the same issuer be told apart from the described one. */
+  issuer?: string;
 }> = [
-  { key: "rts", re: /\bRTS\b/g, held: [["rts"]], caseSensitive: true },
+  { key: "rts", re: /\bR\.T\.S\b\.?|\bRTSs?\b/gi, held: [["rts"]] },
   {
     key: "rts",
-    re: /\bregulatory\s+technical\s+standards?\b/gi,
+    re: new RegExp(`\\b${kindWords("regulatory", "technical", "standards?")}\\b`, "gi"),
     held: [["rts"], ["regulatory", "technical", "standard"], ["regulatory", "technical", "standards"]],
   },
-  { key: "its", re: /\bITS\b/g, held: [["its"]], caseSensitive: true, pronoun: true },
+  { key: "its", re: /\bITSs?\b/g, held: [["its"]], pronoun: true },
+  { key: "its", re: /\bI\.T\.S\b\.?/gi, held: [["its"]] },
+  // "its" cannot be a pronoun straight after an article ("the its on reporting").
+  // Not "that": "a rule that its text amends" is ordinary English.
+  { key: "its", re: /(?<=\b(?:the|an?|this)\s+)its\b/gi, held: [["its"]] },
   {
     key: "its",
-    re: /\bimplementing\s+technical\s+standards?\b/gi,
+    re: new RegExp(`\\b${kindWords("implementing", "technical", "standards?")}\\b`, "gi"),
     held: [["its"], ["implementing", "technical", "standard"], ["implementing", "technical", "standards"]],
   },
   {
+    // Not preceded by the word that makes it one of the two above, or one phrase is read twice.
+    key: "technical-standards",
+    re: new RegExp(`(?<!\\b(?:regulatory|implementing)${KIND_GAP})\\b${kindWords("technical", "standards?")}\\b`, "gi"),
+    held: [["rts"], ["its"], ["technical", "standard"], ["technical", "standards"]],
+  },
+  {
     key: "delegated",
-    re: new RegExp(`\\b(?:commission\\s+)?delegated\\s+(?:regulation|decision|act)s?\\b`, "gi"),
+    re: new RegExp(`\\b(?:commission${KIND_GAP})?delegated${KIND_GAP}(?:regulation|decision|act)s?\\b`, "gi"),
     held: [["delegated"]],
   },
   {
     key: "implementing",
-    re: new RegExp(`\\b(?:commission\\s+)?implementing\\s+(?:regulation|decision|act)s?\\b`, "gi"),
+    re: new RegExp(`\\b(?:commission${KIND_GAP})?implementing${KIND_GAP}(?:regulation|decision|act)s?\\b`, "gi"),
     held: [["implementing"]],
   },
   ...(["regulation", "guideline", "decision", "recommendation"] as const).map((kind) => ({
     key: `ecb-${kind}`,
-    re: new RegExp(`\\becb\\s+${kind}s?\\b`, "gi"),
-    held: [["ecb", kind], ["ecb", `${kind}s`]],
+    // The ECB, its dotted acronym or its full name, with or without a possessive.
+    re: new RegExp(
+      `(?:\\becb|\\bE\\.C\\.B\\b\\.?|\\beuropean${KIND_GAP}central${KIND_GAP}bank)(?:['’]s)?\\s+${kind}s?\\b`,
+      "gi",
+    ),
+    held: [["ecb", kind], ["ecb", `${kind}s`], ["european", "central", "bank", kind], ["european", "central", "bank", `${kind}s`]],
+    issuer: "ecb",
   })),
   {
     key: "ecb-guideline",
-    re: /\bguidelines?\s+of\s+the\s+(?:ecb|european\s+central\s+bank)\b/gi,
+    re: new RegExp(
+      `\\bguidelines?\\s+of\\s+the\\s+(?:ecb|european${KIND_GAP}central${KIND_GAP}bank)\\b`,
+      "gi",
+    ),
     held: [["ecb", "guideline"], ["ecb", "guidelines"]],
+    issuer: "ecb",
   },
 ];
 
 interface DescribedInstrument {
+  /** The kind of the table entry that matched, so one kind named twice is quoted once. */
+  key: string;
   /** The citation's own words for it, quoted back. */
   quote: string;
   held: string[][];
   /** Written as a numbered identifier ("RTS/2016/03"), not as a description. */
   identifier: boolean;
+  /** The issuer the table entry names, if it names one. */
+  issuer?: string;
+}
+
+/**
+ * Where a descriptor's own words end. The kind and what it is on ("RTS on the IRB
+ * assessment methodology") belong to it; the punctuation, dash, provision
+ * reference or "under / referred to in" that starts something else does not.
+ */
+const DESCRIPTOR_END =
+  /[,;:()[\]"\u201c\u201d]|\s[-\u2013\u2014]\s|\b(?:art(?:icle)?s?|para(?:graph)?s?|sections?|chapters?|annex(?:es)?|points?)\.?\s*\(?\d|\s(?:under|referred|cited|mentioned|pursuant|adopted|according|per|as)\b/i;
+/** A full stop that ends the sentence rather than abbreviating a word. */
+const SENTENCE_END = /\.(?=\s+[A-Z]|\s*$)/;
+
+/**
+ * The caller's own words for a described instrument, quoted back in a note: the
+ * descriptor and what it is on, cut where something else starts. The whole rest
+ * of the clause used to be quoted, which put the held document's id and the
+ * provision itself inside "the description".
+ */
+function descriptorQuote(text: string, start: number, matched: string): string {
+  const after = text.slice(start + matched.length);
+  const stops = [after.search(DESCRIPTOR_END), after.search(SENTENCE_END)].filter((n) => n !== -1);
+  const own = `${matched}${stops.length === 0 ? after : after.slice(0, Math.min(...stops))}`;
+  const body = own
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/(?:\s+(?:of|in|under|from|and|or|to|the|an?|as|by|at|for|with|see))+$/i, "")
+    .replace(/[:;,\s]+$/, "");
+  // A full stop closes a dotted acronym ("R.T.S.") and nothing else.
+  const quote = /(?:\b[A-Za-z]\.){2,}$/.test(body) ? body : body.replace(/\.+$/, "");
+  return quote.length === 0 || quote.length > 80 ? matched : quote;
 }
 
 /** Does the number gate read a number starting at the kind word that ends this match? */
 function numberGateReads(text: string, start: number, matched: string): boolean {
   const sticky = new RegExp(NUMBERED_ACT.source, "iy");
-  sticky.lastIndex = start + matched.search(/\S+$/);
+  // The kind word is the last run of letters of the match, whatever sat between its words.
+  sticky.lastIndex = start + matched.search(/[A-Za-z]+$/);
   return sticky.test(text);
 }
 
 /**
  * Instruments the citation names by description, and the citation with those
  * words removed (so the rest can be scoped to a held document without "ECB" in
- * "ECB Regulation" being read as the held ECB guide).
+ * "ECB Regulation" being read as the held ECB guide). The words are cut out by
+ * POSITION, never by searching for their text: a descriptor spelled "rts" would
+ * otherwise be found first inside "reports".
  */
 function describedInstruments(text: string): { found: DescribedInstrument[]; residual: string } {
   // An all-capitals citation has lost the case that tells ITS from a shouted
-  // pronoun. RTS has no pronoun reading, so it stays recognised.
+  // pronoun. The other kinds have no pronoun reading, so they stay recognised.
   const caseLost = !/[a-z]/.test(text);
   const found: DescribedInstrument[] = [];
-  let residual = text;
-  for (const { re, held, caseSensitive, pronoun } of DESCRIBED_INSTRUMENTS) {
-    if (caseSensitive === true && caseLost && pronoun === true) continue;
-    for (const m of text.matchAll(re)) {
-      const start = m.index;
-      const end = start + m[0].length;
-      if (numberGateReads(text, start, m[0])) continue;
-      // "EBA/RTS/2016/03" is an identifier. It names its instrument by number, in
-      // a shape the number gate does not read, so it is declined for what it is.
-      const id = /^\s*\/\s*(\d{4})\s*\/\s*(\d{1,4})\b/.exec(text.slice(end));
-      if (id !== null) {
-        const lead = /(?:\b[A-Za-z]+\s*\/\s*)*$/.exec(text.slice(0, start))?.[0] ?? "";
-        const whole = `${lead}${m[0]}${id[0]}`.replace(/\s+/g, "");
-        if (!found.some((f) => f.quote === whole)) {
-          found.push({
-            quote: whole,
-            held: [citationTokens(`${m[0]} ${id[1] ?? ""} ${id[2] ?? ""}`)],
-            identifier: true,
-          });
-        }
-        residual = residual.replace(`${lead}${m[0]}${id[0]}`, " ");
-        continue;
+  const cut: Array<[number, number]> = [];
+  // Every match of every kind, in the order the caller wrote them, so a kind named
+  // twice is quoted at its first (and usually fuller) mention.
+  const hits = DESCRIBED_INSTRUMENTS.flatMap((entry) =>
+    entry.pronoun === true && caseLost ? [] : [...text.matchAll(entry.re)].map((m) => ({ entry, m })),
+  ).sort((a, b) => a.m.index - b.m.index || b.m[0].length - a.m[0].length);
+  for (const { entry: { key, held, issuer }, m } of hits) {
+    const start = m.index;
+    const end = start + m[0].length;
+    if (numberGateReads(text, start, m[0])) continue;
+    // "EBA/RTS/2016/03" is an identifier. It names its instrument by number, in
+    // a shape the number gate does not read, so it is declined for what it is.
+    const id = /^\s*\/\s*(\d{4})\s*\/\s*(\d{1,4})\b/.exec(text.slice(end));
+    if (id !== null) {
+      const lead = /(?:\b[A-Za-z]+\s*\/\s*)*$/.exec(text.slice(0, start))?.[0] ?? "";
+      const whole = `${lead}${m[0]}${id[0]}`.replace(/\s+/g, "");
+      if (!found.some((f) => f.quote === whole)) {
+        found.push({
+          key,
+          quote: whole,
+          held: [citationTokens(`${m[0]} ${id[1] ?? ""} ${id[2] ?? ""}`)],
+          identifier: true,
+        });
       }
-      // Quote from the descriptor to the end of its clause: "RTS on the IRB
-      // assessment methodology" is what the caller wrote, not "RTS".
-      const tail = (text.slice(start).split(/[,;()[\]]/)[0] ?? m[0]).trim();
-      const quote = tail.length > 80 ? m[0] : tail;
-      if (!found.some((f) => f.quote === quote)) found.push({ quote, held, identifier: false });
-      residual = residual.replace(m[0], " ");
+      cut.push([start - lead.length, end + id[0].length]);
+      continue;
     }
+    const quote = descriptorQuote(text, start, m[0]);
+    // The same kind named twice in one phrase ("regulatory technical standards
+    // (RTS) on ...") is one instrument, quoted once.
+    if (!found.some((f) => f.quote === quote || (f.key === key && !f.identifier))) {
+      found.push({ key, quote, held, identifier: false, ...(issuer === undefined ? {} : { issuer }) });
+    }
+    cut.push([start, end]);
   }
+  // Blank the cut spans, merged so none is cut twice, from the end backwards so
+  // earlier offsets stay valid.
+  const merged: Array<[number, number]> = [];
+  for (const [from, to] of cut.sort((a, b) => a[0] - b[0] || a[1] - b[1])) {
+    const last = merged[merged.length - 1];
+    if (last !== undefined && from <= last[1]) last[1] = Math.max(last[1], to);
+    else merged.push([from, to]);
+  }
+  let residual = text;
+  for (const [from, to] of merged.reverse()) residual = `${residual.slice(0, from)} ${residual.slice(to)}`;
   return { found, residual };
 }
 
