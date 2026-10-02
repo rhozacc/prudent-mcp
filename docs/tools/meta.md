@@ -100,6 +100,8 @@ Passes, in order, and nothing below them:
 5. **Containing provision** — the mirror of 4. The corpus stores some documents at whole-article granularity, so `Article 181(1)(b)` has no record of its own but sits inside `Article 181`. The container comes back as the (narrowest) `candidate`, `unmatched_segments` lists the numbers that could not be placed, and `match` stays `null` with `confidence: "none"` — containment is reported, never matched. Two guards keep it safe: a record whose citation has no faithful numeric spine never contains anything, and numbers are compared as whole tokens, so `1218` is not inside `121`.
    The note does not assume the container carries the point: the container's text is read for it first (`textCarriesPoint`), each deeper segment looked for only inside the span of the one before it — point `(b)` must follow paragraph 2's marker and precede paragraph 3's. Markers are read as `1.`, `(1)` or `1)` for numbers and `(a)` or `a)` for letters, only where a list item can start (at a line head, or after `;` `:` `.`), and only as a run: `9.` is a paragraph only after `1.` to `8.`. The verdict decides the wording. **yes** (every marker found in place): "whose text carries point …". **no** (the text numbers items that way and the marker is not there): "no point … was found in its text; its numbering may differ. Open it and check before anything is cited from this resolution." **unknown** (no markers at all, another numbering style, an irregular run, an inserted `1a`, roman sub-points): "whether its text has point … could not be established". Only a verified `yes` says the text carries the point; a `no` is a statement about markers found, not about the law.
 
+The `match` record is served undecorated: it does not carry `pre_adoption_placeholders`, so a resolved record whose text names an instrument by a placeholder number (Regulation (EU) xx/xx) is not flagged here. Fetch it with `get_regulation` for the flag.
+
 **Inputs:**
 
 | Parameter | Type | Notes |
@@ -315,8 +317,12 @@ type ExpandedRegulation = {
   parent: RegulationId | null;
   children: { type, id, label }[];   // stubs by default; detail: "full" embeds the complete records
   as_of_note?: string;               // only with as_of, when the current text was served because no version is recorded for that date
+  pre_adoption_placeholders?: string[]; // only when the record's own text names an instrument by a placeholder number
+  notice?: string;                   // with pre_adoption_placeholders: the placeholder is not a citation
 }
 ```
+
+`pre_adoption_placeholders` and `notice` are the same flag [`get_regulation`](./regulation#get-regulation) attaches (one scan, `src/placeholders.ts`), computed over the record asked for and not over the children it embeds.
 
 With `as_of`, regulation children are resolved under the same date as the record, so a child with a recorded version for that date is embedded at that version (the same one [`get_regulation`](./regulation#get-regulation) serves), not at its latest. The note is the one `get_regulation` attaches, and it also counts any children served from current text because the corpus records no version of them for the date, so a record covered by history still carries a note when one of its children is not. Checks and tests are not versioned and are resolved as always.
 

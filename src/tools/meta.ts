@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { adapters } from "../adapters.ts";
 import { playbookInArea, resolveArea } from "../areas.ts";
+import { withPlaceholderFlag } from "../placeholders.ts";
 import type {
   AnyId,
   Check,
@@ -608,7 +609,8 @@ export function registerMetaTools(server: McpServer): void {
         "stubs (default) or complete records (detail: 'full'). Supports as_of like " +
         "get_regulation, resolving regulation children under the same date; an as_of_note says when " +
         "the record or any child is current text standing in for a version the corpus does not " +
-        "record. Unknown ids return isError, saying if the document is held only in part. Use " +
+        "record. Placeholder act numbers (Regulation (EU) xx/xx) are flagged as in get_regulation. " +
+        "Unknown ids return isError, saying if the document is held only in part. Use " +
         "get_regulation_tree to walk the whole sub-tree.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(
@@ -645,7 +647,7 @@ export function registerMetaTools(server: McpServer): void {
               [...fromCurrent].filter((n) => n !== raw.id).length,
               "children",
             );
-      return ok(withAsOfNote(detail === "full" ? expanded : toConciseRegulation(expanded), note));
+      return ok(withAsOfNote(withPlaceholderFlag(detail === "full" ? expanded : toConciseRegulation(expanded)), note));
     },
   );
 

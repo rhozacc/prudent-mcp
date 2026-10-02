@@ -5,6 +5,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { adapters } from "../adapters.ts";
+import { MAX_PLACEHOLDER_SPANS, MAX_PLACEHOLDER_SPAN_CHARS, withPlaceholderFlag } from "../placeholders.ts";
 import type { Regulation } from "../schema.ts";
 import { ProvisionKindSchema, RegulationSchema, regulationIdSchema } from "../schema.ts";
 import { regulationSearchFields } from "../search.ts";
@@ -136,7 +137,8 @@ export function registerRegulationTools(server: McpServer): void {
         "text, and attached commentary (supervisor Q&A, interpretive letters). Latest version " +
         "by default; pass as_of (ISO date) for the text in force on that date. Where the corpus " +
         "records no version for that date the current text is served with an as_of_note saying " +
-        "so — it may not be the text of that date, so do not present it as historical. An as_of " +
+        "so — it may not be the text of that date, so do not present it as historical. A placeholder act " +
+        "number (Regulation (EU) xx/xx) is flagged: pre_adoption_placeholders + notice. An as_of " +
         "predating every recorded version is a miss. Unknown ids return isError, saying if " +
         "the document is held only in part (absent from the corpus, not necessarily the law). Use get_referrers to find operationalising checks/playbooks.",
       inputSchema: {
@@ -147,7 +149,10 @@ export function registerRegulationTools(server: McpServer): void {
       },
       // Open at the declaration site only: the canonical RegulationSchema stays
       // closed. `as_of_note` is published so a caller reading the schema learns
-      // that a hit under as_of can carry a caveat about what it is.
+      // that a hit under as_of can carry a caveat about what it is. The placeholder
+      // flag is declared here too and NOT on the `detail: 'full'` search rows above:
+      // those rows are the canonical record schema served as it stands, and the flag
+      // is one get_regulation away.
       outputSchema: RegulationSchema.extend({
         as_of_note: z
           .string()
@@ -157,12 +162,24 @@ export function registerRegulationTools(server: McpServer): void {
               "current text was served. Says which version (document_version) and that it must not be " +
               "presented as the historical text.",
           ),
+        pre_adoption_placeholders: z
+          .array(z.string().max(MAX_PLACEHOLDER_SPAN_CHARS))
+          .max(MAX_PLACEHOLDER_SPANS)
+          .optional()
+          .describe(
+            "Present only when the text names an instrument by a pre-adoption placeholder number " +
+              "(Regulation (EU) xx/xx): the matched spans. A placeholder is not a citation.",
+          ),
+        notice: z
+          .string()
+          .optional()
+          .describe("Present with pre_adoption_placeholders: what the placeholder is and is not."),
       }).passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async ({ id, as_of }) => {
       const { record, note } = await resolveRegulation(id, as_of);
-      if (record !== null) return ok(withAsOfNote(record, note));
+      if (record !== null) return ok(withAsOfNote(withPlaceholderFlag(record), note));
       if (as_of !== undefined && (await adapters.regulation.get(id)) !== null) {
         return miss(
           `No version of ${id} was in force on ${as_of} according to this corpus's history. ` +

@@ -77,6 +77,10 @@ Internally, the adapter is expected to hold the full version history per `Regula
 
 Where the corpus records no version of a provision for the date you asked about, it serves the current text rather than nothing — and the response carries an `as_of_note` saying that this is the version named in `document_version`, that it may differ from the text in force on that date, and that it must not be presented as the historical text. `expand_regulation` and `get_regulation_tree` carry the same note. A date before the source document existed is a miss.
 
+### A passage cites "Regulation (EU) xx/xx". Is that a regulation?
+
+No. A guideline written before a technical standard was adopted names it with a placeholder number. `get_regulation` and `expand_regulation` flag such a record with `pre_adoption_placeholders` (the spans) and a `notice`: the placeholder is not a citation, the instrument may be identified elsewhere in the corpus or not at all, and the passage is not the current state of the law. The flag is computed from the text; search rows and `resolve_citation` matches do not carry it.
+
 ### A lookup missed. Does that article not exist?
 
 Not necessarily. The corpus holds the provisions it was built from, which for some documents is a subset of the articles. `get_corpus_info.holdings` says, per document, how many records are held and whether the source registry declares the document partly held (`partial: true`), whole (`false`) or says nothing (key absent). A miss on `get_regulation`, `expand_regulation` or `get_regulation_tree`, and a `resolve_citation` decline, repeat that in plain words: on a partly held document the provision is absent from the corpus, not necessarily from the law. See [Declaring coverage](../corpus/#declaring-coverage).

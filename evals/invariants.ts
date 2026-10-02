@@ -9,7 +9,7 @@
  * The failure they are all aimed at is the same one: **a model believing
  * something the corpus did not say.** Volume is a cost; a confident wrong
  * answer is a defect. So the fatal findings here are about truthfulness
- * (I1–I4, I7, I11–I13) and the budgeted ones about cost (I5–I6).
+ * (I1–I4, I7, I11–I14) and the budgeted ones about cost (I5–I6).
  *
  * Every invariant reports `applicable: false` rather than passing when it had
  * nothing to bind on — a check that passes by having nothing to measure is the
@@ -1650,6 +1650,115 @@ export async function weakBestMatchIsDeclared(s: Session): Promise<InvariantResu
   return { id, title, applicable: bound > 0, findings };
 }
 
+// ============================================================================
+// I14 - placeholders are marked
+// ============================================================================
+
+/**
+ * A guideline written before a standard was adopted names it "Regulation (EU)
+ * xx/xx [...]". Served verbatim that reads as a citation, but it cites nothing,
+ * and the instructions' rule ("say such references are unresolved") only works
+ * if the model notices the shape unprompted. So a record whose served text names
+ * an instrument by a placeholder number must come back flagged, on both tools
+ * that serve a record by id: `pre_adoption_placeholders` (the spans) and a
+ * `notice` saying the placeholder is not a citation. Search rows are not asked
+ * to carry it - `detail: 'full'` rows are the canonical record schema.
+ *
+ * The candidates are found WITHOUT trusting the server's own scan, which would
+ * make the invariant agree with itself: a deliberately looser pattern (an
+ * instrument kind within a few words of an act number with a stand-in half) is
+ * run over the text the server serves. Candidates come from the corpus file's
+ * records when the session was opened on one (the text is read locally, never
+ * stored), and from the server's own search output otherwise. The converse is
+ * checked on sampled records the looser pattern does not match: a flag there
+ * says a real citation is not one, which is as wrong as the omission.
+ *
+ * Applicable only when some served record carries a placeholder.
+ */
+export async function placeholdersAreMarked(s: Session): Promise<InvariantResult> {
+  const id = "I14";
+  const title = "Placeholders are marked";
+  const findings: Finding[] = [];
+
+  // Looser than the server's scan by construction: it asks only for an
+  // instrument word shortly before an act number with a stand-in half.
+  const STAND_IN = String.raw`(?:[xX]{2,4}|(?:19|20)(?:\d[xX]|[xX]{1,2})|\[\s*(?:\.{2,}|…)\s*\])`;
+  const LOOSE = new RegExp(
+    String.raw`\b(?:regulation|directive|decision|guideline)\b[^;\n]{0,40}?(?:${STAND_IN}\s*\/\s*(?:${STAND_IN}|\d{1,4})|\d{1,4}\s*\/\s*${STAND_IN})`,
+    "i",
+  );
+  const asRecord = (json: unknown): Record<string, unknown> | null =>
+    json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : null;
+  type Row = { id?: string };
+  const rowsOf = (json: unknown): Row[] =>
+    ((json as { results?: Row[] } | null)?.results ?? []).filter((r) => typeof r.id === "string");
+
+  // Candidate ids: records of the corpus file whose text the loose pattern
+  // matches, plus whatever search surfaces for the obvious queries.
+  const candidates: string[] = [];
+  if (s.corpusFile !== undefined) {
+    try {
+      const parsed = JSON.parse(readFileSync(s.corpusFile, "utf8")) as { regulation?: Array<{ id?: unknown; text?: unknown }> };
+      for (const r of parsed.regulation ?? []) {
+        if (typeof r.id === "string" && typeof r.text === "string" && LOOSE.test(r.text)) candidates.push(r.id);
+      }
+    } catch {
+      // No readable file: fall back to what search surfaces.
+    }
+  }
+  const sampled: string[] = [];
+  for (const q of ["xx/xx", "regulation xx", "placeholder", "default", "risk", "estimation", "data", "model"]) {
+    const t = await s.call("search_regulation", { query: q, limit: 10 });
+    for (const row of rowsOf(t.json)) {
+      if (row.id !== undefined && !sampled.includes(row.id)) sampled.push(row.id);
+    }
+  }
+
+  let bound = 0;
+  let falseFlags = 0;
+  const checked = new Set<string>();
+  for (const rid of [...candidates.slice(0, 12), ...sampled.slice(0, 40)]) {
+    if (checked.has(rid)) continue;
+    checked.add(rid);
+    for (const tool of ["get_regulation", "expand_regulation"] as const) {
+      const r = await s.call(tool, { id: rid });
+      const body = asRecord(r.json);
+      if (r.isError || body === null || typeof body["text"] !== "string") continue;
+      const has = LOOSE.test(body["text"]);
+      const spans = body["pre_adoption_placeholders"];
+      if (!has) {
+        if ("pre_adoption_placeholders" in body && falseFlags++ < 3) {
+          findings.push({
+            id: `I14/false-flag/${tool}`,
+            severity: "fatal",
+            summary: `${tool} flagged a record whose text names no instrument by a placeholder number - a real citation is being called not-a-citation.`,
+            evidence: [`id ${rid}`, `spans ${JSON.stringify(spans)}`],
+          });
+        }
+        continue;
+      }
+      bound++;
+      const problems: string[] = [];
+      if (!Array.isArray(spans) || spans.length === 0) problems.push("pre_adoption_placeholders is missing or empty");
+      else {
+        if (spans.length > 3) problems.push(`${spans.length} spans, at most 3 are allowed`);
+        if (spans.some((x) => typeof x !== "string" || x.length > 120)) problems.push("a span is not a string of at most 120 characters");
+      }
+      const notice = typeof body["notice"] === "string" ? body["notice"] : "";
+      if (!/not a citation/i.test(notice)) problems.push("notice does not say the placeholder is not a citation");
+      if (problems.length > 0) {
+        findings.push({
+          id: `I14/${tool}`,
+          severity: "fatal",
+          summary: `${tool} served a record whose text names an instrument by a pre-adoption placeholder without marking it - the placeholder reads as a citation.`,
+          evidence: [`id ${rid}`, ...problems, `notice: ${notice.slice(0, 200) || "(none)"}`],
+        });
+      }
+    }
+  }
+  return { id, title, applicable: bound > 0, findings };
+}
+
 export const ALL = [
   envelopeIsJson,
   describedIdsResolve,
@@ -1665,4 +1774,5 @@ export const ALL = [
   asOfIsNeverSilentlySubstituted,
   declineOnPartialDocumentSaysSo,
   weakBestMatchIsDeclared,
+  placeholdersAreMarked,
 ] as const;

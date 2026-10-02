@@ -12,7 +12,7 @@
  */
 import { adapters } from "../src/adapters.ts";
 import { computeHoldings, holdingsSummary } from "../src/holdings.ts";
-import { corpusWarnings, validateCorpus } from "../src/validate.ts";
+import { corpusInfo, corpusWarnings, validateCorpus } from "../src/validate.ts";
 
 async function wireCorpus(): Promise<void> {
   const corpusFile = process.env.CORPUS_FILE;
@@ -53,6 +53,8 @@ async function main(): Promise<void> {
     console.error("");
   }
 
+  // Information only: counted, never a failure and never a warning.
+  for (const line of corpusInfo(corpus)) console.log(`  info: ${line}`);
   console.log(`  holdings: ${holdingsSummary(computeHoldings(regs, sources)) || "none"}`);
   console.log(
     `✓ corpus integrity OK — ${regs.length} regulations, ${checks.length} checks, ` +

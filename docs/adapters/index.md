@@ -120,6 +120,8 @@ A miss is `{ record: null }`; it has no basis because nothing was served.
 
 When the basis is `"current"`, `get_regulation`, `expand_regulation` and `get_regulation_tree` attach an additive `as_of_note` string saying that the corpus records no version for the requested date, which version was served (by its `document_version`), that it may differ from the text in force on that date, and that it must not be presented as the historical text. `expand_regulation` also resolves its regulation children through `resolveAsOf` under the same date and counts those served from current text. There is no note without `as_of`, when history covers the date (for the record and its children), or on a miss.
 
+The pre-adoption placeholder flag (`pre_adoption_placeholders` + `notice` on `get_regulation` and `expand_regulation`) needs nothing from an adapter: the tool layer computes it from the served `text` (`src/placeholders.ts`), so every adapter, including an out-of-tree one, gets it.
+
 Rules for implementers:
 
 - **Make it the one implementation and have `get` delegate to it.** The record must be exactly what `get(id, asOf)` returns; only `basis` is new. Two copies of the selection logic can disagree about what was served. `createFileAdapters` and the in-memory demo both do this.

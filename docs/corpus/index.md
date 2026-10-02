@@ -499,8 +499,8 @@ Outputs `docs/schemas/*.schema.json` and the rendered [Schema reference](/corpus
 Two scripts operate over whatever corpus is wired (the in-memory demo by default, or a file via `CORPUS_FILE`):
 
 ```bash
-bun run validate      # integrity linter — mirror invariant, dangling refs, cycles, source supersession, verbatim text (no markup); warns on stale sources
+bun run validate      # integrity linter — mirror invariant, dangling refs, cycles, source supersession, verbatim text (no markup); warns on stale sources; counts records with pre-adoption placeholders (info only)
 bun run graph         # regenerates docs/corpus/graph.md, a Mermaid map of the corpus
 ```
 
-`validate` exits non-zero on any violation, so it drops straight into CI. `graph` derives the [corpus graph](/corpus/graph) from the data itself, so the diagram can't drift from what's actually loaded.
+`validate` exits non-zero on any violation, so it drops straight into CI. It also prints an `info:` line counting the regulation records whose text names an instrument by a pre-adoption placeholder ("Regulation (EU) xx/xx"); that is neither an error nor a warning, because a guideline written before a standard was adopted legitimately names it that way. The server flags each such record when it serves it (`pre_adoption_placeholders`, see [`get_regulation`](/tools/regulation#get-regulation)) — computed from the text, so nothing in the corpus file marks them. `graph` derives the [corpus graph](/corpus/graph) from the data itself, so the diagram can't drift from what's actually loaded.
