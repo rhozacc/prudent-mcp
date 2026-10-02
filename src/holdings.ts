@@ -4,8 +4,8 @@
  *
  * `get_corpus_info.coverage` names documents ("CRR"), which reads as the whole
  * regulation; a corpus holds a subset of its articles. A miss ("No record for
- * ...") and a citation decline ("Nothing in this corpus is numbered 153") are
- * both TRUE and both read as "there is no Article 153". Absence from the corpus
+ * ...") and a citation decline ("Nothing in this corpus is numbered 99") are
+ * both TRUE and both read as "there is no Article 99". Absence from the corpus
  * is not absence from the law, and the only party that can say which kind of
  * absence a miss is, is the registry that knows how much of the document was
  * taken. So the file adapter, the in-memory demo, the tool-layer misses,

@@ -67,7 +67,7 @@ function stub(envelope: Record<string, unknown>): Session {
       // (the eval also sends those) is answered with the plain truncation notice.
       const single = !/\s/.test(query.trim());
       return trace(tool, args, matches
-        ? { results: [{ id: "x://y/z", name: "n" }], returned: 1, total_matches: 1239, offset: 0, truncated: true, next_offset: 1, ...(single ? { notice: "Showing 1 of 1239 matches." } : envelope) }
+        ? { results: [{ id: "x://y/z", name: "n" }], returned: 1, total_matches: 500, offset: 0, truncated: true, next_offset: 1, ...(single ? { notice: "Showing 1 of 500 matches." } : envelope) }
         : { results: [], returned: 0, total_matches: 0, offset: 0, truncated: false, next_offset: null });
     },
   };
@@ -88,7 +88,7 @@ describe("eval I13 on servers that do not declare it", () => {
   });
 
   it("fails the old envelope: no coverage, no figures, a bare truncation notice", async () => {
-    const r = await weakBestMatchIsDeclared(stub({ notice: "Showing 1 of 1239 matches." }));
+    const r = await weakBestMatchIsDeclared(stub({ notice: "Showing 1 of 500 matches." }));
     expect(r.applicable).toBe(true);
     expect(r.findings.filter((f) => f.severity === "fatal").length).toBe(4);
   });
@@ -108,7 +108,7 @@ describe("eval I13 on servers that do not declare it", () => {
         query_tokens: 4,
         best_coverage: 1,
         results: [{ id: "x://y/z", coverage: 1 }],
-        notice: "Showing 1 of 1239 matches. The best result matches only 1 of the query's 4 meaningful terms, so the topic may not be in this corpus. Absence of a strong match is a statement about the corpus, not about the law.",
+        notice: "Showing 1 of 500 matches. The best result matches only 1 of the query's 4 meaningful terms, so the topic may not be in this corpus. Absence of a strong match is a statement about the corpus, not about the law.",
       }),
     );
     expect(r.findings).toEqual([]);

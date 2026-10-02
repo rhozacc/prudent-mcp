@@ -985,13 +985,13 @@ export function resolveCitationDetailed(
   // missing. Rule (iii) answers "the corpus holds provisions under the one you
   // named"; this answers "the corpus holds the record yours sits inside".
   //
-  // It matters because of how the corpus is shaped rather than how citations
-  // are written: the CRR is stored at whole-article granularity — not one of
-  // its 160 records carries a bracketed citation — while 86% of the
-  // cross-references the corpus makes about itself are bracketed sub-article
-  // points. So "Article 181(1)(b) of the CRR" was a bare miss reading "nothing
-  // in this corpus is numbered 181.1.b", for a provision served in full, whose
-  // text contains point (b) verbatim.
+  // It matters because of how a corpus can be shaped rather than how citations
+  // are written: a document may be stored at whole-article granularity, with no
+  // record carrying a bracketed citation, while most of the cross-references the
+  // corpus makes about itself are bracketed sub-article points. So "Article
+  // 181(1)(b)" was a bare miss reading "nothing in this corpus is numbered
+  // 181.1.b", for a provision served in full, whose text contains point (b)
+  // verbatim.
   //
   // Still a decline: `match` stays null and `confidence` stays "none". Matching
   // is not being loosened — the container is reported as a candidate, exactly

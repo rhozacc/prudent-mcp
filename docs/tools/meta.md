@@ -157,11 +157,11 @@ resolve_citation("Article 1 of Regulation (EU) No 9999/9999")
 ```
 
 ```ts
-// CRR is declared partial in the registry.
-resolve_citation("Article 153 CRR")
-→ { match: null, confidence: "none", unmatched_segments: ["153"],
-    coverage_note: "Nothing in this corpus is numbered 153 in the document named. This corpus holds only part of
-                    Regulation (EU) No 575/2013 (CRR) (160 records), so a provision missing here is absent from
+// CRR is declared partial in the registry (the seeded demo holds 4 of its records).
+resolve_citation("Article 99 CRR")
+→ { match: null, confidence: "none", unmatched_segments: ["99"],
+    coverage_note: "Nothing in this corpus is numbered 99 in the document named. This corpus holds only part of
+                    Regulation (EU) No 575/2013 (CRR) (4 records), so a provision missing here is absent from
                     the corpus, not necessarily from the law. Try search_regulation…" }
 ```
 

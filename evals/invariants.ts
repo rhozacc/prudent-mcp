@@ -1469,8 +1469,8 @@ export async function asOfIsNeverSilentlySubstituted(s: Session): Promise<Invari
 
 /**
  * A corpus holds some provisions of a document, not all of them. "No record for
- * <id>" and "Nothing in this corpus is numbered 153" are both TRUE and both read
- * as "there is no Article 153" - absence from the corpus taken for absence from
+ * <id>" and "Nothing in this corpus is numbered 99" are both TRUE and both read
+ * as "there is no Article 99" - absence from the corpus taken for absence from
  * the law, which is the one error a validator cannot afford.
  *
  * So for every document the registry declares partial (the `holdings` the server
@@ -1574,7 +1574,7 @@ export async function declineOnPartialDocumentSaysSo(s: Session): Promise<Invari
 // ============================================================================
 
 /**
- * "Showing 20 of 1239 matches" for a concept the corpus does not hold: a page of
+ * "Showing 20 of N matches" for a concept the corpus does not hold: a page of
  * hits on the commonest query terms, with nothing to say that no hit covers the
  * distinctive ones. The ranking knows how many query terms each hit matched; the
  * belief at stake is "the top of this list answers my question".

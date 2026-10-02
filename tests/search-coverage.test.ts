@@ -10,7 +10,7 @@ import { paginate, serialize, weakMatchNotice, withQueryCoverage } from "../src/
 
 // ── Search rows say how much of the query they matched ─────────────────────────
 //
-// "Showing 20 of 1239 matches" for a concept the corpus does not hold is a page
+// "Showing 20 of N matches" for a concept the corpus does not hold is a page
 // of hits on the commonest terms with nothing to say that no hit covers the
 // distinctive ones. Ranking already knew; these pin that the four search tools
 // now say it. Every record below is synthetic.

@@ -183,7 +183,7 @@ export function searchResult<T>(envelope: SearchEnvelope<T>): CallToolResult {
  * query unmatched.
  *
  * It exists because a page of twenty hits on the commonest query terms looks the
- * same whether or not any hit is about the distinctive ones: "Showing 20 of 1239
+ * same whether or not any hit is about the distinctive ones: "Showing 20 of N
  * matches" for a concept the corpus does not hold. The ranking knew how many
  * terms each hit matched and kept it to itself. No relevance floor and no cap
  * come with it - every match is still returned, in the same order; the notice
