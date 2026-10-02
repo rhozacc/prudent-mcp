@@ -7,15 +7,17 @@ import { z } from "zod";
 import { adapters } from "../adapters.ts";
 import type { Playbook, PlaybookId } from "../schema.ts";
 import { PlaybookSchema, playbookIdSchema } from "../schema.ts";
+import { playbookSearchFields } from "../search.ts";
 import {
+  COVERAGE_CARD,
   READ_ONLY_HINTS,
   lenient,
   miss,
   ok,
-  paginate,
+  rankedSearchResult,
+  rowCoverageShape,
   searchInputShape,
   searchOutputShape,
-  searchResult,
 } from "./shared.ts";
 
 // Concise projection served by search_playbooks (detail: "concise").
@@ -24,6 +26,7 @@ const ConcisePlaybookHit = z.object({
   area: z.string(),
   subarea: z.string().optional(),
   phase_count: z.number().int(),
+  ...rowCoverageShape,
 }).passthrough();
 
 /**
@@ -73,21 +76,27 @@ export function registerPlaybookTools(server: McpServer): void {
         "and phase descriptions. Returns { results, total_matches, offset, truncated }; " +
         "concise results (default) are { id, area, subarea, phase_count } — pass detail: 'full' " +
         "for complete records. Follow up with expand_playbook (references resolved inline) or " +
-        "get_playbook for the raw record.",
+        "get_playbook for the raw record. " + COVERAGE_CARD,
       inputSchema: searchInputShape("area, subarea, and phase names/descriptions"),
       outputSchema: searchOutputShape(z.union([ConcisePlaybookHit, PlaybookSchema])),
       annotations: READ_ONLY_HINTS,
     },
     async ({ query, limit, offset, detail }) => {
       const records = await adapters.playbook.search(query);
-      if (detail === "full") return searchResult(paginate(records, limit, offset));
-      const concise = records.map((p) => ({
-        id: p.id,
-        area: p.area,
-        ...(p.subarea !== undefined ? { subarea: p.subarea } : {}),
-        phase_count: p.phases.length,
-      }));
-      return searchResult(paginate(concise, limit, offset));
+      return rankedSearchResult({
+        records,
+        query,
+        fields: playbookSearchFields,
+        detail,
+        limit,
+        offset,
+        concise: (p) => ({
+          id: p.id,
+          area: p.area,
+          ...(p.subarea !== undefined ? { subarea: p.subarea } : {}),
+          phase_count: p.phases.length,
+        }),
+      });
     },
   );
 

@@ -6,16 +6,18 @@ import { z } from "zod";
 
 import { adapters } from "../adapters.ts";
 import { TestSchema, testIdSchema } from "../schema.ts";
+import { testSearchFields } from "../search.ts";
 import {
+  COVERAGE_CARD,
   READ_ONLY_HINTS,
   firstSentence,
   lenient,
   miss,
   ok,
-  paginate,
+  rankedSearchResult,
+  rowCoverageShape,
   searchInputShape,
   searchOutputShape,
-  searchResult,
 } from "./shared.ts";
 
 // Concise projection served by search_tests (detail: "concise").
@@ -24,6 +26,7 @@ const ConciseTestHit = z.object({
   name: z.string(),
   family: z.string().optional().describe("Equivalence group across bank-specific variants"),
   purpose_first_sentence: z.string(),
+  ...rowCoverageShape,
 }).passthrough();
 
 export function registerTestTools(server: McpServer): void {
@@ -36,21 +39,27 @@ export function registerTestTools(server: McpServer): void {
         "aliases, family, purpose, acceptance_criteria — useful for matching bank-specific " +
         "test names to corpus entries. Returns { results, total_matches, offset, truncated }; " +
         "concise results (default) are { id, name, family, purpose_first_sentence } — pass " +
-        "detail: 'full' for complete records. Call get_test on an id for the full record.",
+        "detail: 'full' for complete records. Call get_test on an id for the full record. " + COVERAGE_CARD,
       inputSchema: searchInputShape("name, aliases, family, purpose, and acceptance criteria"),
       outputSchema: searchOutputShape(z.union([ConciseTestHit, TestSchema])),
       annotations: READ_ONLY_HINTS,
     },
     async ({ query, limit, offset, detail }) => {
       const records = await adapters.test.search(query);
-      if (detail === "full") return searchResult(paginate(records, limit, offset));
-      const concise = records.map((t) => ({
-        id: t.id,
-        name: t.name,
-        ...(t.family !== undefined ? { family: t.family } : {}),
-        purpose_first_sentence: firstSentence(t.purpose),
-      }));
-      return searchResult(paginate(concise, limit, offset));
+      return rankedSearchResult({
+        records,
+        query,
+        fields: testSearchFields,
+        detail,
+        limit,
+        offset,
+        concise: (t) => ({
+          id: t.id,
+          name: t.name,
+          ...(t.family !== undefined ? { family: t.family } : {}),
+          purpose_first_sentence: firstSentence(t.purpose),
+        }),
+      });
     },
   );
 

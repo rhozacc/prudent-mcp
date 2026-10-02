@@ -6,16 +6,18 @@ import { z } from "zod";
 
 import { adapters } from "../adapters.ts";
 import { CheckSchema, checkIdSchema, regulationIdSchema } from "../schema.ts";
+import { checkSearchFields } from "../search.ts";
 import {
+  COVERAGE_CARD,
   READ_ONLY_HINTS,
   firstSentence,
   lenient,
   miss,
   ok,
-  paginate,
+  rankedSearchResult,
+  rowCoverageShape,
   searchInputShape,
   searchOutputShape,
-  searchResult,
 } from "./shared.ts";
 
 // Concise projection served by search_checks (detail: "concise").
@@ -24,6 +26,7 @@ const ConciseCheckHit = z.object({
   name: z.string(),
   expectation_first_sentence: z.string(),
   derived_from: z.array(regulationIdSchema).describe("Regulations this check operationalises"),
+  ...rowCoverageShape,
 }).passthrough();
 
 export function registerCheckTools(server: McpServer): void {
@@ -36,21 +39,27 @@ export function registerCheckTools(server: McpServer): void {
         "expectation, expected_evidence. Returns { results, total_matches, offset, truncated }; " +
         "concise results (default) are { id, name, expectation_first_sentence, derived_from } — " +
         "pass detail: 'full' for complete records. Call get_check on an id for the full record, " +
-        "or get_regulation on any derived_from id to read the underlying law.",
+        "or get_regulation on any derived_from id to read the underlying law. " + COVERAGE_CARD,
       inputSchema: searchInputShape("name, expectation, and expected evidence"),
       outputSchema: searchOutputShape(z.union([ConciseCheckHit, CheckSchema])),
       annotations: READ_ONLY_HINTS,
     },
     async ({ query, limit, offset, detail }) => {
       const records = await adapters.check.search(query);
-      if (detail === "full") return searchResult(paginate(records, limit, offset));
-      const concise = records.map((c) => ({
-        id: c.id,
-        name: c.name,
-        expectation_first_sentence: firstSentence(c.expectation),
-        derived_from: c.derived_from,
-      }));
-      return searchResult(paginate(concise, limit, offset));
+      return rankedSearchResult({
+        records,
+        query,
+        fields: checkSearchFields,
+        detail,
+        limit,
+        offset,
+        concise: (c) => ({
+          id: c.id,
+          name: c.name,
+          expectation_first_sentence: firstSentence(c.expectation),
+          derived_from: c.derived_from,
+        }),
+      });
     },
   );
 

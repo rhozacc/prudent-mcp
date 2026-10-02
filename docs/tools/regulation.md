@@ -19,7 +19,7 @@ Ranked, field-scoped search across all loaded regulatory frameworks: citation (w
 | `offset` | `number` | Optional — skip this many ranked matches |
 | `detail` | `"concise" \| "full"` | Optional, default `"concise"` |
 
-**Returns:** the shared envelope `{ results, returned, total_matches, offset, truncated, next_offset }` — latest versions only. Concise results are `{ id, citation, matched_excerpt, document_id, parent }`, where `matched_excerpt` is a run of whole sentences around the best match — quotable as it stands, so a hit can be answered from without re-fetching the record. `detail: "full"` serves complete records with `commentary` capped per row and `commentary_omitted` declaring what was withheld; `get_regulation` serves every entry.
+**Returns:** the shared envelope `{ results, returned, total_matches, offset, truncated, next_offset, query_tokens, best_coverage, notice }` — latest versions only. Concise results are `{ id, citation, matched_excerpt, document_id, parent }`, where `matched_excerpt` is a run of whole sentences around the best match — quotable as it stands, so a hit can be answered from without re-fetching the record. `detail: "full"` serves complete records with `commentary` capped per row and `commentary_omitted` declaring what was withheld; `get_regulation` serves every entry. Concise rows also carry `coverage` — how many of the query's `query_tokens` meaningful terms that row matched; `best_coverage` is the highest of any row across the whole ranked set (page 2 still reports it), and `notice` says so when the best match covers fewer than half the terms. `detail: "full"` records are not decorated; the envelope fields still appear.
 
 **Example:**
 ```ts

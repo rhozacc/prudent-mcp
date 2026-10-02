@@ -59,7 +59,7 @@ Search semantics are defined once, in `src/search.ts` (`rankedSearch` plus per-s
 
 - The query is tokenized (lowercased, split on non-alphanumerics). Only the declared fields are scanned, each with a weight — a query never matches JSON keys or URI scheme prefixes. For regulation, record ids join the field set (at low weight) only when the query itself looks URI-like, so a prose query like "regulation" no longer matches 100% of records.
 - Score = weight × occurrences; whole-word occurrences count full weight, substring-only occurrences half. Results sort by score descending, ties by input order — fully deterministic.
-- `rankedSearch` caps at 20 results by default. Each match carries `{ record, score, matched: { field, excerpt } }`; the built-in adapters return the records, and `search_regulation` re-ranks locally to attach `matched_excerpt` to its concise hits.
+- `rankedSearch` does not cap; the tool layer pages. Each match carries `{ record, score, coverage, query_tokens, matched: { field, excerpt } }`; the built-in adapters return the records, and every `search_*` tool re-ranks the returned records locally (with the same field set) to attach `matched_excerpt` and each row's `coverage`, and to report `query_tokens` and `best_coverage` on the envelope. An outside adapter therefore needs no new method: its records are measured by the server's own definition of coverage.
 
 An external backend that wants ranking parity should call `rankedSearch` with the exported field sets rather than reinventing the scoring.
 

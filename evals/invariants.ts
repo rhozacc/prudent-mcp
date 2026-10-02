@@ -9,7 +9,7 @@
  * The failure they are all aimed at is the same one: **a model believing
  * something the corpus did not say.** Volume is a cost; a confident wrong
  * answer is a defect. So the fatal findings here are about truthfulness
- * (I1–I4, I7, I11, I12) and the budgeted ones about cost (I5–I6).
+ * (I1–I4, I7, I11–I13) and the budgeted ones about cost (I5–I6).
  *
  * Every invariant reports `applicable: false` rather than passing when it had
  * nothing to bind on — a check that passes by having nothing to measure is the
@@ -1560,6 +1560,96 @@ export async function declineOnPartialDocumentSaysSo(s: Session): Promise<Invari
   return { id, title, applicable: bound > 0, findings };
 }
 
+// ============================================================================
+// I13 - a weak best match is declared
+// ============================================================================
+
+/**
+ * "Showing 20 of 1239 matches" for a concept the corpus does not hold: a page of
+ * hits on the commonest query terms, with nothing to say that no hit covers the
+ * distinctive ones. The ranking knows how many query terms each hit matched; the
+ * belief at stake is "the top of this list answers my question".
+ *
+ * The probe is built so that the truth is known WITHOUT trusting the reply: three
+ * invented words that occur in no record (checked - the same three alone must
+ * match nothing) plus one common word the surface does hold. No record can
+ * cover more than one of the four terms, so the envelope must say there are four
+ * meaningful terms, must not claim a best coverage above one, must not decorate a
+ * row with more than one, and must carry a notice that the topic may not be in
+ * this corpus. It does not ask what the server's coverage IS on a real query -
+ * only that it never overstates a match whose truth is fixed by construction.
+ *
+ * Applicable only where a surface holds a record matching one of the seed words;
+ * an empty corpus has nothing to say a weak match about.
+ */
+export async function weakBestMatchIsDeclared(s: Session): Promise<InvariantResult> {
+  const id = "I13";
+  const title = "A weak best match is declared";
+  const findings: Finding[] = [];
+  const INVENTED = ["zqxvjk", "wkvzqp", "qjxzwm"];
+  const SEEDS = ["default", "risk", "model", "data", "validation", "estimation", "test", "check", "area"];
+  const TOOLS = ["search_regulation", "search_checks", "search_tests", "search_playbooks"];
+  type Body = { total_matches?: unknown; query_tokens?: unknown; best_coverage?: unknown; notice?: unknown; results?: unknown };
+  const bodyOf = (t: { json: unknown }): Body => (t.json ?? {}) as Body;
+
+  let bound = 0;
+  for (const tool of TOOLS) {
+    // The invented words alone must match nothing, or the premise is false and
+    // nothing can be concluded from this surface.
+    const alone = await s.call(tool, { query: INVENTED.join(" "), limit: 1 });
+    if (alone.isError || bodyOf(alone).total_matches !== 0) continue;
+
+    let query: string | undefined;
+    let probe: Awaited<ReturnType<Session["call"]>> | undefined;
+    for (const word of SEEDS) {
+      const q = `${INVENTED.join(" ")} ${word}`;
+      const t = await s.call(tool, { query: q, limit: 20 });
+      if (!t.isError && typeof bodyOf(t).total_matches === "number" && (bodyOf(t).total_matches as number) > 0) {
+        query = q;
+        probe = t;
+        break;
+      }
+    }
+    if (query === undefined || probe === undefined) continue;
+    bound++;
+
+    const b = bodyOf(probe);
+    const rows = Array.isArray(b.results) ? (b.results as Array<Record<string, unknown>>) : [];
+    const problems: string[] = [];
+    if (b.query_tokens !== 4) problems.push(`query_tokens is ${JSON.stringify(b.query_tokens)}, the query holds 4 meaningful terms`);
+    if (!Number.isInteger(b.best_coverage)) problems.push(`best_coverage is ${JSON.stringify(b.best_coverage)}, not an integer`);
+    else if ((b.best_coverage as number) > 1) problems.push(`best_coverage is ${String(b.best_coverage)} but no record can match more than 1 of the 4 terms`);
+    const overstated = rows.filter((r) => typeof r["coverage"] === "number" && (r["coverage"] as number) > 1);
+    if (overstated.length > 0) problems.push(`${overstated.length} row(s) claim a coverage above 1`);
+    if (rows.length > 0 && rows.every((r) => !("coverage" in r))) problems.push("rows carry no coverage");
+    const notice = typeof b.notice === "string" ? b.notice : "";
+    if (!/may not be in this corpus/i.test(notice) || !/not about the law/i.test(notice)) {
+      problems.push("the notice does not say the topic may not be in this corpus, and that absence is not absence from the law");
+    }
+    // A single-term query has no "some of the terms" to be short of: a whole word
+    // and a stem (placed only on partial-word matches, coverage 0) alike must not
+    // be told the topic may not be in the corpus.
+    for (const word of SEEDS.flatMap((w) => [w, w.slice(0, Math.max(3, w.length - 2))])) {
+      const one = await s.call(tool, { query: word, limit: 5 });
+      if (one.isError) continue;
+      const ob = bodyOf(one);
+      const n = typeof ob.notice === "string" ? ob.notice : "";
+      if (typeof ob.total_matches === "number" && ob.total_matches > 0 && /meaningful terms|partial-word/i.test(n)) {
+        problems.push(`the single-term query ${JSON.stringify(word)} (${String(ob.total_matches)} matches) carries a weak-match notice`);
+      }
+    }
+    if (problems.length > 0) {
+      findings.push({
+        id: `I13/${tool}`,
+        severity: "fatal",
+        summary: `${tool} returned a page whose best hit matches 1 of 4 query terms without declaring it - a client reads the top of the list as an answer.`,
+        evidence: [`query ${JSON.stringify(query)}`, `total_matches ${String(b.total_matches)}`, ...problems, `notice: ${notice.slice(0, 200) || "(none)"}`],
+      });
+    }
+  }
+  return { id, title, applicable: bound > 0, findings };
+}
+
 export const ALL = [
   envelopeIsJson,
   describedIdsResolve,
@@ -1574,4 +1664,5 @@ export const ALL = [
   declinesAreNeverEmpty,
   asOfIsNeverSilentlySubstituted,
   declineOnPartialDocumentSaysSo,
+  weakBestMatchIsDeclared,
 ] as const;

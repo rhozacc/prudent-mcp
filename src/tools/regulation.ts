@@ -7,18 +7,19 @@ import { z } from "zod";
 import { adapters } from "../adapters.ts";
 import type { Regulation } from "../schema.ts";
 import { ProvisionKindSchema, RegulationSchema, regulationIdSchema } from "../schema.ts";
-import { rankedSearch, regulationSearchFields } from "../search.ts";
+import { regulationSearchFields } from "../search.ts";
 import {
   AS_OF_MISS_CONTEXT,
+  COVERAGE_CARD,
   READ_ONLY_HINTS,
   lenient,
   miss,
   ok,
-  paginate,
+  rankedSearchResult,
   resolveRegulation,
+  rowCoverageShape,
   searchInputShape,
   searchOutputShape,
-  searchResult,
   unknownRegulationMiss,
   withAsOfNote,
 } from "./shared.ts";
@@ -38,6 +39,7 @@ const ConciseRegulationHit = z.object({
   // it states a requirement or guidance.
   kind: ProvisionKindSchema.optional(),
   obligation: z.enum(["must", "should", "may", "none"]).optional(),
+  ...rowCoverageShape,
 }).passthrough();
 
 /**
@@ -82,7 +84,7 @@ export function registerRegulationTools(server: McpServer): void {
         "match — quotable as it stands. detail: 'full' gives complete records with commentary " +
         "capped (commentary_omitted says how many were left out; get_regulation serves them " +
         "all). Latest versions only. Follow up with get_regulation (as_of for history) or " +
-        "get_referrers on any id.",
+        "get_referrers on any id. " + COVERAGE_CARD,
       inputSchema: searchInputShape("citation, text, and commentary"),
       outputSchema: searchOutputShape(
         z.union([
@@ -100,24 +102,28 @@ export function registerRegulationTools(server: McpServer): void {
     },
     async ({ query, limit, offset, detail }) => {
       const records = await adapters.regulation.search(query);
-      if (detail === "full") return searchResult(paginate(records.map(capCommentary), limit, offset));
-      // The adapter interface returns records only — recompute matches locally
-      // (cheap at result sizes) to attach the excerpt to each concise hit.
-      const matches = rankedSearch(records, query, regulationSearchFields(query), records.length);
-      const excerpts = new Map(matches.map((m) => [m.record.id, m.matched.excerpt]));
-      const concise = records.map((r) => {
-        const excerpt = excerpts.get(r.id);
-        return {
-          id: r.id,
-          citation: r.citation,
-          ...(excerpt !== undefined ? { matched_excerpt: excerpt } : {}),
-          document_id: r.document_id,
-          ...(r.parent !== undefined ? { parent: r.parent } : {}),
-          ...(r.kind !== undefined ? { kind: r.kind } : {}),
-          ...(r.obligation !== undefined ? { obligation: r.obligation } : {}),
-        };
+      // The excerpt comes from the same local ranking that supplies `coverage`.
+      return rankedSearchResult({
+        records,
+        query,
+        fields: regulationSearchFields(query),
+        detail,
+        limit,
+        offset,
+        full: capCommentary,
+        concise: (r, match) => {
+          const excerpt = match?.matched.excerpt;
+          return {
+            id: r.id,
+            citation: r.citation,
+            ...(excerpt !== undefined ? { matched_excerpt: excerpt } : {}),
+            document_id: r.document_id,
+            ...(r.parent !== undefined ? { parent: r.parent } : {}),
+            ...(r.kind !== undefined ? { kind: r.kind } : {}),
+            ...(r.obligation !== undefined ? { obligation: r.obligation } : {}),
+          };
+        },
       });
-      return searchResult(paginate(concise, limit, offset));
     },
   );
 

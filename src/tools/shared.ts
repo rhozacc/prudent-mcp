@@ -19,6 +19,7 @@ import { z } from "zod";
 import { adapters } from "../adapters.ts";
 import { computeHoldings, missingRecordClause } from "../holdings.ts";
 import type { Regulation, RegulationId } from "../schema.ts";
+import { distinctQueryTokens, rankedSearch, type SearchField, type SearchMatch } from "../search.ts";
 
 // Every tool on this server reads a local knowledge base and nothing else.
 export const READ_ONLY_HINTS: ToolAnnotations = {
@@ -94,6 +95,17 @@ export interface SearchEnvelope<T> {
   truncated: boolean;
   /** Next offset to ask for; null when this page is the last one. */
   next_offset: number | null;
+  /**
+   * Distinct meaningful terms in the query (stopwords excluded exactly as
+   * ranking excludes them): the denominator every row's `coverage` is read
+   * against.
+   */
+  query_tokens?: number;
+  /**
+   * The highest `coverage` over the WHOLE ranked set, not this page - so page 2
+   * still says how good the best hit was. Absent when no row matched.
+   */
+  best_coverage?: number;
   /** Guidance that used to be appended after the JSON, where it broke parsing. */
   notice?: string;
 }
@@ -164,6 +176,105 @@ export function searchResult<T>(envelope: SearchEnvelope<T>): CallToolResult {
   return { content, structuredContent: envelope as unknown as Record<string, unknown> };
 }
 
+// --- Search coverage -----------------------------------------------------------
+
+/**
+ * The sentence added to `notice` when even the best hit leaves most of the
+ * query unmatched.
+ *
+ * It exists because a page of twenty hits on the commonest query terms looks the
+ * same whether or not any hit is about the distinctive ones: "Showing 20 of 1239
+ * matches" for a concept the corpus does not hold. The ranking knew how many
+ * terms each hit matched and kept it to itself. No relevance floor and no cap
+ * come with it - every match is still returned, in the same order; the notice
+ * only says what the best of them is worth, and that the shortfall is a fact
+ * about this corpus, not about the law.
+ */
+export function weakMatchNotice(best: number, queryTokens: number): string {
+  if (best === 0) {
+    // Coverage counts whole-word matches only; a record can be placed on a
+    // partial-word match alone (a stem) and carry coverage 0. That is not "matches
+    // none of the terms" - say what was actually found.
+    return (
+      `No result contains any of the query's ${queryTokens} meaningful terms as a whole word; the matches are ` +
+      "partial-word matches only, so they may not be about the topic. Absence of a strong match is a " +
+      "statement about the corpus, not about the law."
+    );
+  }
+  return (
+    `The best result matches only ${best} of the query's ${queryTokens} meaningful terms, so the topic ` +
+    "may not be in this corpus. Absence of a strong match is a statement about the corpus, not about the law."
+  );
+}
+
+/**
+ * Add `query_tokens` and `best_coverage` to a paged envelope and, when the best
+ * match is weak (fewer than half the query's terms), say so in `notice` after
+ * whatever truncation or shortening notice is already there - never instead of it.
+ * A single-term query never carries it: with one term there is no "some of the
+ * terms" to be short of, and a stem that places records on partial-word matches
+ * alone has best coverage 0 (coverage counts whole words) without being weak.
+ */
+export function withQueryCoverage<T>(
+  envelope: SearchEnvelope<T>,
+  queryTokens: number,
+  bestCoverage: number | undefined,
+): SearchEnvelope<T> {
+  const out: SearchEnvelope<T> = { ...envelope, query_tokens: queryTokens };
+  if (bestCoverage === undefined) return out;
+  out.best_coverage = bestCoverage;
+  if (queryTokens >= 2 && bestCoverage * 2 < queryTokens) {
+    const weak = weakMatchNotice(bestCoverage, queryTokens);
+    out.notice = envelope.notice === undefined ? weak : `${envelope.notice} ${weak}`;
+  }
+  return out;
+}
+
+export interface RankedSearchPage<T extends { id: string }, Row extends object> {
+  /** What the adapter's `search(query)` returned, in the order it returned it. */
+  records: T[];
+  query: string;
+  fields: SearchField<T>[];
+  detail: "concise" | "full";
+  limit: number;
+  offset: number;
+  /** The concise projection; `match` is undefined for a record the local ranking did not place. */
+  concise: (record: T, match: SearchMatch<T> | undefined) => Row;
+  /** The `detail: 'full'` row; the record itself when omitted. */
+  full?: (record: T) => object;
+}
+
+/**
+ * The one body of a search_* tool: page the adapter's records, decorate concise
+ * rows with `coverage`, and report the query-level figures.
+ *
+ * The adapter interface returns records and not matches, so ranking is recomputed
+ * here over the result set (cheap at these sizes) with the same field set the
+ * adapter used. Coverage is therefore the server's own definition, and the best
+ * is taken over every ranked record before paging. Row order is the adapter's,
+ * untouched. `detail: 'full'` rows are record schemas and stay undecorated; the
+ * envelope fields still appear. Rows are decorated BEFORE paginate so the size
+ * budget measures what is actually sent.
+ */
+export function rankedSearchResult<T extends { id: string }, Row extends object>(
+  page: RankedSearchPage<T, Row>,
+): CallToolResult {
+  const { records, query, fields, detail, limit, offset } = page;
+  const ranked = rankedSearch(records, query, fields);
+  const byId = new Map(ranked.map((m) => [m.record.id, m]));
+  const rows: object[] =
+    detail === "full"
+      ? records.map((r) => (page.full === undefined ? r : page.full(r)))
+      : records.map((r) => {
+          const match = byId.get(r.id);
+          const row = page.concise(r, match);
+          return match === undefined ? row : { ...row, coverage: match.coverage };
+        });
+  // Highest of the whole ranked set, taken before paging.
+  const best = ranked.reduce<number | undefined>((b, m) => (b === undefined || m.coverage > b ? m.coverage : b), undefined);
+  return searchResult(withQueryCoverage(paginate(rows, limit, offset), distinctQueryTokens(query), best));
+}
+
 /**
  * Size guard for a single non-paged response.
  *
@@ -213,6 +324,19 @@ export function searchInputShape(fieldsDoc: string) {
   };
 }
 
+/** The sentence every search_* tool card ends its result description with. */
+export const COVERAGE_CARD =
+  "Rows carry coverage (query terms matched, of query_tokens); best_coverage spans all pages; notice flags a weak best match.";
+
+/** Documented once, spread into each concise hit schema. */
+export const rowCoverageShape = {
+  coverage: z
+    .number()
+    .int()
+    .optional()
+    .describe("How many of the query's meaningful terms (query_tokens) this row matched."),
+};
+
 /**
  * The shared output schema for the four search_* tools.
  *
@@ -242,6 +366,18 @@ export function searchOutputShape(resultItem: z.ZodTypeAny) {
       .int()
       .nullable()
       .describe("Offset for the next page; null when this page is the last."),
+    query_tokens: z
+      .number()
+      .int()
+      .optional()
+      .describe("Distinct meaningful terms in the query (stopwords excluded) - the denominator for each row's coverage."),
+    best_coverage: z
+      .number()
+      .int()
+      .optional()
+      .describe(
+        "Highest coverage of any match across the whole ranked set, not only this page; absent when nothing matched.",
+      ),
     notice: z.string().optional().describe("Guidance about this result set, when there is any."),
   }).passthrough();
 }

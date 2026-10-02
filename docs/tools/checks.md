@@ -18,7 +18,7 @@ Ranked, field-scoped search across the catalog of qualitative checks: name (weig
 | `limit` / `offset` | `number` | Optional paging (default 20 per page) |
 | `detail` | `"concise" \| "full"` | Optional, default `"concise"` |
 
-**Returns:** the shared envelope `{ results, returned, total_matches, offset, truncated, next_offset }`. Concise results are `{ id, name, expectation_first_sentence, derived_from }`; `detail: "full"` serves complete records.
+**Returns:** the shared envelope `{ results, returned, total_matches, offset, truncated, next_offset, query_tokens, best_coverage, notice }`. Concise results are `{ id, name, expectation_first_sentence, derived_from }`; `detail: "full"` serves complete records. Concise rows also carry `coverage` — how many of the query's `query_tokens` meaningful terms that row matched; `best_coverage` is the highest of any row across the whole ranked set (page 2 still reports it), and `notice` says so when the best match covers fewer than half the terms. `detail: "full"` records are not decorated; the envelope fields still appear.
 
 **Example:**
 ```ts
