@@ -200,3 +200,87 @@ describe("resolve_citation: the containing-provision note", () => {
     expect(r.confidence).toBe("exact");
   });
 });
+
+describe("resolve_citation: containers in more than one document", () => {
+  // Two documents number a provision the same way. The citation names neither, so
+  // "the provision containing it" is not one record, and reading ONE document's
+  // text for the point verifies a text the caller may not be citing.
+  const inDocument = (framework: string, documentId: string, n: number, text: string, citation = `Article ${n}`): Regulation => ({
+    id: `regulation://${documentId}/article-${n}` as Regulation["id"],
+    framework,
+    document_id: documentId,
+    document_version: "2024-01-09",
+    citation,
+    text,
+    commentary: [],
+    children: [],
+  });
+  const both = (): Regulation[] => [
+    inDocument("acme", "acme-act", 146, WITH_POINTS),
+    inDocument("bravo", "bravo-gl", 146, WITH_POINTS),
+  ];
+
+  it("names no container and gives no verdict, though each text happens to carry the point", () => {
+    const { note: n, r } = note(both(), "Article 146(2)(b)");
+    expect(r.match).toBeNull();
+    expect(r.confidence).toBe("none");
+    expect(r.unmatched_segments).toEqual(["146", "2", "b"]);
+    expect(r.candidates.map((c) => c.document_id)).toEqual(["acme-act", "bravo-gl"]);
+    expect(n).not.toContain("carries");
+    expect(n).not.toContain("no point");
+    expect(n).not.toContain("containing it");
+    expect(n).toContain("sit in 2 documents (acme-act, bravo-gl) and the citation names none of them");
+    expect(n).toContain("which one it belongs to cannot be told");
+    expect(n).toContain("nothing is said here about whether the text of any of them has the point");
+    expect(n).toContain("Name the document");
+  });
+
+  it("does the same when only one document's text lacks the point", () => {
+    const regs = [inDocument("acme", "acme-act", 146, WITH_POINTS), inDocument("bravo", "bravo-gl", 146, SEVEN)];
+    const { note: n, r } = note(regs, "Article 146(2)(b)");
+    expect(r.candidates).toHaveLength(2);
+    expect(n).not.toContain("carries");
+    expect(n).not.toContain("no point");
+  });
+
+  it("keeps the verdict when the citation names the document", () => {
+    const { note: n, r } = note(both(), "Article 146(2)(b) of acme-act");
+    expect(r.candidates.map((c) => c.document_id)).toEqual(["acme-act"]);
+    expect(n).toContain("whose text carries point 2.b");
+  });
+
+  it("keeps the verdict when only one document holds a container", () => {
+    const regs = [...both(), inDocument("charlie", "charlie-reg", 7, SEVEN)];
+    const { note: n } = note(regs, "Article 7(3)");
+    expect(n).toContain("whose text carries point 3");
+  });
+
+  it("lists the narrowest container of each document, however many nested records one holds", () => {
+    const regs = [
+      inDocument("acme", "acme-act", 146, WITH_POINTS),
+      inDocument("acme", "acme-act", 146, WITH_POINTS, "Article 146(2)"),
+      inDocument("bravo", "bravo-gl", 146, WITH_POINTS),
+    ];
+    regs[1] = { ...regs[1]!, id: "regulation://acme-act/article-146.2" as Regulation["id"] };
+    const { r } = note(regs, "Article 146(2)(b)");
+    expect(r.candidates.map((c) => c.citation)).toEqual(["Article 146(2)", "Article 146"]);
+    expect(r.candidates.map((c) => c.document_id)).toEqual(["acme-act", "bravo-gl"]);
+  });
+
+  it("says when a framework alias names several documents and more than one holds a container", () => {
+    const regs = [inDocument("grp", "grp-a", 146, WITH_POINTS), inDocument("grp", "grp-b", 146, WITH_POINTS)];
+    const { note: n, r } = note(regs, "Article 146(2)(b) grp");
+    expect(r.candidates).toHaveLength(2);
+    expect(n).toContain("sit in 2 of the documents it names (grp-a, grp-b)");
+    expect(n).not.toContain("and the citation names none of them");
+    expect(n).not.toContain("carries");
+  });
+
+  it("caps the candidates and says so", () => {
+    const regs = Array.from({ length: 12 }, (_, i) => inDocument(`fw${i}`, `doc-${i}`, 146, WITH_POINTS));
+    const { note: n, r } = note(regs, "Article 146(2)(b)");
+    expect(r.candidates).toHaveLength(10);
+    expect(n).toContain("sit in 12 documents");
+    expect(n).toContain("(First 10 listed.)");
+  });
+});

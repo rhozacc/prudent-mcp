@@ -1096,6 +1096,35 @@ export function resolveCitationDetailed(
     // Narrowest first: the most specific container is the most useful one.
     .sort((a, b) => b.rs.length - a.rs.length);
   if (containers.length > 0) {
+    // Which document the container is in is part of the claim. Containers from
+    // several documents are not alternatives for one provision, they are different
+    // provisions that happen to share a number, and presenting the first of them
+    // as "the provision containing it" - then reading ITS text for the point -
+    // verifies the wrong document's text for a citation that may be about
+    // another. So when the containers span documents there is no best one, and no
+    // verdict on any text: the candidates are listed by document and the caller
+    // is asked to name one.
+    const holders = [...new Set(containers.map(({ r }) => r.document_id))];
+    if (holders.length > 1) {
+      // The narrowest container of each document, so every document is represented
+      // however many nested records one of them holds.
+      const perDocument = holders.map((d) => containers.find(({ r }) => r.document_id === d)!.r);
+      const listed = perDocument.slice(0, MAX_CANDIDATES);
+      const where =
+        docs === null
+          ? `sit in ${holders.length} documents (${holders.slice(0, 5).join(", ")}${holders.length > 5 ? ", …" : ""}) and the citation names none of them`
+          : `sit in ${holders.length} of the documents it names (${holders.slice(0, 5).join(", ")}${holders.length > 5 ? ", …" : ""})`;
+      return none({
+        unmatched_segments: spine,
+        candidates: listed.map(asCandidate),
+        coverage_note:
+          `No record is "${text}" itself — this corpus does not address provisions at that granularity. ` +
+          `Records that could contain it ${where}, so which one it belongs to cannot be told, and nothing ` +
+          `is said here about whether the text of any of them has the point. ` +
+          `${perDocument.length > listed.length ? `(First ${MAX_CANDIDATES} listed.) ` : ""}` +
+          "Name the document, or open the candidates and check.",
+      });
+    }
     const best = containers[0]!;
     const points = spine.slice(best.rs.length);
     const inside = points.join(".");

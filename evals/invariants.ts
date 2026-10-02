@@ -293,7 +293,7 @@ export async function containerClaimsAreTrue(
       const j = (r.json ?? {}) as {
         match?: unknown;
         unmatched_segments?: unknown;
-        candidates?: Array<{ id?: string }>;
+        candidates?: Array<{ id?: string; document_id?: string }>;
         coverage_note?: unknown;
       };
       const candidate = Array.isArray(j.candidates) ? j.candidates[0] : undefined;
@@ -309,6 +309,24 @@ export async function containerClaimsAreTrue(
       const note = typeof j.coverage_note === "string" ? j.coverage_note : "";
       const claim = /carries point ([0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)\./.exec(note)?.[1];
       if (claim === undefined) continue;
+      // Containers in several documents are different provisions that share a
+      // number, not alternatives for one. Calling one of them "the provision
+      // containing it" and reading ITS text verifies a document the citation may
+      // not be about, so the claim is wrong however true it is of that text.
+      const documents = new Set((j.candidates ?? []).flatMap((c) => (typeof c.document_id === "string" ? [c.document_id] : [])));
+      if (documents.size > 1) {
+        findings.push({
+          id: "I3/container-claim-cross-document",
+          severity: "fatal",
+          summary:
+            "resolve_citation presents one record as the provision containing a citation and says its text carries the point, though the records that could contain it sit in several documents - it verified a text that may not be the one cited.",
+          evidence: [
+            `resolve_citation("${probe}") claims point ${claim} in ${candidate.id}`,
+            `candidates sit in ${documents.size} documents: ${[...documents].slice(0, 5).join(", ")}`,
+          ],
+        });
+        continue;
+      }
       const rec = await s.call("get_regulation", { id: candidate.id });
       const text = typeof (rec.json as { text?: unknown } | null)?.text === "string" ? (rec.json as { text: string }).text : null;
       if (rec.isError || text === null) continue;

@@ -62,6 +62,20 @@ describe("eval I3/container-claim", () => {
     expect(r.findings.filter((f) => f.severity === "fatal")).toEqual([]);
   });
 
+  it("finds the server honest where two documents number a provision the same way", async () => {
+    // Citations carry no document name, so a deeper citation names neither document.
+    const plain = (n: number, document: "acme" | "bravo") => ({
+      ...rec(n, SEVEN),
+      id: `regulation://${document}/article-${n}`,
+      framework: document,
+      document_id: `${document}-doc`,
+      citation: `Article ${n}`,
+    });
+    const r = await run(write("two-docs.json", [plain(180, "acme"), plain(180, "bravo"), plain(181, "acme"), plain(181, "bravo")]));
+    expect(r.applicable).toBe(true);
+    expect(r.findings.filter((f) => f.severity === "fatal")).toEqual([]);
+  });
+
   it("is not applicable when no citation reaches the containing-provision rule", async () => {
     // Records with no numbered citation to deepen: nothing can sit inside them.
     const unnumbered = { ...rec(1, "Synthetic default risk text."), citation: "Preamble" };
@@ -72,7 +86,12 @@ describe("eval I3/container-claim", () => {
 });
 
 /** A session that answers like a server which still claims without looking. */
-function scripted(claimText: string, claim = "9", unmatched = ["180", "9"]): Session {
+function scripted(
+  claimText: string,
+  claim = "9",
+  unmatched = ["180", "9"],
+  candidates: Array<{ id: string; document_id?: string }> = [{ id: "regulation://acme/article-180" }],
+): Session {
   const trace = (tool: string, json: unknown): CallTrace => ({
     tool,
     args: {},
@@ -101,7 +120,7 @@ function scripted(claimText: string, claim = "9", unmatched = ["180", "9"]): Ses
         match: null,
         confidence: "none",
         unmatched_segments: unmatched,
-        candidates: [{ id: "regulation://acme/article-180" }],
+        candidates,
         coverage_note:
           'It holds the provision containing it: "Acme Article 180" (regulation://acme/article-180), ' +
           `whose text carries point ${claim}. Open it.`,
@@ -130,6 +149,33 @@ describe("eval I3/container-claim fires on a false claim", () => {
 
   it("passes when a nested claim is true", async () => {
     const r = await containerClaimsAreTrue(scripted(LETTERED, "2.b", ["180", "2", "b"]));
+    expect(r.findings.filter((f) => f.severity === "fatal")).toEqual([]);
+  });
+
+  it("is fatal when the claim is made about one of several documents' containers", async () => {
+    // True of the text served for the first candidate, and still wrong: the citation
+    // names no document, and the second candidate is another document's provision.
+    const nine = Array.from({ length: 9 }, (_, i) => `${i + 1}. Synthetic paragraph ${i + 1}.`).join("\n");
+    const r = await containerClaimsAreTrue(
+      scripted(nine, "9", ["180", "9"], [
+        { id: "regulation://acme/article-180", document_id: "acme-act" },
+        { id: "regulation://bravo/article-180", document_id: "bravo-gl" },
+      ]),
+    );
+    expect(r.applicable).toBe(true);
+    const fatal = r.findings.filter((f) => f.severity === "fatal");
+    expect(fatal.map((f) => f.id)).toContain("I3/container-claim-cross-document");
+    expect(fatal.map((f) => f.id)).not.toContain("I3/container-claim");
+  });
+
+  it("does not fire when the candidates are one document's", async () => {
+    const nine = Array.from({ length: 9 }, (_, i) => `${i + 1}. Synthetic paragraph ${i + 1}.`).join("\n");
+    const r = await containerClaimsAreTrue(
+      scripted(nine, "9", ["180", "9"], [
+        { id: "regulation://acme/article-180", document_id: "acme-act" },
+        { id: "regulation://acme/article-180.1", document_id: "acme-act" },
+      ]),
+    );
     expect(r.findings.filter((f) => f.severity === "fatal")).toEqual([]);
   });
 
