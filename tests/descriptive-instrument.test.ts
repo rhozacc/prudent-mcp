@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { openSession } from "../evals/harness.ts";
-import { descriptiveInstrumentGateHolds } from "../evals/invariants.ts";
+import { openSession, type CallTrace, type Session } from "../evals/harness.ts";
+import { descriptiveInstrumentGateHolds, ownCitationsResolve } from "../evals/invariants.ts";
 import { resolveCitationDetailed } from "../src/file-adapter.ts";
 import type { Regulation } from "../src/schema.ts";
 
@@ -322,6 +322,75 @@ describe("zero match flips", () => {
   });
 });
 
+describe("a record's own citation resolves before any instrument gate", () => {
+  // A corpus is not obliged to keep descriptor words out of its citations: a
+  // document may hold "RTS Article 5" or "ECB Guideline paragraph 7" as the
+  // labels of its own records. The gates read words in the CALLER's text; when
+  // that text is exactly a record's citation, or a label the record declares,
+  // the caller quoted the record and nothing may refuse it.
+  const zeta = (id: string, citation: string, extra: Partial<Regulation> = {}): Regulation => ({
+    ...reg(`regulation://zeta/${id}`, citation, "zeta-gl", "zeta"),
+    ...extra,
+  });
+  const labelled = (): Regulation[] => [
+    zeta("rts-5", "RTS Article 5"),
+    zeta("its-5", "ITS Article 5"),
+    zeta("ecb-7", "ECB Guideline paragraph 7"),
+    zeta("del-8", "Delegated Regulation Article 8"),
+    zeta("tech-9", "Technical Standards Article 9"),
+    zeta("art-6", "Article 6", { citation_aliases: ["RTS Article 6", "the ECB Guidelines, paragraph 6"] }),
+    // An act number in a citation, on a document whose ids carry no number.
+    zeta("act-14", "Regulation (EU) 2022/439 Article 14(b)"),
+    // A same-numbered provision elsewhere, which an unscoped lookup would find.
+    reg("regulation://other/p5", "Article 5", "other-gl", "other"),
+    reg("regulation://other/p7", "Paragraph 7", "other-gl", "other"),
+  ];
+
+  it("a citation equal to a record's own resolves to it, exactly", () => {
+    const regs = labelled();
+    for (const [text, id] of [
+      ["RTS Article 5", "regulation://zeta/rts-5"],
+      ["ITS Article 5", "regulation://zeta/its-5"],
+      ["ECB Guideline paragraph 7", "regulation://zeta/ecb-7"],
+      ["Delegated Regulation Article 8", "regulation://zeta/del-8"],
+      ["Technical Standards Article 9", "regulation://zeta/tech-9"],
+      ["Regulation (EU) 2022/439 Article 14(b)", "regulation://zeta/act-14"],
+    ] as const) {
+      const r = resolveCitationDetailed(regs, text);
+      expect(r.match?.id, text).toBe(id);
+      expect(r.confidence, text).toBe("exact");
+    }
+  });
+
+  it("a declared alias resolves at its own confidence level", () => {
+    const regs = labelled();
+    for (const text of ["RTS Article 6", "the ECB Guidelines, paragraph 6"]) {
+      const r = resolveCitationDetailed(regs, text);
+      expect(r.match?.id, text).toBe("regulation://zeta/art-6");
+      expect(r.confidence, text).toBe("alias");
+    }
+  });
+
+  it("the same words in a different citation are still gated", () => {
+    // Not equal to any record's citation: the gate reads them as the caller's own
+    // description of an instrument, exactly as before.
+    const regs = labelled();
+    declined(resolveCitationDetailed(regs, "Article 5 of the RTS on assessment"));
+    declined(resolveCitationDetailed(regs, "Paragraph 7 of an ECB Guideline on reporting"));
+    declined(resolveCitationDetailed(regs, "Article 14(b) of Regulation (EU) 2099/777"));
+  });
+
+  it("every record of a corpus whose citations carry descriptor words resolves from its own citation and aliases", () => {
+    const regs = labelled();
+    for (const r of regs) {
+      if (regs.filter((o) => o.citation === r.citation).length !== 1) continue; // ambiguous by construction
+      const got = resolveCitationDetailed(regs, r.citation);
+      expect(got.match?.id, r.citation).toBe(r.id);
+      for (const a of r.citation_aliases ?? []) expect(resolveCitationDetailed(regs, a).match?.id, a).toBe(r.id);
+    }
+  });
+});
+
 // ── Eval I3/descriptive-instrument ────────────────────────────────────────────
 
 const dir = mkdtempSync(join(tmpdir(), "prudent-i3-desc-"));
@@ -402,6 +471,83 @@ describe("eval I3/descriptive-instrument", () => {
     try {
       const seg = await descriptiveInstrumentGateHolds(session);
       expect(seg.findings.filter((f) => f.severity === "fatal")).toEqual([]);
+    } finally {
+      await session.close();
+    }
+  });
+});
+
+// ── Eval I3/own-citation ──────────────────────────────────────────────────────
+
+describe("eval I3/own-citation", () => {
+  // Texts carry the words the eval searches for, so the records are served in rows.
+  const labelled = (id: string, citation: string): Regulation => ({
+    ...reg(`regulation://zeta/${id}`, citation, "zeta-gl", "zeta"),
+    text: `Synthetic default risk estimation model text for ${id}.`,
+  });
+  const records = [
+    labelled("rts-5", "RTS Article 5"),
+    labelled("ecb-7", "ECB Guideline paragraph 7"),
+    labelled("act-14", "Regulation (EU) 2022/439 Article 14(b)"),
+    labelled("plain", "Article 11"),
+  ];
+
+  it("binds on a corpus whose citations carry descriptor words and finds the server resolves them", async () => {
+    const file = join(dir, "own-citation.json");
+    writeFileSync(file, JSON.stringify({ regulation: records, sources: [source("zeta", "zeta-gl")] }));
+    const session = await openSession({ corpusFile: file });
+    try {
+      const r = await ownCitationsResolve(session);
+      expect(r.applicable).toBe(true);
+      expect(r.findings.filter((f) => f.severity === "fatal")).toEqual([]);
+      // The probes really were the descriptor-bearing citations, not only the plain one.
+      const asked = session.traces.filter((t) => t.tool === "resolve_citation").map((t) => String(t.args["text"]));
+      expect(asked).toContain("RTS Article 5");
+      expect(asked).toContain("ECB Guideline paragraph 7");
+    } finally {
+      await session.close();
+    }
+  });
+
+  // A server that refuses any citation containing a descriptor word, as the gate did.
+  function refusing(): Session {
+    const trace = (tool: string, args: Record<string, unknown>, json: unknown): CallTrace => ({
+      tool, args, text: JSON.stringify(json), chars: 0, tokens: 0, ms: 0, isError: false, json,
+    });
+    return {
+      tools: [], surfaceTokens: 0, wireTokens: 0, instructions: "", traces: [],
+      async close() {},
+      async call(tool, args = {}) {
+        if (tool === "search_regulation") {
+          return trace(tool, args, { results: records.map((r) => ({ id: r.id, citation: r.citation })) });
+        }
+        const text = String(args["text"] ?? "");
+        const refused = /\b(RTS|ECB Guideline)\b/.test(text);
+        const hit = records.find((r) => r.citation === text);
+        return trace(tool, args, {
+          match: refused || hit === undefined ? null : { id: hit.id },
+          confidence: refused ? "none" : "exact",
+          candidates: [],
+          ambiguous: false,
+        });
+      },
+    };
+  }
+
+  it("fails a server that declines a citation it serves for a record", async () => {
+    const r = await ownCitationsResolve(refusing());
+    const fatal = r.findings.filter((f) => f.severity === "fatal");
+    expect(fatal.map((f) => f.id)).toEqual(["I3/own-citation", "I3/own-citation"]);
+    expect(fatal[0]?.evidence.join(" ")).toContain("RTS Article 5");
+  });
+
+  it("is not applicable when no citation is served", async () => {
+    const file = join(dir, "own-citation-empty.json");
+    writeFileSync(file, JSON.stringify({}));
+    const session = await openSession({ corpusFile: file });
+    try {
+      const r = await ownCitationsResolve(session);
+      expect(r.applicable).toBe(false);
     } finally {
       await session.close();
     }

@@ -333,6 +333,63 @@ export async function containerClaimsAreTrue(
 }
 
 /**
+ * A record's own citation is the strongest evidence a citation can have, so the
+ * server must never refuse it: not into a decline, and not into another record.
+ * The gates in front of the numeric rules read WORDS in the caller's text, and a
+ * corpus is free to label its records with the same words ("RTS Article 5"), so
+ * a gate that runs ahead of the equality pass refuses the very record quoted.
+ *
+ * Corpus-agnostic: the citations are the ones the server itself serves in search
+ * rows. The honest answers are the record itself, or an ambiguity that says
+ * several records fit (a citation several documents share, "Paragraph 12"); a
+ * null match with nobody named, or a different record, is a defect. The unit
+ * tests cover a corpus built to trip it; this binds on whatever corpus it is
+ * pointed at.
+ */
+export async function ownCitationsResolve(s: Session): Promise<{ applicable: boolean; findings: Finding[] }> {
+  const findings: Finding[] = [];
+  const served = new Map<string, string>();
+  for (const q of ["default", "estimation", "downturn", "validation", "model", "risk", "regulation"]) {
+    const t = await s.call("search_regulation", { query: q, limit: 10 });
+    const rows = ((t.json as { results?: Array<{ id?: unknown; citation?: unknown }> } | null)?.results ?? []);
+    for (const row of rows) {
+      if (typeof row.id === "string" && typeof row.citation === "string" && row.citation.trim() !== "") {
+        served.set(row.id, row.citation);
+      }
+    }
+  }
+  let bound = 0;
+  for (const [id, citation] of [...served].slice(0, 30)) {
+    const r = await s.call("resolve_citation", { text: citation });
+    if (r.isError) continue;
+    bound++;
+    const j = (r.json ?? {}) as { match?: { id?: unknown } | null; ambiguous?: unknown };
+    const matched = j.match?.id;
+    if (matched === id || (matched === undefined || matched === null ? j.ambiguous === true : false)) continue;
+    findings.push({
+      id: "I3/own-citation",
+      severity: "fatal",
+      summary:
+        "resolve_citation does not return the record whose own citation it was given - it declines, or names another record, for a citation the server itself serves.",
+      evidence: [
+        `search_regulation serves ${id} with the citation "${citation}"`,
+        `resolve_citation("${citation}") -> match ${matched === undefined || matched === null ? "null" : String(matched)}, ambiguous ${String(j.ambiguous)}`,
+        "a gate that reads words in the citation ran ahead of the equality pass, or the equality pass is scoped to the wrong document",
+      ],
+    });
+  }
+  if (bound === 0) {
+    findings.push({
+      id: "I3/own-citation-na",
+      severity: "info",
+      summary: "No record citation was observed through search_regulation, so a record's own citation could not be tested.",
+      evidence: [`${served.size} citation(s) observed`],
+    });
+  }
+  return { applicable: bound > 0, findings };
+}
+
+/**
  * The hardest defect to see from inside the code: a resolver that always
  * resolves. Fuzzy containment turns "Article 501" into article 50 and an
  * instrument the corpus does not hold into one it does — and returns it with no
@@ -349,6 +406,8 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
   findings.push(...descriptive.findings);
   const container = await containerClaimsAreTrue(s);
   findings.push(...container.findings);
+  const own = await ownCitationsResolve(s);
+  findings.push(...own.findings);
 
   // Discover real article numbers from ids the server itself hands out.
   const seen = new Set<number>();
@@ -363,7 +422,7 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
     return {
       id: "I3",
       title: "Citation resolution is honest",
-      applicable: descriptive.applicable || container.applicable,
+      applicable: descriptive.applicable || container.applicable || own.applicable,
       findings: [
         ...findings,
         {

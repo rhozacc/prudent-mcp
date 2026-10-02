@@ -728,11 +728,13 @@ function ambiguousResolution(text: string, hits: Regulation[]): CitationResoluti
  *
  * Matching now, in order, and nothing below it:
  *
+ *   (i) exact normalized-citation equality, then equality against a record's
+ *       declared aliases. First, because a record's own citation is the
+ *       strongest evidence there is and no gate may refuse it;
  *   (0) instrument gate — a citation naming an instrument the corpus does not
  *       hold resolves to null with a coverage note, never into another
  *       document that shares a number. Named by number, or by description
  *       ("the RTS on …", "an ECB Guideline") when no held document is that kind;
- *   (i) exact normalized-citation equality;
  *   (ii) exact equality of the numeric SPINE (article/paragraph/point numbers,
  *        structural words dropped), scoped to the document the citation names.
  *        Exact: 1218 is not 121, and 178 is not 178(1)(a);
@@ -764,8 +766,60 @@ export function resolveCitationDetailed(
   const queryTokens = citationTokens(text);
   if (queryTokens.length === 0) return none();
 
-  // (0) The instrument gate. Checked first: a wrong instrument is not a near
-  // miss, it is a different body of law.
+  // The document a citation names is stripped from BOTH sides before anything
+  // is compared: a record's own citation may repeat it ("CRR Article 180"), a
+  // query may omit it ("Art. 180"), and its numbers ("2017/16") are not the
+  // provision's.
+  const index = documentAliases(regulations);
+  const { docs, rest } = scopeToDocument(queryTokens, index);
+  const pool = docs === null ? regulations : regulations.filter((r) => docs.has(r.document_id));
+  const bare = (tokens: string[]): string[] => scopeToDocument(tokens, index).rest;
+
+  // (i) Exact equality of the whole citation, structural words included — so
+  // "paragraph 78" does not match a record that says "Article 78".
+  // Joined with a SEPARATOR, not concatenated. "Article 4(1)" and "Article 41"
+  // tokenise to ["article","4","1"] and ["article","41"]; run together they are
+  // both "article41", so a bracketed point silently became a different article
+  // number — and on this corpus that offered EBA "Paragraph 41" as the answer
+  // to a question about Article 4(1). Matching only ever gets stricter here.
+  const nq = rest.join(" ");
+  const exactHits = pool.filter((r) => bare(citationTokens(r.citation)).join(" ") === nq);
+  if (exactHits.length === 1) {
+    return { ...none(), match: exactHits[0] ?? null, confidence: "exact" };
+  }
+  if (exactHits.length > 1) return ambiguousResolution(text, exactHits);
+
+  // (i-alias) The same equality against a record's declared aliases.
+  //
+  // Kept as its own pass, and its own confidence level, rather than folded into
+  // (i): the caller asked for a label this record does not carry. EBA
+  // guidelines number PARAGRAPHS, so "Article 178" is a common way to cite one
+  // and also a real CRR article — the alias makes the loose spelling resolvable
+  // without letting it be reported as the record's citation.
+  const aliasHits = pool.filter((r) =>
+    (r.citation_aliases ?? []).some((a) => bare(citationTokens(a)).join(" ") === nq),
+  );
+  if (aliasHits.length === 1) {
+    const hit = aliasHits[0];
+    return {
+      ...none(),
+      match: hit ?? null,
+      confidence: "alias",
+      coverage_note:
+        hit === undefined
+          ? undefined
+          : `Matched an alias. This record's own citation is "${hit.citation}" — quote that, ` +
+            `not "${text}".`,
+    };
+  }
+  if (aliasHits.length > 1) return ambiguousResolution(text, aliasHits);
+
+  // (0) The instrument gate. A wrong instrument is not a near miss, it is a
+  // different body of law - but it comes AFTER the two equality passes above. A
+  // record's own citation (or a label it declares) is the strongest evidence a
+  // citation can have, and a gate that reads words inside it ("RTS Article 5",
+  // "Regulation (EU) 2022/439, Article 14") as a second instrument would refuse
+  // the very record the caller quoted.
   const instrument = namedInstrument(text);
   if (instrument !== null && !corpusHolds(regulations, instrument)) {
     // A dead end that names the way out. Two ways out, in fact, and which one
@@ -832,10 +886,7 @@ export function resolveCitationDetailed(
     const identifiers = unheld.every((d) => d.identifier);
     const heldNames: string[] = [];
     if (instrument !== null) heldNames.push(instrumentLabel(instrument));
-    const { docs: namedDocs } = scopeToDocument(
-      citationTokens(described.residual),
-      documentAliases(regulations),
-    );
+    const { docs: namedDocs } = scopeToDocument(citationTokens(described.residual), index);
     // `crr` the instrument and `crr` the document are one thing named twice.
     for (const d of namedDocs ?? []) {
       if (!heldNames.some((n) => n.toLowerCase() === d.toLowerCase())) heldNames.push(d);
@@ -877,54 +928,6 @@ export function resolveCitationDetailed(
             `citation. ${wayOut}`,
     });
   }
-
-  // The document a citation names is stripped from BOTH sides before anything
-  // is compared: a record's own citation may repeat it ("CRR Article 180"), a
-  // query may omit it ("Art. 180"), and its numbers ("2017/16") are not the
-  // provision's.
-  const index = documentAliases(regulations);
-  const { docs, rest } = scopeToDocument(queryTokens, index);
-  const pool = docs === null ? regulations : regulations.filter((r) => docs.has(r.document_id));
-  const bare = (tokens: string[]): string[] => scopeToDocument(tokens, index).rest;
-
-  // (i) Exact equality of the whole citation, structural words included — so
-  // "paragraph 78" does not match a record that says "Article 78".
-  // Joined with a SEPARATOR, not concatenated. "Article 4(1)" and "Article 41"
-  // tokenise to ["article","4","1"] and ["article","41"]; run together they are
-  // both "article41", so a bracketed point silently became a different article
-  // number — and on this corpus that offered EBA "Paragraph 41" as the answer
-  // to a question about Article 4(1). Matching only ever gets stricter here.
-  const nq = rest.join(" ");
-  const exactHits = pool.filter((r) => bare(citationTokens(r.citation)).join(" ") === nq);
-  if (exactHits.length === 1) {
-    return { ...none(), match: exactHits[0] ?? null, confidence: "exact" };
-  }
-  if (exactHits.length > 1) return ambiguousResolution(text, exactHits);
-
-  // (i-alias) The same equality against a record's declared aliases.
-  //
-  // Kept as its own pass, and its own confidence level, rather than folded into
-  // (i): the caller asked for a label this record does not carry. EBA
-  // guidelines number PARAGRAPHS, so "Article 178" is a common way to cite one
-  // and also a real CRR article — the alias makes the loose spelling resolvable
-  // without letting it be reported as the record's citation.
-  const aliasHits = pool.filter((r) =>
-    (r.citation_aliases ?? []).some((a) => bare(citationTokens(a)).join(" ") === nq),
-  );
-  if (aliasHits.length === 1) {
-    const hit = aliasHits[0];
-    return {
-      ...none(),
-      match: hit ?? null,
-      confidence: "alias",
-      coverage_note:
-        hit === undefined
-          ? undefined
-          : `Matched an alias. This record's own citation is "${hit.citation}" — quote that, ` +
-            `not "${text}".`,
-    };
-  }
-  if (aliasHits.length > 1) return ambiguousResolution(text, aliasHits);
 
   // (ii) Spine equality: the numbers alone, however the citation spells the
   // structure around them.
