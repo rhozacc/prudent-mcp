@@ -11,7 +11,6 @@ import { ProvisionKindSchema, RegulationSchema, regulationIdSchema } from "../sc
 import { regulationSearchFields } from "../search.ts";
 import {
   AS_OF_MISS_CONTEXT,
-  COVERAGE_CARD,
   READ_ONLY_HINTS,
   lenient,
   miss,
@@ -85,7 +84,7 @@ export function registerRegulationTools(server: McpServer): void {
         "match — quotable as it stands. detail: 'full' gives complete records with commentary " +
         "capped (commentary_omitted says how many were left out; get_regulation serves them " +
         "all). Latest versions only. Follow up with get_regulation (as_of for history) or " +
-        "get_referrers on any id. " + COVERAGE_CARD,
+        "get_referrers on any id.",
       inputSchema: searchInputShape("citation, text, and commentary"),
       outputSchema: searchOutputShape(
         z.union([
@@ -135,12 +134,10 @@ export function registerRegulationTools(server: McpServer): void {
       description:
         "Fetch one regulation paragraph by URI. Returns the full record: citation, verbatim " +
         "text, and attached commentary (supervisor Q&A, interpretive letters). Latest version " +
-        "by default; pass as_of (ISO date) for the text in force on that date. Where the corpus " +
-        "records no version for that date the current text is served with an as_of_note saying " +
-        "so — it may not be the text of that date, so do not present it as historical. A placeholder act " +
-        "number (Regulation (EU) xx/xx) is flagged: pre_adoption_placeholders + notice. An as_of " +
-        "predating every recorded version is a miss. Unknown ids return isError, saying if " +
-        "the document is held only in part (absent from the corpus, not necessarily the law). Use get_referrers to find operationalising checks/playbooks.",
+        "by default; pass as_of (ISO date) for the text in force on that date, or the current text " +
+        "with an as_of_note where no version is recorded for it. A pre-adoption placeholder act " +
+        "number is flagged: pre_adoption_placeholders + notice. An as_of predating every recorded " +
+        "version, or an unknown id, is an isError miss. get_referrers finds operationalising checks/playbooks.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(
           "A regulation id from search_regulation or resolve_citation — shape regulation://{document}/{provision}",

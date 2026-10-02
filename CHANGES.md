@@ -1,5 +1,16 @@
 # Changes
 
+## Say what the corpus does not know
+
+**0.9.0.** Additive throughout: every new key is optional, published output schemas stay open, and a corpus file written for 0.8.0 loads unchanged. Found by probing the server at the edge of its corpus, where it told a client something untrue or left out what the client needed.
+
+- **`as_of` no longer passes current text off as historical** — where the corpus records no version of a provision for the date, `get_regulation` and `expand_regulation` still serve the current text but carry an `as_of_note`; `get_regulation_tree` carries one on the root. `RegulationAdapter.resolveAsOf?` is the optional single selection logic; an adapter without it behaves as before.
+- **Coverage says how much, not only which** — `Source.coverage` (`full` | `partial`, absent = not declared) and `CorpusInfo.holdings` per document. A regulation miss or a `resolve_citation` decline on a partly held document says the provision is absent from the corpus, not necessarily from the law.
+- **`resolve_citation` declines instruments named by description** ("the RTS on …") that no held document identifies as, and a containing-provision note only says the text carries a point once the served text was read and shows it.
+- **Search rows carry `coverage`; the envelope carries `query_tokens`, `best_coverage` and a weak-match `notice`** — no cap, order and `total_matches` untouched.
+- **Pre-adoption placeholder act numbers are flagged** on `get_regulation` and `expand_regulation` (`pre_adoption_placeholders`, `notice`).
+- Evals I11-I14 gate each of the above; the validator prints holdings and warns on a coverage declaration for a document with no records. The standing context surface is held at the 6,100-token ratchet by tightening wording, not by raising it.
+
 ## Honest envelopes, precise ranking, and a resolver that declines
 
 **0.7.0.** Four things break for a programmatic consumer, none for a corpus file:

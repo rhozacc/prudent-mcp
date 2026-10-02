@@ -8,7 +8,6 @@ import { adapters } from "../adapters.ts";
 import { TestSchema, testIdSchema } from "../schema.ts";
 import { testSearchFields } from "../search.ts";
 import {
-  COVERAGE_CARD,
   READ_ONLY_HINTS,
   firstSentence,
   lenient,
@@ -39,7 +38,7 @@ export function registerTestTools(server: McpServer): void {
         "aliases, family, purpose, acceptance_criteria — useful for matching bank-specific " +
         "test names to corpus entries. Returns { results, total_matches, offset, truncated }; " +
         "concise results (default) are { id, name, family, purpose_first_sentence } — pass " +
-        "detail: 'full' for complete records. Call get_test on an id for the full record. " + COVERAGE_CARD,
+        "detail: 'full' for complete records. Call get_test on an id for the full record.",
       inputSchema: searchInputShape("name, aliases, family, purpose, and acceptance criteria"),
       outputSchema: searchOutputShape(z.union([ConciseTestHit, TestSchema])),
       annotations: READ_ONLY_HINTS,

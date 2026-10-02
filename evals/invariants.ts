@@ -634,6 +634,15 @@ export interface Budget {
  *   6,100  measured 5,807 + 5% headroom — instructions gained the scope,
  *          boundary and legal-force rules; list_review_areas stopped
  *          advertising itself as the entry point for every question
+ *   6,100  unchanged, 2026-10-02: 5,807 -> 6,099 across the as_of_note,
+ *          holdings, descriptive-gate, container-claim, search-coverage and
+ *          placeholder items (tool cards +, instructions +). The growth was
+ *          offset rather than absorbed by a raise: the four search cards' shared
+ *          coverage sentence moved into the instructions once, and the cards for
+ *          get_corpus_info, resolve_citation, get_regulation, expand_regulation,
+ *          get_regulation_tree, get_area_overview, list_review_areas and
+ *          expand_playbook were tightened without dropping a rule. Zero headroom:
+ *          the next rule has to be paid for the same way.
  */
 export const DEFAULT_BUDGET: Budget = {
   surface: 6100,

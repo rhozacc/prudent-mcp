@@ -9,7 +9,6 @@ import type { Playbook, PlaybookId } from "../schema.ts";
 import { PlaybookSchema, playbookIdSchema } from "../schema.ts";
 import { playbookSearchFields } from "../search.ts";
 import {
-  COVERAGE_CARD,
   READ_ONLY_HINTS,
   lenient,
   miss,
@@ -76,7 +75,7 @@ export function registerPlaybookTools(server: McpServer): void {
         "and phase descriptions. Returns { results, total_matches, offset, truncated }; " +
         "concise results (default) are { id, area, subarea, phase_count } — pass detail: 'full' " +
         "for complete records. Follow up with expand_playbook (references resolved inline) or " +
-        "get_playbook for the raw record. " + COVERAGE_CARD,
+        "get_playbook for the raw record.",
       inputSchema: searchInputShape("area, subarea, and phase names/descriptions"),
       outputSchema: searchOutputShape(z.union([ConcisePlaybookHit, PlaybookSchema])),
       annotations: READ_ONLY_HINTS,

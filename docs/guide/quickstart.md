@@ -62,7 +62,7 @@ This starts an in-memory server (`examples/inmemory-demo.ts`) seeded with a smal
 
 | Try | What you'll see |
 |---|---|
-| `get_corpus_info` | counts and coverage |
+| `get_corpus_info` | counts, covered documents, and how much of each is held |
 | `list_review_areas` | the taxonomy tree |
 | `search_regulation` `"long-run average"` | hits CRR 180/1/a and EBA GL para 78 |
 | `get_regulation` `"regulation://crr/178/1/b"` | latest text + EBA commentary |

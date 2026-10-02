@@ -8,7 +8,6 @@ import { adapters } from "../adapters.ts";
 import { CheckSchema, checkIdSchema, regulationIdSchema } from "../schema.ts";
 import { checkSearchFields } from "../search.ts";
 import {
-  COVERAGE_CARD,
   READ_ONLY_HINTS,
   firstSentence,
   lenient,
@@ -39,7 +38,7 @@ export function registerCheckTools(server: McpServer): void {
         "expectation, expected_evidence. Returns { results, total_matches, offset, truncated }; " +
         "concise results (default) are { id, name, expectation_first_sentence, derived_from } — " +
         "pass detail: 'full' for complete records. Call get_check on an id for the full record, " +
-        "or get_regulation on any derived_from id to read the underlying law. " + COVERAGE_CARD,
+        "or get_regulation on any derived_from id to read the underlying law.",
       inputSchema: searchInputShape("name, expectation, and expected evidence"),
       outputSchema: searchOutputShape(z.union([ConciseCheckHit, CheckSchema])),
       annotations: READ_ONLY_HINTS,

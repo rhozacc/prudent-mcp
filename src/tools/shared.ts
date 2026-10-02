@@ -324,10 +324,6 @@ export function searchInputShape(fieldsDoc: string) {
   };
 }
 
-/** The sentence every search_* tool card ends its result description with. */
-export const COVERAGE_CARD =
-  "Rows carry coverage (query terms matched, of query_tokens); best_coverage spans all pages; notice flags a weak best match.";
-
 /** Documented once, spread into each concise hit schema. */
 export const rowCoverageShape = {
   coverage: z

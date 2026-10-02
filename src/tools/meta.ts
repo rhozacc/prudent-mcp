@@ -367,12 +367,10 @@ export function registerMetaTools(server: McpServer): void {
       description:
         "What's loaded right now — the entry point before anything else. " +
         "Returns { last_updated, counts: {regulation, test, check, playbook, source}, " +
-        "coverage: [...], holdings: [...], stale_sources: [...] } — coverage names documents, " +
-        "not how much of each: holdings gives per document { document_id, framework, title, " +
-        "records, partial }, where partial true/false is what the source registry declares and an " +
-        "absent key means undeclared, not full. A document held in part lacks provisions of the " +
-        "law, not only of the corpus. stale_sources lists current sources whose verified date " +
-        "is older than 30 days; follow up with list_sources, then list_review_areas.",
+        "coverage: [...], holdings: [...], stale_sources: [...] } — coverage only names documents; " +
+        "holdings gives each one's { document_id, framework, title, records, partial }, partial being " +
+        "what the source registry declares (key absent = undeclared, not full). stale_sources lists " +
+        "current sources verified more than 30 days ago; follow up with list_sources, then list_review_areas.",
       inputSchema: {},
       outputSchema: CorpusInfoSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
@@ -429,18 +427,16 @@ export function registerMetaTools(server: McpServer): void {
         "\"EBA GL 2017/16 para 78\") → the Regulation record it names, or an honest refusal.\n" +
         "Matching is EXACT, in this order: the record's own citation, then its numeric spine " +
         "(article/paragraph/point numbers) scoped to the document the citation names. There is " +
-        "no fuzzy fallback — 1218 is not 121, and a citation naming an instrument this corpus " +
-        "does not hold, by number or by description (\"the RTS on …\"), resolves to null with no " +
-        "candidates rather than to a same-numbered provision elsewhere.\n" +
+        "no fuzzy fallback — 1218 is not 121, and an instrument this corpus does not hold, named " +
+        "by number or description (\"the RTS on …\"), resolves to null with no candidates rather " +
+        "than to a same-numbered provision elsewhere.\n" +
         "Returns { match, confidence, candidates, ambiguous, unmatched_segments, coverage_note }:\n" +
-        "  match null + candidates non-empty → several records fit (ambiguous: true) or the " +
-        "corpus holds only narrower provisions under the one asked for; open a candidate by id.\n" +
-        "  match null + coverage_note → why, in terms of what this corpus covers.\n" +
-        "  confidence 'exact' | 'segment' says which rule matched.\n" +
-        "Where the document is held only in part, the note says so: a provision missing is absent " +
-        "from the corpus, not necessarily from the law.\n" +
-        "Do not present a null match as a citation. Fall back to search_regulation with the " +
-        "citation's key words, or get_corpus_info for the documents actually loaded.",
+        "  match null + candidates → several records fit (ambiguous: true) or only narrower or " +
+        "containing provisions are held; open a candidate by id.\n" +
+        "  match null + coverage_note → why, in terms of what this corpus covers (and whether the " +
+        "document is held only in part).\n" +
+        "  confidence 'exact' | 'alias' | 'segment' says which rule matched.\n" +
+        "A null match is not a citation: fall back to search_regulation on the citation's key words.",
       inputSchema: {
         text: z.string().describe("A loose, human-prose citation."),
       },
@@ -468,9 +464,8 @@ export function registerMetaTools(server: McpServer): void {
         "playbooks a backend authored, so it reflects how the corpus was written up rather than everything " +
         "the corpus holds on a subject, and it may draw on fewer documents than the corpus covers. " +
         "Returns { areas: [{ id, name, parent, children }] }; ids are dotted slugs and a " +
-        "child id is prefixed by its parent's. Backends that author no taxonomy get one " +
-        "derived from the playbooks present, so this is never empty for a corpus that has " +
-        "any.",
+        "child id is prefixed by its parent's. With no authored taxonomy one is derived from " +
+        "the playbooks present, so this is never empty for a corpus that has any.",
       inputSchema: {},
       outputSchema: z.object({ areas: z.array(ReviewAreaSchema) }).passthrough(),
       annotations: READ_ONLY_HINTS,
@@ -490,8 +485,7 @@ export function registerMetaTools(server: McpServer): void {
         "with search_playbooks or list_review_areas.\n" +
         "Use this when you intend to FOLLOW the references. If the question is only what the " +
         "steps are, get_playbook with detail: 'steps' answers it for roughly a fifth of the " +
-        "payload — a dense playbook resolves to ~90 stubs plus a regulatory_scope of a couple " +
-        "of hundred ids, none of which is the walkthrough.",
+        "payload — the stubs and regulatory_scope are not the walkthrough.",
       inputSchema: {
         id: lenient(playbookIdSchema).describe(
           "A playbook id from search_playbooks, list_review_areas or get_area_overview — shape playbook://{document}/{slug}",
@@ -517,11 +511,10 @@ export function registerMetaTools(server: McpServer): void {
         "when the question is about a whole area.\n" +
         "Returns { area, playbooks, regulation_ids, check_ids, test_ids, playbook_ids }. " +
         "By default each playbook is a walkthrough SUMMARY: phase names, descriptions and " +
-        "per-phase reference counts. The references themselves arrive de-duplicated in the " +
-        "flat id lists below, so nothing is missing — expand_playbook gives the per-phase " +
-        "breakdown when the phase a reference belongs to actually matters. " +
-        "detail: 'full' embeds every referenced record inline and is large; ask for it only " +
-        "when the whole area is being read.\n" +
+        "per-phase reference counts. References arrive de-duplicated in the flat id lists, so " +
+        "nothing is missing; expand_playbook gives the per-phase breakdown when it matters. " +
+        "detail: 'full' embeds every referenced record inline and is large; use it only when " +
+        "the whole area is being read.\n" +
         "playbook_ids are playbooks referenced but not already listed, which is how a " +
         "lifecycle playbook names the per-parameter ones. Asking for a top-level area " +
         "includes everything in its subareas. Accepts the slug from list_review_areas " +
@@ -606,11 +599,9 @@ export function registerMetaTools(server: McpServer): void {
         "Fetch a regulation with its children resolved inline — sub-regulations plus the " +
         "checks/tests that operationalize it; the reverse-direction companion to " +
         "expand_playbook. Returns the regulation fields plus children as { type, id, label } " +
-        "stubs (default) or complete records (detail: 'full'). Supports as_of like " +
-        "get_regulation, resolving regulation children under the same date; an as_of_note says when " +
-        "the record or any child is current text standing in for a version the corpus does not " +
-        "record. Placeholder act numbers (Regulation (EU) xx/xx) are flagged as in get_regulation. " +
-        "Unknown ids return isError, saying if the document is held only in part. Use " +
+        "stubs (default) or complete records (detail: 'full'). as_of and the placeholder flag work as " +
+        "in get_regulation; an as_of_note also covers children served from current text. " +
+        "Unknown ids are isError misses. Use " +
         "get_regulation_tree to walk the whole sub-tree.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(
@@ -662,8 +653,7 @@ export function registerMetaTools(server: McpServer): void {
         "(default) keeps citations and leaf labels only; detail: 'full' embeds each node's " +
         "complete record. depth defaults to 5 and the walk is capped at 200 total nodes; " +
         "nodes cut off by depth, a cycle, or the cap carry truncated: true. With as_of, an " +
-        "as_of_note on the root says when nodes were served from current text because the " +
-        "corpus records no version for that date. Unknown roots return isError (saying if the document is held only in part) — " +
+        "as_of_note on the root counts nodes served from current text. Unknown roots are isError misses — " +
         "verify with search_regulation.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(

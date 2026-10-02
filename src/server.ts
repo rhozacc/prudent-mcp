@@ -36,18 +36,21 @@ export function createServer(): McpServer {
         "Traversal: expand_playbook / expand_regulation (references resolved inline), get_regulation_tree (dossier walk, " +
         "200-node cap), get_referrers (the reverse index), get_coverage_gaps (its aggregate inverse).\n" +
         "Conventions: search_* and traversal tools are concise by default — pass detail: 'full' for complete records; " +
-        "search_* return { results, returned, total_matches, offset, truncated, next_offset, notice }. total_matches " +
-        "is the whole match set, not the page: page with next_offset until it is null before concluding anything is " +
-        "absent. Responses are size-capped — a shortened page or a summary served in place of detail: 'full' says so " +
+        "search_* return { results, returned, total_matches, offset, truncated, next_offset, query_tokens, " +
+        "best_coverage, notice }. total_matches is the whole match set, not the page: page with next_offset until it " +
+        "is null before concluding anything is absent. A row's `coverage` of query_tokens is how much of the " +
+        "query it matched; read best_coverage before treating the top of a list as an answer — a notice, or a best " +
+        "match covering few terms beside a large total_matches, means the topic is probably not in this corpus " +
+        "(not the same as not in the law). Responses are size-capped — a shortened page or a summary served in place of detail: 'full' says so " +
         "in `notice`, and nothing is ever dropped silently.\n" +
         "Concise search results carry a quotable excerpt (whole sentences around the match); quote it rather than " +
         "re-fetching the record to confirm a hit.\n" +
-        "Misses come back as isError results pointing at the right search/list tool — never a bare 'null'.\n" +
-        "Regulation is the only versioned surface: pass as_of (ISO date) for the text in force on that date; where no " +
-        "version is recorded for it, current text comes back with an as_of_note — never present that as the text of " +
-        "that date. An as_of predating all recorded versions is a miss.\n" +
+        "Misses come back as isError results pointing at the right search/list tool — never a bare 'null'; regulation misses also say whether the document is held in part.\n" +
+        "Regulation is the only versioned surface: pass as_of (ISO date) for the text in force on that date; where the " +
+        "corpus records no version for it, current text comes back flagged by as_of_note and is not evidence of what " +
+        "applied on that date. An as_of predating all recorded versions is a miss.\n" +
         "resolve_citation declines rather than guesses: a citation naming an instrument or provision this corpus does " +
-        "not hold comes back with match null plus candidates and a coverage_note. A null match is not a citation — " +
+        "not hold comes back with match null and a coverage_note (candidates only where narrower or containing provisions are held). A null match is not a citation — " +
         "never present one as though the text were found.\n" +
         "Sources are the currency registry (verified dates, supersession, milestones); they join regulation via " +
         "framework + document_id, never by URI reference.\n" +
@@ -64,14 +67,17 @@ export function createServer(): McpServer {
         "Scope: this is a BOUNDED corpus, not the regulatory universe — get_corpus_info names every document " +
         "loaded. Absence from it is not absence from the law, and a miss from this server is a statement about " +
         "this corpus only. get_coverage_gaps measures coverage of provisions BY checks and tests INSIDE the " +
-        "corpus; it does not measure coverage of the law by the corpus.\n" +
+        "corpus; it does not measure coverage of the law by the corpus. get_corpus_info.holdings gives per document the records " +
+        "held and whether it is held in part (partial true; false = whole; absent = undeclared, not full): on a " +
+        "partly held document, a miss or null resolve_citation match means absent from the corpus, not nonexistent.\n" +
         "Answering past the boundary: a real question often turns on an instrument this corpus does not hold. " +
         "Search first — total_matches and next_offset tell you whether you actually looked. Then neither truncate " +
         "the answer at the corpus boundary nor blend across it: give what the question needs and LABEL it, " +
         "marking any statement not traceable to a record id as not corpus-backed and naming what it rests on. " +
         "Where a record's own text defers to an instrument this corpus lacks — including a pre-adoption " +
-        "placeholder of the form 'Regulation (EU) xx/xx [...]' — say the reference is unresolved here, and never " +
-        "present the placeholder as the current state of the law.\n" +
+        "placeholder of the form 'Regulation (EU) xx/xx [...]', flagged on the record as pre_adoption_placeholders " +
+        "+ notice — say the reference is unresolved here. A placeholder is not a citation: never resolve it to a " +
+        "numbered act from memory or present the passage as the current state of the law.\n" +
         "Legal force and drafting register are DIFFERENT AXES. `obligation` (must/should/may) is how ONE provision " +
         "is worded; it says nothing about what the document IS, and `doc_type` is a format label that carries no " +
         "tier. Never infer binding force from either: a supervisory guide that is not a legal act can carry " +
