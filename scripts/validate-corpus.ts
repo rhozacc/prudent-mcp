@@ -11,6 +11,7 @@
  * through this CLI.
  */
 import { adapters } from "../src/adapters.ts";
+import { computeHoldings, holdingsSummary } from "../src/holdings.ts";
 import { corpusWarnings, validateCorpus } from "../src/validate.ts";
 
 async function wireCorpus(): Promise<void> {
@@ -44,14 +45,15 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Warnings are advisory — stale currency needs a maintenance run
+  // Warnings are advisory — stale currency or a coverage declaration about nothing needs a maintenance run
   // (/maintain-context), not a failed build.
   if (warnings.length > 0) {
-    console.error(`⚠ ${warnings.length} corpus currency warning(s):\n`);
+    console.error(`⚠ ${warnings.length} corpus warning(s):\n`);
     for (const w of warnings) console.error(`  • ${w}`);
     console.error("");
   }
 
+  console.log(`  holdings: ${holdingsSummary(computeHoldings(regs, sources)) || "none"}`);
   console.log(
     `✓ corpus integrity OK — ${regs.length} regulations, ${checks.length} checks, ` +
       `${tests.length} tests, ${playbooks.length} playbooks, ${sources.length} sources`,

@@ -7,7 +7,7 @@
  * zod parse, the structural linter (validateCorpusFile) runs and any violation
  * aborts startup with exit 1 — serving a corpus with dangling references or a
  * broken mirror invariant would make every traversal tool quietly wrong.
- * Currency warnings (corpusWarnings — stale sources) go to stderr but never
+ * Registry warnings (corpusWarnings — stale sources, coverage declared for nothing) go to stderr but never
  * block: a stale source needs a /maintain-context run, not a dead server.
  */
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -32,7 +32,7 @@ if (corpusFile) {
       process.exit(1);
     }
     for (const w of corpusWarnings(corpus)) {
-      console.error(`prudent-mcp: ⚠ ${w} — run /maintain-context to re-verify.`);
+      console.error(`prudent-mcp: ⚠ ${w} — run /maintain-context to review the registry.`);
     }
 
     const fa = createFileAdapters(corpus);

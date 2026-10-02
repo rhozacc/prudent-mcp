@@ -17,6 +17,7 @@ import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/
 import { z } from "zod";
 
 import { adapters } from "../adapters.ts";
+import { computeHoldings, missingRecordClause } from "../holdings.ts";
 import type { Regulation, RegulationId } from "../schema.ts";
 
 // Every tool on this server reads a local knowledge base and nothing else.
@@ -60,6 +61,20 @@ export function okText(value: unknown): CallToolResult {
 /** Miss / bad input: an isError result carrying a next-step pointer. */
 export function miss(message: string): CallToolResult {
   return { content: [textBlock(message)], isError: true };
+}
+
+/**
+ * The miss for a regulation id the corpus does not hold - ONE sentence for
+ * get_regulation, expand_regulation and get_regulation_tree. "No record for X"
+ * alone is true and reads as "there is no X": the corpus holds some provisions
+ * of a document, not all of them, and which kind of absence this is depends on
+ * how much of that document was taken (src/holdings.ts). Computed from the
+ * adapters' own lists so an outside adapter with no `info().holdings` gets it too.
+ */
+export async function unknownRegulationMiss(id: string): Promise<CallToolResult> {
+  const [regulations, sources] = await Promise.all([adapters.regulation.list(), adapters.source.list()]);
+  const why = missingRecordClause(regulations, computeHoldings(regulations, sources), id);
+  return miss(`No record for ${id}. ${why} Verify the id with search_regulation or list_review_areas.`);
 }
 
 // --- Search envelope ---------------------------------------------------------

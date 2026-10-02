@@ -9,7 +9,7 @@
  * The failure they are all aimed at is the same one: **a model believing
  * something the corpus did not say.** Volume is a cost; a confident wrong
  * answer is a defect. So the fatal findings here are about truthfulness
- * (I1–I4, I7, I11) and the budgeted ones about cost (I5–I6).
+ * (I1–I4, I7, I11, I12) and the budgeted ones about cost (I5–I6).
  *
  * Every invariant reports `applicable: false` rather than passing when it had
  * nothing to bind on — a check that passes by having nothing to measure is the
@@ -1254,6 +1254,112 @@ export async function asOfIsNeverSilentlySubstituted(s: Session): Promise<Invari
   return { id: "I11", title, applicable: true, findings };
 }
 
+// ============================================================================
+// I12 — a decline on a partly held document says so
+// ============================================================================
+
+/**
+ * A corpus holds some provisions of a document, not all of them. "No record for
+ * <id>" and "Nothing in this corpus is numbered 153" are both TRUE and both read
+ * as "there is no Article 153" - absence from the corpus taken for absence from
+ * the law, which is the one error a validator cannot afford.
+ *
+ * So for every document the registry declares partial (the `holdings` the server
+ * itself publishes), an id in that document that does not exist must come back
+ * as a miss that says the document is held in part, on every tool that serves a
+ * regulation by id, and a citation naming the document that the corpus cannot
+ * place must say so in its note. The probes are built from the server's own
+ * output: a sampled record gives the id prefix the document lives under, and an
+ * absent provision is made up under it (and checked to really be absent).
+ *
+ * Only a DECLARED partial binds. An undeclared document is not claimed to be
+ * partial or whole, so the invariant has nothing to hold the server to there;
+ * it reports `applicable: false` rather than passing when no document declares.
+ */
+export async function declineOnPartialDocumentSaysSo(s: Session): Promise<InvariantResult> {
+  const findings: Finding[] = [];
+  const id = "I12";
+  const title = "A decline on a partly held document says so";
+
+  type Holding = { document_id?: unknown; title?: unknown; partial?: unknown };
+  const info = await s.call("get_corpus_info", {});
+  const holdings = ((info.json as { holdings?: Holding[] } | null)?.holdings ?? []).filter(
+    (h): h is Holding & { document_id: string } => typeof h.document_id === "string" && h.partial === true,
+  );
+  if (holdings.length === 0) return { id, title, applicable: false, findings };
+
+  const SAYS_PARTIAL = /\b(?:only part|in part|partly|partial(?:ly)?)\b/i;
+  type Row = { id?: string; document_id?: string };
+  const rowsOf = (json: unknown): Row[] => ((json as { results?: Row[] } | null)?.results ?? []) as Row[];
+
+  // One sampled record per partial document: the id prefix it lives under.
+  const prefixOf = new Map<string, string>();
+  const queries = ["default", "estimation", "risk", "data", "model", "validation"];
+  for (const h of holdings) {
+    const words = typeof h.title === "string" ? h.title.split(/[^A-Za-z0-9]+/).filter((w) => w.length > 3) : [];
+    for (const q of [...queries, ...words.slice(0, 4)]) {
+      if (prefixOf.has(h.document_id)) break;
+      const t = await s.call("search_regulation", { query: q, limit: 50 });
+      const row = rowsOf(t.json).find((r) => r.document_id === h.document_id && typeof r.id === "string");
+      const segment = row?.id?.replace(/^regulation:\/\//, "").split("/")[0];
+      if (segment !== undefined && segment !== "") prefixOf.set(h.document_id, segment);
+    }
+  }
+
+  let bound = 0;
+  for (const h of holdings) {
+    const segment = prefixOf.get(h.document_id);
+    if (segment === undefined) {
+      findings.push({
+        id: "I12/unsampled",
+        severity: "warn",
+        summary: "A document declared partial could not be sampled through search_regulation, so its misses were not probed.",
+        evidence: [`document ${h.document_id}`],
+      });
+      continue;
+    }
+    const absent = `regulation://${segment}/i12-absent-provision`;
+    const direct = await s.call("get_regulation", { id: absent });
+    if (!direct.isError) continue; // it exists after all; nothing to decline
+    const probes: Array<[string, Record<string, unknown>]> = [
+      ["get_regulation", { id: absent }],
+      ["expand_regulation", { id: absent }],
+      ["get_regulation_tree", { id: absent }],
+    ];
+    for (const [tool, args] of probes) {
+      const r = await s.call(tool, args);
+      bound++;
+      if (!r.isError || !SAYS_PARTIAL.test(r.text)) {
+        findings.push({
+          id: `I12/${tool}`,
+          severity: "fatal",
+          summary: `${tool} declined an id in a document the registry declares partly held without saying it is held in part - the miss reads as "no such provision".`,
+          evidence: [`document ${h.document_id}`, `id ${absent}`, `isError ${String(r.isError)}`, `message: ${r.text.slice(0, 200)}`],
+        });
+      }
+    }
+
+    // The same boundary through the citation resolver: a provision number that
+    // exists nowhere, scoped to the document by its own id.
+    const cite = await s.call("resolve_citation", { text: `${h.document_id} 99999` });
+    const body = cite.json as { match?: unknown; coverage_note?: unknown } | null;
+    const note = typeof body?.coverage_note === "string" ? body.coverage_note : "";
+    if (body !== null && body.match === null && /Nothing in this corpus is numbered/.test(note)) {
+      bound++;
+      if (!SAYS_PARTIAL.test(note)) {
+        findings.push({
+          id: "I12/resolve_citation",
+          severity: "fatal",
+          summary: "resolve_citation could not place a provision of a document the registry declares partly held and its note does not say the document is held in part.",
+          evidence: [`document ${h.document_id}`, `note: ${note.slice(0, 200)}`],
+        });
+      }
+    }
+  }
+
+  return { id, title, applicable: bound > 0, findings };
+}
+
 export const ALL = [
   envelopeIsJson,
   describedIdsResolve,
@@ -1267,4 +1373,5 @@ export const ALL = [
   humanRegisterCitationsResolve,
   declinesAreNeverEmpty,
   asOfIsNeverSilentlySubstituted,
+  declineOnPartialDocumentSaysSo,
 ] as const;

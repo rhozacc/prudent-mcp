@@ -10,6 +10,7 @@ import type {
   TestAdapter,
 } from "./adapters.ts";
 import { deriveTaxonomy } from "./areas.ts";
+import { citationPartialClause, computeHoldings, idDocSegment } from "./holdings.ts";
 import { computeReferrers } from "./referrers.ts";
 import {
   checkSearchFields,
@@ -34,6 +35,7 @@ import type {
   CitationCandidate,
   CitationResolution,
   CorpusInfo,
+  DocumentHolding,
   Playbook,
   PlaybookId,
   Referrers,
@@ -154,10 +156,6 @@ const spineOf = (tokens: string[]): string[] =>
  */
 const spineIsFaithful = (tokens: string[]): boolean =>
   tokens.every((t) => !/\d/.test(t) || /^\d+[a-z]{0,2}$/.test(t));
-
-/** First path segment of a regulation id — the document, not the framework. */
-const idDocSegment = (id: RegulationId): string =>
-  id.slice("regulation://".length).split("/")[0] ?? "";
 
 const arraysEqual = (a: string[], b: string[]): boolean =>
   a.length === b.length && a.every((v, i) => v === b[i]);
@@ -449,6 +447,10 @@ function ambiguousResolution(text: string, hits: Regulation[]): CitationResoluti
 export function resolveCitationDetailed(
   regulations: Regulation[],
   text: string,
+  // Optional so every existing caller keeps its behaviour: without holdings the
+  // notes below are exactly what they were. With them, a decline on a partly
+  // held document says the absence is the corpus's and not necessarily the law's.
+  holdings?: DocumentHolding[],
 ): CitationResolution {
   const none = (extra: Partial<CitationResolution> = {}): CitationResolution => ({
     match: null,
@@ -590,14 +592,23 @@ export function resolveCitationDetailed(
   if (spineHits.length > 1) return ambiguousResolution(text, spineHits);
 
   // (iii) Narrower relatives. Reported, never returned as the match.
+  // The partly-held clause rides on the two notes that say "this record is not
+  // here" (iii and the final one). `match` and `confidence` are untouched: the
+  // clause explains an absence, it never turns one into a hit. The container note
+  // (iv) does not carry it - there the provision's text IS held, inside the
+  // container, so nothing is missing to explain.
+  const partial = citationPartialClause(holdings, docs);
+  const withPartial = (note: string): string => (partial === null ? note : `${note} ${partial}`);
+
   const relatives = pool.filter((r) => startsWithTokens(recordSpine(r), spine));
   if (relatives.length > 0) {
     return none({
       candidates: relatives.slice(0, MAX_CANDIDATES).map(asCandidate),
-      coverage_note:
+      coverage_note: withPartial(
         `No record is "${text}" itself. The corpus holds ${relatives.length} narrower provision(s) ` +
-        `under it${relatives.length > MAX_CANDIDATES ? ` (first ${MAX_CANDIDATES} listed)` : ""}; ` +
-        "open one, or use get_regulation_tree on it for the whole subtree.",
+          `under it${relatives.length > MAX_CANDIDATES ? ` (first ${MAX_CANDIDATES} listed)` : ""}; ` +
+          "open one, or use get_regulation_tree on it for the whole subtree.",
+      ),
     });
   }
 
@@ -649,6 +660,7 @@ export function resolveCitationDetailed(
     unmatched_segments: spine,
     coverage_note:
       `Nothing in this corpus is numbered ${spine.join(".")}${docs === null ? "" : " in the document named"}. ` +
+      (partial === null ? "" : `${partial} `) +
       "Try search_regulation with the citation's key words.",
   });
 }
@@ -797,11 +809,15 @@ export function createFileAdapters(corpus: CorpusFile): {
       // Source count and staleness are computed at serve time even when the
       // file ships a corpus_info block — stored currency data is stale by definition.
       const stale_sources = staleSourceIds(corpus.sources);
+      // Holdings likewise: a stored block cannot know what the registry now
+      // declares, and its `coverage` list stays exactly as authored.
+      const holdings = computeHoldings(corpus.regulation, corpus.sources);
       if (corpus.corpus_info) {
         return {
           ...corpus.corpus_info,
           counts: { ...corpus.corpus_info.counts, source: corpus.sources.length },
           stale_sources,
+          holdings,
         };
       }
       return {
@@ -815,6 +831,7 @@ export function createFileAdapters(corpus: CorpusFile): {
         },
         coverage: [...new Set(corpus.regulation.map(r => r.framework.toUpperCase()))],
         stale_sources,
+        holdings,
       };
     },
     async referrers(id: string): Promise<Referrers> {
@@ -829,7 +846,7 @@ export function createFileAdapters(corpus: CorpusFile): {
       );
     },
     async resolveCitation(text: string): Promise<CitationResolution> {
-      return resolveCitationDetailed(corpus.regulation, text);
+      return resolveCitationDetailed(corpus.regulation, text, computeHoldings(corpus.regulation, corpus.sources));
     },
     async taxonomy(): Promise<ReviewArea[]> {
       // An authored taxonomy wins: it can name areas the corpus does not cover

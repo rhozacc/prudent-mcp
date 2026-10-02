@@ -35,6 +35,7 @@
  * Staleness (a current source whose `verified` is older than
  * STALE_AFTER_DAYS) is advisory, not fatal — see `corpusWarnings`.
  */
+import { holdingsWarnings } from "./holdings.ts";
 import type {
   Check,
   Playbook,
@@ -336,10 +337,11 @@ export function validateCorpus(corpus: CorpusInput, now: Date = new Date()): str
 export function corpusWarnings(corpus: CorpusInput, now: Date = new Date()): string[] {
   const sources = corpus.sources ?? [];
   const byId = new Map(sources.map((s) => [s.id, s]));
-  return staleSourceIds(sources, now).map((id) => {
+  const stale = staleSourceIds(sources, now).map((id) => {
     const s = byId.get(id)!;
     return `${id}: verified ${s.verified} is older than ${STALE_AFTER_DAYS} days (stale)`;
   });
+  return [...stale, ...holdingsWarnings(corpus.regulation, sources)];
 }
 
 /**

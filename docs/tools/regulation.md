@@ -50,6 +50,17 @@ Fetch a regulation paragraph by URI.
 
 **Returns:** `Regulation` — unknown ids are an `isError` result pointing at `search_regulation`.
 
+**Misses say what kind of absence they are.** "No record for X" is true and reads as "there is no X", but a corpus holds some provisions of a document, not all of them. The same sentence is used by `get_regulation`, `expand_regulation` and `get_regulation_tree` (one helper, `unknownRegulationMiss`), and it works out the document from the id's first path segment against the documents held (`holdings`, see [`get_corpus_info`](./meta#get-corpus-info)):
+
+| The id's document | The miss adds |
+|---|---|
+| declared partial | the corpus holds only part of it (n records); a provision missing here is absent from the corpus, not necessarily from the law |
+| held, coverage undeclared | the corpus holds n records of it and does not declare that as the whole, so absence here does not show the provision does not exist |
+| declared full | the document is declared held in full, so the id is probably mistyped |
+| not held | no document with that id prefix is loaded; `get_corpus_info` lists what is |
+
+The `search_regulation` / `list_review_areas` pointer follows in every case, and the result is still `isError`.
+
 The `as_of` rule (see [Corpus structure → Versioning](../corpus/#versioning)): with no history for the id, the backend serves the only version it knows — the current one — **and says so**; with history, the version in force on the date is returned, and an `as_of` predating every recorded version is a miss explaining the rule — never current text masquerading as historical. A date before the source document existed is also a miss.
 
 **`as_of_note`.** When `as_of` is given and the text served is the current record because the corpus records no version of the provision for that date, the response carries an additive string key `as_of_note` ahead of the record fields:

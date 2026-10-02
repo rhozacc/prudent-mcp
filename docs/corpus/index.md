@@ -379,6 +379,17 @@ The registry of source documents the corpus derives from — the regulatory-cont
 | `milestones` | `{date, event}[]` | no, default `[]` | Upcoming regulatory dates, kept chronological — the first entry is served as `next_milestone`. Dates are display strings (`"2026-10-19"`, `"Q4 2026"`), never parsed. |
 | `url` | `string` | no | Publisher page. |
 | `notes` | `string` | no | Free-form. |
+| `coverage` | `"full" \| "partial"` | no | How much of the document the corpus holds. **Absent means not declared** — never defaulted. See [Declaring coverage](#declaring-coverage). |
+
+### Declaring coverage
+
+`get_corpus_info.coverage` lists documents ("CRR"), which reads as the whole regulation; a corpus typically holds a subset of its articles. The registry is where that is said, with the optional `coverage` field on the document's current source:
+
+- `"partial"` — the corpus holds only part of the document. A miss on that document says the provision is absent from the corpus, not necessarily from the law, and `resolve_citation` says the same on a decline.
+- `"full"` — the document is held whole. A miss says the id is probably mistyped.
+- *absent* — nobody has declared it. The servers say so ("does not declare that as the whole") rather than assume either; absence of a declaration is a third state, not a synonym for `full`.
+
+Declare it on the **current** source: superseded and pending sources describe other editions and do not speak for the held records. If a document's current sources disagree, partial wins, because reading a partly held document as whole is the error that tells a caller a missing provision does not exist. The server publishes the result as `get_corpus_info.holdings` (record count per document, plus `partial` when declared), computed at serve time from the records and the registry — never stored. `bun run validate` prints a holdings summary and warns when a source declares coverage for a document the corpus holds no regulation records of.
 
 ### On the `document_id` join
 

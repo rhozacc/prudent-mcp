@@ -23,6 +23,7 @@ import type {
   TestAdapter,
 } from "../src/adapters.ts";
 import { resolveCitationDetailed } from "../src/file-adapter.ts";
+import { computeHoldings } from "../src/holdings.ts";
 import { computeReferrers } from "../src/referrers.ts";
 import {
   checkSearchFields,
@@ -391,6 +392,10 @@ const SOURCES: Record<SourceId, Source> = {
     published: "2013-06-26",
     effective_from: "2014-01-01",
     verified: daysAgo(3),
+    // The seed holds a handful of articles, so the registry says so: this is
+    // what makes a miss on an unseeded article read as absent from the corpus
+    // rather than from the law (and what binds eval I12 on the demo).
+    coverage: "partial",
     milestones: [],
     url: "https://eur-lex.europa.eu/eli/reg/2013/575/oj",
   },
@@ -403,6 +408,7 @@ const SOURCES: Record<SourceId, Source> = {
     status: "current",
     published: "2017-11-20",
     effective_from: "2021-01-01",
+    coverage: "full",
     // Deliberately stale — exercises stale_sources and the validate warning.
     verified: daysAgo(45),
     milestones: [],
@@ -551,6 +557,7 @@ const inMemoryMeta: MetaAdapter = {
       },
       coverage: ["CRR", "EBA-GL-2017-16"],
       stale_sources: staleSourceIds(Object.values(SOURCES)),
+      holdings: computeHoldings(Object.values(REGULATIONS), Object.values(SOURCES)),
     };
   },
   async referrers(id) {
@@ -567,7 +574,11 @@ const inMemoryMeta: MetaAdapter = {
   async resolveCitation(text) {
     // Same deterministic matcher as the file adapter — including its refusals,
     // so the demo declines on the same citations a real corpus declines on.
-    return resolveCitationDetailed(Object.values(REGULATIONS), text);
+    return resolveCitationDetailed(
+      Object.values(REGULATIONS),
+      text,
+      computeHoldings(Object.values(REGULATIONS), Object.values(SOURCES)),
+    );
   },
   async taxonomy() {
     return [...REVIEW_AREAS];

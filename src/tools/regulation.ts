@@ -19,6 +19,7 @@ import {
   searchInputShape,
   searchOutputShape,
   searchResult,
+  unknownRegulationMiss,
   withAsOfNote,
 } from "./shared.ts";
 
@@ -130,8 +131,8 @@ export function registerRegulationTools(server: McpServer): void {
         "by default; pass as_of (ISO date) for the text in force on that date. Where the corpus " +
         "records no version for that date the current text is served with an as_of_note saying " +
         "so — it may not be the text of that date, so do not present it as historical. An as_of " +
-        "predating every recorded version is a miss. Unknown ids return isError with a " +
-        "pointer. Use get_referrers to find operationalising checks/playbooks.",
+        "predating every recorded version is a miss. Unknown ids return isError, saying if " +
+        "the document is held only in part (absent from the corpus, not necessarily the law). Use get_referrers to find operationalising checks/playbooks.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(
           "A regulation id from search_regulation or resolve_citation — shape regulation://{document}/{provision}",
@@ -164,7 +165,7 @@ export function registerRegulationTools(server: McpServer): void {
             "Retry without as_of for the current text.",
         );
       }
-      return miss(`No record for ${id}. Verify the id with search_regulation or list_review_areas.`);
+      return unknownRegulationMiss(id);
     },
   );
 }

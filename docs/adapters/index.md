@@ -126,6 +126,14 @@ Rules for implementers:
 - **The method is optional.** An adapter without it keeps compiling and behaving as before: the tools fall back to `get`, and no note is attached, because nothing says the text was substituted. Absent is not `"history"` — it is "unknown".
 - **Report `"current"` honestly.** An adapter that has no history but cannot tell the tool layer so serves a validator today's text under a past date with nothing to say it is not that date's text. Implement the method if your backend ever serves current text for a past `asOf`.
 
+## Saying how much of a document is held
+
+`MetaAdapter.info()` may return `holdings`: per document, how many regulation records are held and whether the registry declares the document `partial`. The tool layer's misses for an unknown regulation id compute the same thing from `regulation.list()` and `source.list()`, so an adapter does not need to publish `holdings` for its misses to be partial-aware.
+
+- **Delegate to `computeHoldings(regulations, sources)` in `src/holdings.ts`.** It is the one definition (the file adapter and the in-memory demo both call it), including the conflict rule: only current sources speak for a document, and if their declarations differ, partial wins.
+- **Never default `partial`.** The key is absent when no current source declares `coverage`; absent is not "full".
+- **`resolveCitationDetailed(regulations, text, holdings?)`** takes the holdings as an optional third parameter. Without it the notes are exactly what they were; with it a decline on a partly held document says the absence is the corpus's, not necessarily the law's. `match` and `confidence` are unaffected — pass the holdings from your `MetaAdapter.resolveCitation`.
+
 ## The in-memory demo as a template
 
 `examples/inmemory-demo.ts` is the reference implementation for hand-coded adapters. It seeds a small slice of PD-calibration content into in-memory maps and implements all six adapter interfaces against them. Use it as the template when building your own backend.
@@ -135,7 +143,8 @@ Key things the demo shows:
 - **`search(query)`** — delegates to `rankedSearch` with the surface's exported field set
 - **`get(id, asOf?)`** — direct map lookup; `asOf` selects from per-id version history (the last entry whose `effectiveFrom` ≤ `asOf`; predating all entries → `null`; no history → current). It delegates to **`resolveAsOf`**, which reports `basis: "history" | "current"` so the tools can attach an `as_of_note`
 - **`list()`** — returns every record on the surface; the sources variant filters by status
-- **`resolveCitation(text)`** — delegates to `resolveCitationIn` from the file adapter, the deterministic citation matcher
+- **`resolveCitation(text)`** — delegates to `resolveCitationDetailed` from the file adapter, the deterministic citation matcher, passing `computeHoldings(...)` so a decline on a partly held document says so
+- **`info()`** — serves `holdings` from the same `computeHoldings`; the seed's CRR source declares `coverage: "partial"` (the demo holds a handful of articles) and the EBA guideline `"full"`, so both kinds of miss are exercised
 - **`referrers(id)`** — delegates to `computeReferrers` from `src/referrers.ts`, the ONE reverse index over parent/children, `derived_from`, `regulatory_basis`, `regulatory_scope`, and playbook phase references
 
 For a production adapter, replace the in-memory maps with HTTP calls, a database, or whatever backs the corpus. The interface contract is the same.

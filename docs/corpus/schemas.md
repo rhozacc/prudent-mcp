@@ -486,6 +486,13 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
         },
         "notes": {
           "type": "string"
+        },
+        "coverage": {
+          "type": "string",
+          "enum": [
+            "full",
+            "partial"
+          ]
         }
       },
       "required": [
@@ -708,6 +715,35 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
             "pattern": "^source:\\/\\/.+"
           },
           "default": []
+        },
+        "holdings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "document_id": {
+                "type": "string"
+              },
+              "framework": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "records": {
+                "type": "integer"
+              },
+              "partial": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "document_id",
+              "framework",
+              "records"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [

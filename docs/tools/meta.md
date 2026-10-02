@@ -22,7 +22,14 @@ What's loaded right now. Tells Claude what's actually queryable before it starts
     playbook: number;
     source: number;
   };
-  coverage: string[];         // e.g. ["CRR", "EBA-GL-2017-16"]
+  coverage: string[];         // e.g. ["CRR", "EBA-GL-2017-16"] — names documents, NOT how much of each
+  holdings?: Array<{          // per document: what is actually held — computed at serve time, never stored
+    document_id: string;
+    framework: string;
+    title?: string;           // from the matching source, when there is one
+    records: number;          // regulation records held
+    partial?: boolean;        // true: source declares partly held · false: declares full · key ABSENT: undeclared
+  }>;
   stale_sources: SourceId[];  // current sources whose verified date is >30 days old — computed, never stored
 }
 ```
@@ -30,8 +37,13 @@ What's loaded right now. Tells Claude what's actually queryable before it starts
 **Example:**
 ```ts
 get_corpus_info()
-→ { last_updated: "2024-10-01T00:00:00Z", counts: { regulation: 12, test: 3, check: 4, playbook: 2, source: 5 }, coverage: ["CRR", "EBA-GL-2017-16"], stale_sources: ["source://eba/gl-2017-16"] }
+→ { last_updated: "2024-10-01T00:00:00Z", counts: { regulation: 12, test: 3, check: 4, playbook: 2, source: 5 }, coverage: ["CRR", "EBA-GL-2017-16"],
+    holdings: [{ document_id: "crr", framework: "crr", title: "Regulation (EU) No 575/2013 (CRR)", records: 4, partial: true },
+               { document_id: "eba-gl-2017-16", framework: "eba", title: "…", records: 2, partial: false }],
+    stale_sources: ["source://eba/gl-2017-16"] }
 ```
+
+**`coverage` names documents; `holdings` says how much of each.** A corpus holds a subset of the articles of a regulation, and `"CRR"` in a list reads as the whole of it. `partial` is what the source registry *declares* about the document (see [Corpus structure → Declaring coverage](../corpus/#declaring-coverage)): `true` means the document is held in part, so a provision missing from the corpus is not necessarily missing from the law; `false` means the registry declares it held in full; **an absent `partial` key means nothing was declared** — it is not "full". Only a current source speaks for a document, and where a document's current sources disagree, partial wins. `holdings` is computed from the records and the registry each time, even when the corpus file ships a stored `corpus_info` block, and `coverage` is left exactly as authored. An adapter that predates the field omits it.
 
 A non-empty `stale_sources` means the registry needs a maintenance run — follow up with `list_sources`.
 
@@ -92,6 +104,8 @@ Passes, in order, and nothing below them:
 
 **Returns:** `{ match, confidence, candidates, ambiguous, unmatched_segments, coverage_note }`
 
+When the declined citation names a document the registry declares partly held — or names no document and some held document is partial, in which case the note names which — `coverage_note` adds that the corpus holds only part of the document, so the provision is absent from the corpus and not necessarily from the law. This is explanation only: `match` stays `null` and `confidence` stays `"none"`. The clause rides on the "nothing is numbered …" note and on the narrower-relatives note; the containing-provision note does not carry it, because there the provision's text *is* held. A document declared full, or not declared at all, adds nothing.
+
 | Field | Meaning |
 |---|---|
 | `match` | The record, or `null`. **A null match is not a citation** — never present one as though the text were found. |
@@ -122,6 +136,15 @@ resolve_citation("Article 1 of Regulation (EU) No 9999/9999")
 → { match: null, candidates: [],
     coverage_note: "This corpus holds no Regulation (EU) No 9999/9999. Nothing was matched, rather than
                     sourcing a same-numbered provision from another document…" }
+```
+
+```ts
+// CRR is declared partial in the registry.
+resolve_citation("Article 153 CRR")
+→ { match: null, confidence: "none", unmatched_segments: ["153"],
+    coverage_note: "Nothing in this corpus is numbered 153 in the document named. This corpus holds only part of
+                    Regulation (EU) No 575/2013 (CRR) (160 records), so a provision missing here is absent from
+                    the corpus, not necessarily from the law. Try search_regulation…" }
 ```
 
 On any `null`, fall back to `search_regulation` with the citation's key words, or `get_corpus_info` for the documents actually loaded.

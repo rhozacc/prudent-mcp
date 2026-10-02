@@ -38,6 +38,7 @@ import {
   ok,
   resolveRegulation,
   stripEdgeNoise,
+  unknownRegulationMiss,
   withAsOfNote,
 } from "./shared.ts";
 
@@ -365,9 +366,12 @@ export function registerMetaTools(server: McpServer): void {
       description:
         "What's loaded right now — the entry point before anything else. " +
         "Returns { last_updated, counts: {regulation, test, check, playbook, source}, " +
-        "coverage: [...], stale_sources: [...] } — stale_sources lists current sources " +
-        "whose verified date is older than 30 days; follow up with list_sources, then " +
-        "list_review_areas to map a task onto the corpus.",
+        "coverage: [...], holdings: [...], stale_sources: [...] } — coverage names documents, " +
+        "not how much of each: holdings gives per document { document_id, framework, title, " +
+        "records, partial }, where partial true/false is what the source registry declares and an " +
+        "absent key means undeclared, not full. A document held in part lacks provisions of the " +
+        "law, not only of the corpus. stale_sources lists current sources whose verified date " +
+        "is older than 30 days; follow up with list_sources, then list_review_areas.",
       inputSchema: {},
       outputSchema: CorpusInfoSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
@@ -431,6 +435,8 @@ export function registerMetaTools(server: McpServer): void {
         "corpus holds only narrower provisions under the one asked for; open a candidate by id.\n" +
         "  match null + coverage_note → why, in terms of what this corpus covers.\n" +
         "  confidence 'exact' | 'segment' says which rule matched.\n" +
+        "Where the document is held only in part, the note says so: a provision missing is absent " +
+        "from the corpus, not necessarily from the law.\n" +
         "Do not present a null match as a citation. Fall back to search_regulation with the " +
         "citation's key words, or get_corpus_info for the documents actually loaded.",
       inputSchema: {
@@ -601,7 +607,7 @@ export function registerMetaTools(server: McpServer): void {
         "stubs (default) or complete records (detail: 'full'). Supports as_of like " +
         "get_regulation, resolving regulation children under the same date; an as_of_note says when " +
         "the record or any child is current text standing in for a version the corpus does not " +
-        "record. Unknown ids return isError with a pointer. Use " +
+        "record. Unknown ids return isError, saying if the document is held only in part. Use " +
         "get_regulation_tree to walk the whole sub-tree.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(
@@ -622,7 +628,7 @@ export function registerMetaTools(server: McpServer): void {
               "Retry without as_of for the current text.",
           );
         }
-        return miss(`No record for ${id}. Verify the id with search_regulation or list_review_areas.`);
+        return unknownRegulationMiss(id);
       }
       // Children are resolved under the same date. The note covers the record and
       // any children that came from current text, so a history-covered parent
@@ -654,8 +660,8 @@ export function registerMetaTools(server: McpServer): void {
         "complete record. depth defaults to 5 and the walk is capped at 200 total nodes; " +
         "nodes cut off by depth, a cycle, or the cap carry truncated: true. With as_of, an " +
         "as_of_note on the root says when nodes were served from current text because the " +
-        "corpus records no version for that date. Unknown roots return isError — verify " +
-        "with search_regulation.",
+        "corpus records no version for that date. Unknown roots return isError (saying if the document is held only in part) — " +
+        "verify with search_regulation.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(
           "Root of the tree: a regulation id from search_regulation — shape regulation://{document}/{provision}",
@@ -676,7 +682,7 @@ export function registerMetaTools(server: McpServer): void {
               `${AS_OF_MISS_CONTEXT} Retry without as_of for the current tree.`,
           );
         }
-        return miss(`No record for ${id}. Verify the id with search_regulation or list_review_areas.`);
+        return unknownRegulationMiss(id);
       }
       const note =
         as_of === undefined
