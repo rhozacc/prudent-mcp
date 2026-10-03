@@ -44,6 +44,22 @@ export type { Referrers } from "./schema.ts";
 //     returns []. Do not lean on search("") to enumerate — that undocumented
 //     contract is gone; call list() instead.
 
+/**
+ * What a record under an `as_of` date was served ON.
+ *
+ *   history — a recorded version covers the date; the text is the one then in force.
+ *   current — no version is recorded for the date, so the current record was
+ *             served because it is the best text the corpus has. It is NOT
+ *             evidence of what was in force then, and the tool layer says so.
+ *
+ * A miss has no basis: there is nothing served to qualify.
+ */
+export type AsOfBasis = "history" | "current";
+
+export type AsOfResolution =
+  | { record: Regulation; basis: AsOfBasis }
+  | { record: null };
+
 export interface RegulationAdapter {
   /** Ranked search over citation/text/commentary. Empty query ⇒ []. */
   search(query: string): Promise<Regulation[]>;
@@ -54,8 +70,29 @@ export interface RegulationAdapter {
    * exists, the version in force on `asOf` is returned — or null when `asOf`
    * predates every known version. Backends must not silently serve current
    * text as historical.
+   *
+   * "Serves the current one" is the part a caller cannot see from the record
+   * alone: today's text under a past date looks exactly like a historical
+   * version. `resolveAsOf` is how an adapter says which it was.
    */
   get(id: RegulationId, asOf?: string): Promise<Regulation | null>;
+  /**
+   * OPTIONAL. The same resolution as `get(id, asOf)` with an `asOf` date, plus
+   * the basis the record was served on — so the tool layer can attach an
+   * `as_of_note` when the current text stands in for a version the corpus does
+   * not record.
+   *
+   * Implement it as the single piece of logic and have `get` delegate to it, so
+   * the two cannot disagree about what was served. The record must be exactly
+   * what `get(id, asOf)` returns; only `basis` is new information.
+   *
+   * An adapter without it keeps compiling: the tools fall back to
+   * `get(id, asOf)`, and no substitution note is attached because nothing says
+   * the text was substituted. Absent is not "history" — it is "unknown". (A
+   * record that `get(id, asOf)` cannot serve while `get(id)` can is still a gap
+   * the tools report, since that is observable from `get` alone.)
+   */
+  resolveAsOf?(id: RegulationId, asOf: string): Promise<AsOfResolution>;
   /** ALL regulation records — enumeration/traversal contract, not search. */
   list(): Promise<Regulation[]>;
 }

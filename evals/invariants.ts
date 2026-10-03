@@ -9,12 +9,15 @@
  * The failure they are all aimed at is the same one: **a model believing
  * something the corpus did not say.** Volume is a cost; a confident wrong
  * answer is a defect. So the fatal findings here are about truthfulness
- * (I1–I4, I7) and the budgeted ones about cost (I5–I6).
+ * (I1–I4, I7, I11–I14) and the budgeted ones about cost (I5–I6).
  *
  * Every invariant reports `applicable: false` rather than passing when it had
  * nothing to bind on — a check that passes by having nothing to measure is the
  * exact failure mode this file exists to catch.
  */
+import { readFileSync } from "node:fs";
+
+import { describedKindWindows, holdsKind, loadCorpusFile, textCarriesPoint } from "../src/file-adapter.ts";
 import { estimateTokens, type Finding, type InvariantResult, type Session } from "./harness.ts";
 
 const SCHEMES = ["regulation", "check", "test", "playbook", "source"] as const;
@@ -136,6 +139,355 @@ export async function describedIdsResolve(s: Session): Promise<InvariantResult> 
 // ============================================================================
 
 /**
+ * An instrument named by DESCRIPTION ("the RTS on …", "an ECB Guideline") must
+ * be declined, never sourced from a same-numbered provision of another document.
+ *
+ * The number gate cannot read these, so before the descriptive gate the
+ * instrument was dropped and the bare article number went looking in whatever
+ * held a provision with it.
+ *
+ * Whether a probe BINDS depends on the corpus holding no document of that kind,
+ * and that is read from what the server itself says it loaded (`get_corpus_info`
+ * document ids, frameworks and coverage), never inferred from the reply: a reply
+ * that returns nothing is what a correctly held kind and a correctly declined one
+ * look like from outside, so equality of replies cannot tell them apart. A corpus
+ * that does hold such a document makes that probe not applicable.
+ */
+const DESCRIPTIVE_PROBES: string[] = [
+  "Article 1 of the RTS on the assessment methodology",
+  "Article 1 of the ITS on supervisory reporting",
+  "Article 1 of the Commission Delegated Regulation on a subject",
+  "Article 1 of an ECB Guideline on a subject",
+  // The same kinds in the spellings a writer has for them. A gate that reads one
+  // spelling is walked round by the next, and the canonical four cannot show it.
+  "Article 1 of the rts on the assessment methodology",
+  "Article 1 of the RTSs on the assessment methodology",
+  "Article 1 of the R.T.S. on the assessment methodology",
+  "Article 1 of the regulatory-technical-standards on the assessment methodology",
+  "Article 1 of the technical standards on the assessment methodology",
+  "Article 1 of the implementing-technical-standards on supervisory reporting",
+  "Article 1 of the European Central Bank Guideline on a subject",
+];
+
+export async function descriptiveInstrumentGateHolds(
+  s: Session,
+): Promise<{ applicable: boolean; findings: Finding[] }> {
+  const findings: Finding[] = [];
+  const info = await s.call("get_corpus_info");
+  // What the corpus holds, as the resolver reads it: framework, document id, id
+  // segment and "framework document_id" (`holdsKind`, the gate's own definition,
+  // so the two cannot disagree about a kind carried only by the framework or the
+  // id segment). `holdings` gives framework and document id for any server; the
+  // id segments need the corpus file, which a file-backed session has.
+  const docs: Array<{ id: `regulation://${string}`; framework: string; document_id: string }> = [];
+  const body = (info.json ?? {}) as { coverage?: unknown; holdings?: unknown };
+  if (Array.isArray(body.holdings)) {
+    for (const h of body.holdings as Array<Record<string, unknown>>) {
+      if (typeof h["document_id"] === "string" && typeof h["framework"] === "string") {
+        docs.push({ id: `regulation://${h["document_id"]}/x`, framework: h["framework"], document_id: h["document_id"] });
+      }
+    }
+  }
+  if (Array.isArray(body.coverage)) {
+    for (const c of body.coverage) {
+      if (typeof c === "string") docs.push({ id: `regulation://${c}/x`, framework: "", document_id: c });
+    }
+  }
+  if (s.corpusFile !== undefined) {
+    for (const r of loadCorpusFile(s.corpusFile).regulation) docs.push(r);
+  }
+  let bound = 0;
+  for (const text of DESCRIPTIVE_PROBES) {
+    if (holdsKind(docs, describedKindWindows(text))) continue;
+    bound++;
+    const r = await s.call("resolve_citation", { text });
+    const j = (r.json ?? {}) as { match?: unknown; candidates?: unknown; coverage_note?: unknown };
+    const candidates = Array.isArray(j.candidates) ? j.candidates.length : 0;
+    if ((j.match !== null && j.match !== undefined) || candidates > 0) {
+      findings.push({
+        id: "I3/descriptive-instrument",
+        severity: "fatal",
+        summary:
+          "resolve_citation answers a citation into an instrument named by description, which the corpus does not hold, out of a same-numbered provision of another document.",
+        evidence: [
+          `resolve_citation("${text}") → match ${j.match === null || j.match === undefined ? "null" : "set"}, ${candidates} candidate(s)`,
+          "the model will attribute that text to the instrument the caller described",
+        ],
+      });
+    } else if (typeof j.coverage_note !== "string" || !/by description/i.test(j.coverage_note)) {
+      findings.push({
+        id: "I3/descriptive-refusal-not-shaped",
+        severity: "warn",
+        summary:
+          "resolve_citation declines an instrument named by description but the note does not say it was read as a description, so it reads as a malformed citation rather than a coverage boundary.",
+        evidence: [`resolve_citation("${text}") → ${r.text.slice(0, 220)}`],
+      });
+    }
+  }
+  if (bound === 0) {
+    findings.push({
+      id: "I3/descriptive-instrument-na",
+      severity: "info",
+      summary: "The corpus holds a document of every kind the descriptive probes name, so the descriptive gate could not be tested.",
+      evidence: [`${docs.length} document name(s) read from get_corpus_info and the corpus file`],
+    });
+  }
+  return { applicable: bound > 0, findings };
+}
+
+/**
+ * A descriptor that names only an issuer's kind of document ("ECB Guideline"),
+ * beside a held document of that same issuer, is a loose name for that document and
+ * not a second instrument: "ECB Guidelines (EGIM) Chapter 3, paragraph 181" says the
+ * one document twice, and the id is the exact half. A server that reads the
+ * descriptor as a second instrument declines what it had just resolved.
+ *
+ * Corpus-agnostic: for a held document whose framework is the issuer, a record the
+ * server serves for it is cited by the document's id and the record's citation,
+ * with and without the descriptor in front. Where the plain citation resolves to
+ * the record, the descriptor must not change the answer.
+ */
+export async function issuerDescriptorIsLoose(s: Session): Promise<{ applicable: boolean; findings: Finding[] }> {
+  const findings: Finding[] = [];
+  const info = await s.call("get_corpus_info");
+  const holdings = ((info.json as { holdings?: Array<{ document_id?: unknown; framework?: unknown }> } | null)?.holdings ?? []);
+  const issuerDocs = new Set(
+    holdings.flatMap((h) =>
+      typeof h.document_id === "string" && typeof h.framework === "string" && h.framework.toLowerCase() === "ecb" ? [h.document_id] : [],
+    ),
+  );
+  if (issuerDocs.size === 0) return { applicable: false, findings };
+  const served = new Map<string, Array<{ id: string; citation: string }>>();
+  for (const q of ["default", "estimation", "downturn", "validation", "model", "risk", "regulation"]) {
+    const t = await s.call("search_regulation", { query: q, limit: 20 });
+    const rows = ((t.json as { results?: Array<{ id?: unknown; citation?: unknown; document_id?: unknown }> } | null)?.results ?? []);
+    for (const row of rows) {
+      if (typeof row.id !== "string" || typeof row.citation !== "string" || typeof row.document_id !== "string") continue;
+      if (!issuerDocs.has(row.document_id) || row.citation.trim() === "") continue;
+      const list = served.get(row.document_id) ?? [];
+      if (list.length < 2 && !list.some((r) => r.id === row.id)) list.push({ id: row.id, citation: row.citation });
+      served.set(row.document_id, list);
+    }
+  }
+  let asked = 0;
+  for (const [documentId, records] of served) {
+    for (const { id, citation } of records) {
+      const plain = await s.call("resolve_citation", { text: `${documentId} ${citation}` });
+      if (plain.isError || ((plain.json as { match?: { id?: unknown } | null } | null)?.match?.id) !== id) continue;
+      for (const text of [`ECB Guideline ${documentId} ${citation}`, `${citation} of the ECB Guidelines (${documentId})`]) {
+        const loose = await s.call("resolve_citation", { text });
+        if (loose.isError) continue;
+        asked++;
+        const matched = ((loose.json as { match?: { id?: unknown } | null } | null)?.match?.id);
+        if (matched !== id) {
+          findings.push({
+            id: "I3/issuer-descriptor",
+            severity: "fatal",
+            summary:
+              "resolve_citation declines, or answers with another record, a citation that names a held document by its id and also calls it by its issuer's kind of text (\"ECB Guideline\") - the descriptor was read as a second instrument.",
+            evidence: [
+              `resolve_citation("${documentId} ${citation}") -> ${id}`,
+              `resolve_citation("${text}") -> ${typeof matched === "string" ? matched : "no match"}`,
+              "the descriptor and the id name one document; the id is the exact half",
+            ],
+          });
+        }
+      }
+    }
+  }
+  if (asked === 0) {
+    findings.push({
+      id: "I3/issuer-descriptor-na",
+      severity: "info",
+      summary: "No record of a document of the descriptor's issuer resolved by its own id, so the descriptor beside a held document could not be tested.",
+      evidence: [`${issuerDocs.size} document(s) of that issuer listed by get_corpus_info`],
+    });
+  }
+  return { applicable: asked > 0, findings };
+}
+
+/**
+ * When resolve_citation places a citation inside the record that contains it,
+ * the note may say that record's text carries the point. That is a claim about
+ * the SERVED text, and it used to be made without looking: an article of seven
+ * paragraphs was said to carry point 9, and a caller told so goes looking and
+ * quotes around the gap.
+ *
+ * Corpus-agnostic: citations the server hands out are deepened to points it is
+ * unlikely to hold at that granularity, and every note that says "carries point
+ * X" is checked against the text `get_regulation` serves for the container it
+ * names. Two checks, deliberately not the same code: the resolver's own reader
+ * (so the note and the record cannot drift apart) and a loose marker test
+ * written independently (so a reader that is wrong in the same way as the
+ * claim does not agree with itself). Whether a citation reached this rule is
+ * read from the reply's structure (a null match, unplaced segments, a
+ * candidate), never from equality of replies.
+ */
+export async function containerClaimsAreTrue(
+  s: Session,
+): Promise<{ applicable: boolean; findings: Finding[] }> {
+  const findings: Finding[] = [];
+  const bases = new Set<string>();
+  for (const q of ["default", "estimation", "downturn", "validation", "model", "risk"]) {
+    const t = await s.call("search_regulation", { query: q, limit: 10 });
+    for (const m of t.text.matchAll(/"citation"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
+      const c = m[1];
+      if (c !== undefined && /\d/.test(c) && !/\(/.test(c)) bases.add(c);
+    }
+  }
+  const markerFor = (seg: string): RegExp =>
+    /^\d+$/.test(seg)
+      ? new RegExp(`(?:^|[\\s;:.])(?:\\(${seg}\\)|${seg}[.)])\\s`)
+      : new RegExp(`\\(${seg}\\)`);
+  // Scoped like the claim: each deeper segment is looked for only between its
+  // parent's marker and the parent's next sibling, so "(b)" found anywhere in
+  // the article does not vouch for "3.b".
+  const nextSibling = (seg: string): string =>
+    /^\d+$/.test(seg) ? String(Number(seg) + 1) : String.fromCharCode(seg.charCodeAt(0) + 1);
+  const looselyCarries = (text: string, segs: string[]): boolean => {
+    let span = text;
+    for (const seg of segs) {
+      const at = markerFor(seg).exec(span);
+      if (at === null) return false;
+      const rest = span.slice(at.index + at[0].length);
+      const next = markerFor(nextSibling(seg)).exec(rest);
+      span = next === null ? rest : rest.slice(0, next.index);
+    }
+    return true;
+  };
+  let reached = 0;
+  for (const base of [...bases].slice(0, 12)) {
+    for (const suffix of ["(1)", "(9)", "(99)", "(2)(b)"]) {
+      const probe = `${base}${suffix}`;
+      const r = await s.call("resolve_citation", { text: probe });
+      if (r.isError) continue;
+      const j = (r.json ?? {}) as {
+        match?: unknown;
+        unmatched_segments?: unknown;
+        candidates?: Array<{ id?: string; document_id?: string }>;
+        coverage_note?: unknown;
+      };
+      const candidate = Array.isArray(j.candidates) ? j.candidates[0] : undefined;
+      if (
+        (j.match ?? null) !== null ||
+        !Array.isArray(j.unmatched_segments) ||
+        j.unmatched_segments.length === 0 ||
+        candidate?.id === undefined
+      ) {
+        continue; // did not reach the containing-provision rule
+      }
+      reached++;
+      const note = typeof j.coverage_note === "string" ? j.coverage_note : "";
+      const claim = /carries point ([0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)\./.exec(note)?.[1];
+      if (claim === undefined) continue;
+      // Containers in several documents are different provisions that share a
+      // number, not alternatives for one. Calling one of them "the provision
+      // containing it" and reading ITS text verifies a document the citation may
+      // not be about, so the claim is wrong however true it is of that text.
+      const documents = new Set((j.candidates ?? []).flatMap((c) => (typeof c.document_id === "string" ? [c.document_id] : [])));
+      if (documents.size > 1) {
+        findings.push({
+          id: "I3/container-claim-cross-document",
+          severity: "fatal",
+          summary:
+            "resolve_citation presents one record as the provision containing a citation and says its text carries the point, though the records that could contain it sit in several documents - it verified a text that may not be the one cited.",
+          evidence: [
+            `resolve_citation("${probe}") claims point ${claim} in ${candidate.id}`,
+            `candidates sit in ${documents.size} documents: ${[...documents].slice(0, 5).join(", ")}`,
+          ],
+        });
+        continue;
+      }
+      const rec = await s.call("get_regulation", { id: candidate.id });
+      const text = typeof (rec.json as { text?: unknown } | null)?.text === "string" ? (rec.json as { text: string }).text : null;
+      if (rec.isError || text === null) continue;
+      const segs = claim.split(".");
+      const reads = textCarriesPoint(text, segs);
+      const loose = looselyCarries(text, segs);
+      if (reads !== "yes" || !loose) {
+        findings.push({
+          id: "I3/container-claim",
+          severity: "fatal",
+          summary:
+            "resolve_citation says the containing record's text carries a point, and the text the server serves for that record does not.",
+          evidence: [
+            `resolve_citation("${probe}") claims point ${claim} in ${candidate.id}`,
+            `the resolver's reader of the served text: ${reads}; independent marker test: ${loose ? "found" : "not found"}`,
+            "a caller told the point exists goes looking for it and quotes around the gap",
+          ],
+        });
+      }
+    }
+  }
+  if (reached === 0) {
+    findings.push({
+      id: "I3/container-claim-na",
+      severity: "info",
+      summary: "No probed citation reached the containing-provision rule, so its claim about the container's text could not be tested.",
+      evidence: [`${bases.size} citation(s) observed through search_regulation`],
+    });
+  }
+  return { applicable: reached > 0, findings };
+}
+
+/**
+ * A record's own citation is the strongest evidence a citation can have, so the
+ * server must never refuse it: not into a decline, and not into another record.
+ * The gates in front of the numeric rules read WORDS in the caller's text, and a
+ * corpus is free to label its records with the same words ("RTS Article 5"), so
+ * a gate that runs ahead of the equality pass refuses the very record quoted.
+ *
+ * Corpus-agnostic: the citations are the ones the server itself serves in search
+ * rows. The honest answers are the record itself, or an ambiguity that says
+ * several records fit (a citation several documents share, "Paragraph 12"); a
+ * null match with nobody named, or a different record, is a defect. The unit
+ * tests cover a corpus built to trip it; this binds on whatever corpus it is
+ * pointed at.
+ */
+export async function ownCitationsResolve(s: Session): Promise<{ applicable: boolean; findings: Finding[] }> {
+  const findings: Finding[] = [];
+  const served = new Map<string, string>();
+  for (const q of ["default", "estimation", "downturn", "validation", "model", "risk", "regulation"]) {
+    const t = await s.call("search_regulation", { query: q, limit: 10 });
+    const rows = ((t.json as { results?: Array<{ id?: unknown; citation?: unknown }> } | null)?.results ?? []);
+    for (const row of rows) {
+      if (typeof row.id === "string" && typeof row.citation === "string" && row.citation.trim() !== "") {
+        served.set(row.id, row.citation);
+      }
+    }
+  }
+  let bound = 0;
+  for (const [id, citation] of [...served].slice(0, 30)) {
+    const r = await s.call("resolve_citation", { text: citation });
+    if (r.isError) continue;
+    bound++;
+    const j = (r.json ?? {}) as { match?: { id?: unknown } | null; ambiguous?: unknown };
+    const matched = j.match?.id;
+    if (matched === id || (matched === undefined || matched === null ? j.ambiguous === true : false)) continue;
+    findings.push({
+      id: "I3/own-citation",
+      severity: "fatal",
+      summary:
+        "resolve_citation does not return the record whose own citation it was given - it declines, or names another record, for a citation the server itself serves.",
+      evidence: [
+        `search_regulation serves ${id} with the citation "${citation}"`,
+        `resolve_citation("${citation}") -> match ${matched === undefined || matched === null ? "null" : String(matched)}, ambiguous ${String(j.ambiguous)}`,
+        "a gate that reads words in the citation ran ahead of the equality pass, or the equality pass is scoped to the wrong document",
+      ],
+    });
+  }
+  if (bound === 0) {
+    findings.push({
+      id: "I3/own-citation-na",
+      severity: "info",
+      summary: "No record citation was observed through search_regulation, so a record's own citation could not be tested.",
+      evidence: [`${served.size} citation(s) observed`],
+    });
+  }
+  return { applicable: bound > 0, findings };
+}
+
+/**
  * The hardest defect to see from inside the code: a resolver that always
  * resolves. Fuzzy containment turns "Article 501" into article 50 and an
  * instrument the corpus does not hold into one it does — and returns it with no
@@ -148,6 +500,14 @@ export async function describedIdsResolve(s: Session): Promise<InvariantResult> 
  */
 export async function citationResolutionIsHonest(s: Session): Promise<InvariantResult> {
   const findings: Finding[] = [];
+  const descriptive = await descriptiveInstrumentGateHolds(s);
+  findings.push(...descriptive.findings);
+  const container = await containerClaimsAreTrue(s);
+  findings.push(...container.findings);
+  const own = await ownCitationsResolve(s);
+  findings.push(...own.findings);
+  const issuer = await issuerDescriptorIsLoose(s);
+  findings.push(...issuer.findings);
 
   // Discover real article numbers from ids the server itself hands out.
   const seen = new Set<number>();
@@ -162,8 +522,9 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
     return {
       id: "I3",
       title: "Citation resolution is honest",
-      applicable: false,
+      applicable: descriptive.applicable || container.applicable || own.applicable || issuer.applicable,
       findings: [
+        ...findings,
         {
           id: "I3/no-articles",
           severity: "info",
@@ -213,9 +574,35 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
   // cannot reveal that — its second number has four digits, so it matches the
   // old pattern and the probe passes on a gate that is broken for everything
   // real. The post-2015 probe needs a SHORT serial to bind at all.
+  //
+  // And the other spellings of the same kind of number. A directive is cited
+  // "Directive 2014/65/EU", a regulation is cited "Regulation EU 2019/2033" or
+  // bare, a decision bare: a gate that reads only "(EU) 2099/930" drops every one
+  // of these, and the bare article number then goes looking in the whole corpus.
+  // The numbers are invented (no act exists numbered in 2099), so none can be held.
+  //
+  // And the number written first ("2099/933 Regulation"), which the kind-first
+  // pattern never saw. Its worst case is a number the corpus DOES hold with the word
+  // of a kind it does not have: no directive or decision is numbered 575/2013, so
+  // "575/2013 Directive" names another act, and answering it out of the regulation
+  // that carries the number is the confident wrong citation. Declined whether or not
+  // the corpus holds that regulation, so the probe does not assume it.
   for (const probe of [
     "Article 1 of Regulation (EU) No 9999/9999", // pre-2015 form
     "Article 1 of Regulation (EU) 2099/930", // post-2015 form, short serial
+    "Article 1 of Directive 2099/77/EU", // the tag after the number
+    "Article 1 of Council Directive 2099/12/EC",
+    "Article 1 of Commission Regulation EU 2099/933", // the tag before the number, bare
+    "Article 1 of Regulation 2099/933", // no tag at all
+    "Article 1 of Decision 2099/12",
+    "Article 1 of 2099/77/EU Directive", // the number first
+    "Article 1 of 2099/933 Regulation",
+    "Article 1 of 2099/12 Decision",
+    // A held number with another kind's word, for an article the corpus has, so that a
+    // reader that ignores the word resolves it.
+    `Article ${present} of 575/2013 Directive`,
+    `Article ${present} of Directive 575/2013`,
+    `Article ${present} of 575/2013 Decision`,
   ]) {
     const foreign = await s.call("resolve_citation", { text: probe });
     const foreignMatch = /"id"\s*:\s*"([^"]+)"/.exec(foreign.text)?.[1];
@@ -249,7 +636,7 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
     // post-2015 act is "Regulation (EU) 2099/930"; writing "No 2099/930" is a
     // wrong citation of a real instrument, from the one code path whose whole
     // purpose is not guessing.
-    if (/No\s+2099\s*\/\s*930/.test(foreign.text)) {
+    if (/\bNo\s+2099\s*\/\s*\d+/.test(foreign.text)) {
       findings.push({
         id: "I3/mislabels-instrument",
         severity: "fatal",
@@ -260,7 +647,124 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
     }
   }
 
+  // A document identified by its number ("EBA/GL/2099/04"), which no held document
+  // answers to. The framework alone can scope such a citation, and the number then
+  // reads as points of a provision. Declined, with no candidates, in any wording.
+  for (const probe of ["Article 1 of EBA/GL/2099/04", "Article 1 of ESMA/2099/1444"]) {
+    const identified = await s.call("resolve_citation", { text: probe });
+    const j = (identified.json ?? {}) as { match?: unknown; candidates?: unknown };
+    const candidates = Array.isArray(j.candidates) ? j.candidates.length : 0;
+    if ((j.match ?? null) !== null || candidates > 0) {
+      findings.push({
+        id: "I3/identifier",
+        severity: "fatal",
+        summary:
+          "resolve_citation answers a citation that names a document by an identifier no held document answers to out of a same-numbered provision of another document, reading the identifier's year and serial as points.",
+        evidence: [`resolve_citation("${probe}") -> match ${(j.match ?? null) === null ? "null" : "set"}, ${candidates} candidate(s)`],
+      });
+    }
+  }
+
+  // One instrument, however it is named, gets one answer. The CRR is "CRR", "the
+  // Capital Requirements Regulation" and "Regulation (EU) No 575/2013"; a resolver
+  // that scopes only the first lets the others fall into whichever document has a
+  // provision with that number. Asked three ways for numbers the corpus has and one
+  // it cannot, the three must agree on the record (or on none) - whether or not the
+  // corpus holds the CRR, which is not assumed.
+  const sameness: number[] = [...seen].slice(0, 6);
+  sameness.push(absent);
+  for (const n of sameness) {
+    const answers = new Map<string, string | null>();
+    for (const text of [
+      `Article ${n} CRR`,
+      `Article ${n} of the Capital Requirements Regulation`,
+      `Article ${n} of Regulation (EU) No 575/2013`,
+    ]) {
+      const r = await s.call("resolve_citation", { text });
+      answers.set(text, ((r.json as { match?: { id?: string } | null } | null)?.match?.id) ?? null);
+    }
+    if (new Set(answers.values()).size > 1) {
+      findings.push({
+        id: "I3/same-instrument-same-answer",
+        severity: "fatal",
+        summary:
+          "resolve_citation answers differently for the same provision of the same instrument depending on how the instrument is named - at least one spelling is being resolved into a different document.",
+        evidence: [...answers].map(([text, id]) => `resolve_citation("${text}") -> ${id ?? "null"}`),
+      });
+    }
+  }
+
+  const titled = await titledCitationsResolve(s);
+  findings.push(...titled.findings);
+
   return { id: "I3", title: "Citation resolution is honest", applicable: true, findings };
+}
+
+/**
+ * A document named by its registry title must be found in that document and in no
+ * other. The title is a name the records do not carry, so it is exactly the kind of
+ * name a resolver can fail to recognise - and then the bare provision number goes
+ * looking in every document and is answered out of whichever has one.
+ *
+ * Corpus-agnostic: the documents and titles are the ones `get_corpus_info` lists,
+ * the records the ones the server serves in search rows. Declining is honest (a
+ * title with an odd word in it may not be an exact name); a different record is not.
+ */
+export async function titledCitationsResolve(s: Session): Promise<{ applicable: boolean; findings: Finding[] }> {
+  const findings: Finding[] = [];
+  const info = await s.call("get_corpus_info", {});
+  const holdings = ((info.json as { holdings?: Array<{ document_id?: unknown; title?: unknown }> } | null)?.holdings ?? []);
+  const titles = new Map<string, string>();
+  for (const h of holdings) {
+    if (typeof h.document_id === "string" && typeof h.title === "string" && h.title.trim() !== "") titles.set(h.document_id, h.title);
+  }
+  if (titles.size === 0) return { applicable: false, findings };
+  const byDocument = new Map<string, Array<{ id: string; citation: string }>>();
+  for (const q of ["default", "estimation", "downturn", "validation", "model", "risk", "regulation"]) {
+    const t = await s.call("search_regulation", { query: q, limit: 20 });
+    const rows = ((t.json as { results?: Array<{ id?: unknown; citation?: unknown; document_id?: unknown }> } | null)?.results ?? []);
+    for (const row of rows) {
+      if (typeof row.id !== "string" || typeof row.citation !== "string" || typeof row.document_id !== "string") continue;
+      if (!titles.has(row.document_id) || row.citation.trim() === "") continue;
+      const list = byDocument.get(row.document_id) ?? [];
+      if (list.length < 2 && !list.some((r) => r.id === row.id)) list.push({ id: row.id, citation: row.citation });
+      byDocument.set(row.document_id, list);
+    }
+  }
+  let asked = 0;
+  for (const [documentId, records] of byDocument) {
+    const title = titles.get(documentId) ?? "";
+    for (const { id, citation } of records) {
+      for (const text of [`${citation} of ${title}`, `${title}, ${citation}`]) {
+        const r = await s.call("resolve_citation", { text });
+        if (r.isError) continue;
+        asked++;
+        const matched = ((r.json as { match?: { id?: unknown } | null } | null)?.match?.id);
+        if (typeof matched === "string" && matched !== id) {
+          findings.push({
+            id: "I3/titled-citation",
+            severity: "fatal",
+            summary:
+              "resolve_citation answers a citation that names a document by its registry title with a record other than the one it was given - the title was not read as a name, and the bare provision number was answered from another document.",
+            evidence: [
+              `search_regulation serves ${id} (document ${documentId}) with the citation "${citation}"`,
+              `resolve_citation("${text}") -> ${matched}`,
+              "a caller who named a document by its title is handed a provision of a different one",
+            ],
+          });
+        }
+      }
+    }
+  }
+  if (asked === 0) {
+    findings.push({
+      id: "I3/titled-citation-na",
+      severity: "info",
+      summary: "No record of a document with a registry title was observed through search_regulation, so naming a document by its title could not be tested.",
+      evidence: [`${titles.size} document title(s) listed by get_corpus_info`],
+    });
+  }
+  return { applicable: asked > 0, findings };
 }
 
 // ============================================================================
@@ -432,6 +936,15 @@ export interface Budget {
  *   6,100  measured 5,807 + 5% headroom — instructions gained the scope,
  *          boundary and legal-force rules; list_review_areas stopped
  *          advertising itself as the entry point for every question
+ *   6,100  unchanged, 2026-10-02: 5,807 -> 6,099 across the as_of_note,
+ *          holdings, descriptive-gate, container-claim, search-coverage and
+ *          placeholder items (tool cards +, instructions +). The growth was
+ *          offset rather than absorbed by a raise: the four search cards' shared
+ *          coverage sentence moved into the instructions once, and the cards for
+ *          get_corpus_info, resolve_citation, get_regulation, expand_regulation,
+ *          get_regulation_tree, get_area_overview, list_review_areas and
+ *          expand_playbook were tightened without dropping a rule. Zero headroom:
+ *          the next rule has to be paid for the same way.
  */
 export const DEFAULT_BUDGET: Budget = {
   surface: 6100,
@@ -1041,6 +1554,565 @@ export async function declinesAreNeverEmpty(s: Session): Promise<InvariantResult
   return { id: "I10", title: "A decline is never empty", applicable: bound > 0, findings };
 }
 
+// ============================================================================
+// I11 — as_of is never silently substituted
+// ============================================================================
+
+/**
+ * A corpus with no recorded version of a provision serves its CURRENT text under
+ * any as_of the document already existed on. That is the best text it has, so
+ * it is a hit and not a miss — but the record alone cannot say so: today's text
+ * asked for under a past date is byte-for-byte what a historical version looks
+ * like. A validator asking what applied at an approval date, and the model
+ * relaying the answer, both read it as the text of that date and cite it with a
+ * date it was never in force on.
+ *
+ * So whenever the text served under as_of IS the current text, the reply must
+ * say it is not the text of that date. Observed from outside: take a record,
+ * read it with no date, then read it under a ladder of dates; every reply that
+ * is a hit identical to the undated one must carry an `as_of_note`.
+ *
+ * The invariant binds only on a record that has no recorded history, and it has
+ * two ways to know. When the session was opened on a corpus file, the ids named
+ * in its `regulation_history` are read (ids only, no content) and skipped: a
+ * record with even one history entry — the current-boundary entry the corpus
+ * format asks for — is correctly served without a note whenever an entry covers
+ * the date, and from outside that looks exactly like an unrecorded provision
+ * whenever the entry starts before the first ladder date. The second guard is
+ * black-box and works with no file (the seeded demo): a record whose reply ever
+ * differs from the current text, or ever misses, is skipped, because that is
+ * history that starts later or a document published later. Neither guard can
+ * hide a substitution on a record that never misses, never differs and has no
+ * history, which is exactly what the unfixed server did. The cost is that
+ * records of documents published after the earliest ladder date are not probed
+ * here; the adapter tests cover the registry-dated boundary.
+ *
+ * `expand_regulation` also resolves the record's regulation children under the
+ * same date, so on a record that has children the embedded children are checked
+ * to be the versions `get_regulation` serves for that date.
+ *
+ * A note that is present but names neither the date asked about nor the version
+ * served is a warning: it satisfies "has a note" while telling the caller nothing
+ * (the same shape as I10's generic decline).
+ *
+ * The other half of the same belief: a child the corpus holds but has no version
+ * of for the date comes back as a bare id, which reads as a reference to nothing.
+ * Wherever `expand_regulation` embeds one, its reply must carry a note naming the
+ * date (`I11/expand_regulation-gap`).
+ */
+/**
+ * The ids the corpus file records history for. Structural metadata only: which
+ * ids have a `regulation_history` entry, never what the entries say. Empty when
+ * there is no file (the demo) or it cannot be read; the black-box guard in the
+ * invariant still applies then.
+ */
+function idsWithRecordedHistory(corpusFile: string | undefined): Set<string> {
+  if (corpusFile === undefined) return new Set();
+  try {
+    const parsed = JSON.parse(readFileSync(corpusFile, "utf8")) as { regulation_history?: Array<{ id?: unknown }> };
+    return new Set((parsed.regulation_history ?? []).flatMap((e) => (typeof e.id === "string" ? [e.id] : [])));
+  } catch {
+    return new Set();
+  }
+}
+
+export async function asOfIsNeverSilentlySubstituted(s: Session): Promise<InvariantResult> {
+  const findings: Finding[] = [];
+  const title = "as_of is never silently substituted";
+
+  type Row = { id?: string; document_id?: string };
+  const rowsOf = (json: unknown): Row[] =>
+    ((json as { results?: Row[] } | null)?.results ?? []).filter((r) => typeof r.id === "string");
+  const asRecord = (json: unknown): Record<string, unknown> | null =>
+    json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : null;
+  const same = (a: Record<string, unknown>, b: Record<string, unknown>): boolean =>
+    a["id"] === b["id"] && a["document_version"] === b["document_version"] && a["text"] === b["text"];
+
+  // Records from the server's own search output, at most two per document so one
+  // large document does not take every probe.
+  const perDocument = new Map<string, number>();
+  const ids: string[] = [];
+  for (const q of ["default", "estimation", "risk", "data", "model", "validation"]) {
+    const t = await s.call("search_regulation", { query: q, limit: 10 });
+    for (const row of rowsOf(t.json)) {
+      const doc = row.document_id ?? "";
+      if (row.id === undefined || ids.includes(row.id) || (perDocument.get(doc) ?? 0) >= 2) continue;
+      perDocument.set(doc, (perDocument.get(doc) ?? 0) + 1);
+      ids.push(row.id);
+    }
+  }
+
+  const withHistory = idsWithRecordedHistory(s.corpusFile);
+  const today = new Date().toISOString().slice(0, 10);
+  const ladder = [...new Set(["2014-06-30", "2019-06-30", "2024-12-31", today])];
+
+  const dateAndVersionNamed = (note: string, asOf: string, version: unknown): boolean =>
+    note.includes(asOf) && (typeof version !== "string" || version === "" || note.includes(version));
+
+  let bound = 0;
+  let crossChecked = 0;
+  for (const id of ids.slice(0, 8)) {
+    if (withHistory.has(id)) continue; // the corpus records a version of it; see the docstring
+    const current = await s.call("get_regulation", { id });
+    const cur = asRecord(current.json);
+    if (current.isError || cur === null) continue;
+
+    const served: Array<{ asOf: string; body: Record<string, unknown> }> = [];
+    let hasHistory = false;
+    for (const asOf of ladder) {
+      const r = await s.call("get_regulation", { id, as_of: asOf });
+      const body = asRecord(r.json);
+      if (r.isError || body === null || !same(body, cur)) {
+        hasHistory = true;
+        break;
+      }
+      served.push({ asOf, body });
+    }
+    if (hasHistory) continue;
+
+    const silent: string[] = [];
+    for (const { asOf, body } of served) {
+      bound++;
+      const note = body["as_of_note"];
+      if (typeof note !== "string" || note.trim() === "") {
+        silent.push(asOf);
+      } else if (!dateAndVersionNamed(note, asOf, body["document_version"])) {
+        findings.push({
+          id: "I11/note-generic",
+          severity: "warn",
+          summary: "as_of_note does not name the date that was asked about and the version that was served — it says a note exists and nothing about this reply.",
+          evidence: [`id ${id}`, `as_of ${asOf}`, `note: ${note.slice(0, 200)}`],
+        });
+      }
+    }
+    if (silent.length > 0) {
+      findings.push({
+        id: "I11/get_regulation",
+        severity: "fatal",
+        summary: "get_regulation served the current text of a record with no recorded history under as_of and said nothing — it reads as the text in force on the date asked for.",
+        evidence: [
+          `id ${id}`,
+          `as_of dates answered without a note: ${silent.join(", ")}`,
+          `document_version served: ${String(cur["document_version"])}`,
+          `reply keys: ${Object.keys(served[0]?.body ?? {}).join(", ")}`,
+        ],
+      });
+    }
+
+    // The other two tools that serve a regulation under as_of must agree. Two
+    // records are enough: the point is that the three are wired to the same
+    // resolution, not that every id is probed three ways.
+    const last = served[served.length - 1];
+    if (last !== undefined && crossChecked < 2) {
+      crossChecked++;
+      const probes: Array<[string, Record<string, unknown>]> = [
+        ["expand_regulation", { id, as_of: last.asOf }],
+        ["get_regulation_tree", { id, as_of: last.asOf, depth: 0 }],
+      ];
+      for (const [tool, args] of probes) {
+        const r = await s.call(tool, args);
+        const body = asRecord(r.json);
+        if (r.isError || body === null) continue;
+        bound++;
+        const note = body["as_of_note"];
+        if (typeof note !== "string" || note.trim() === "") {
+          findings.push({
+            id: `I11/${tool}`,
+            severity: "fatal",
+            summary: `${tool} served the current text of a record with no recorded history under as_of ${last.asOf} and said nothing — every tool that serves a regulation under as_of must say so.`,
+            evidence: [`id ${id}`, `reply keys: ${Object.keys(body).join(", ")}`],
+          });
+        }
+      }
+
+      // The embedded children are resolved under the same date, so each must be
+      // the version get_regulation serves for it — not its latest text under the
+      // date asked about.
+      const full = await s.call("expand_regulation", { id, as_of: last.asOf, detail: "full" });
+      const kids = (asRecord(full.json)?.["children"] ?? []) as Array<{ type?: string; id?: string; record?: unknown }>;
+      for (const kid of kids.filter((k) => k.type === "regulation" && typeof k.id === "string").slice(0, 3)) {
+        bound++;
+        const direct = await s.call("get_regulation", { id: kid.id, as_of: last.asOf });
+        const want = asRecord(direct.json);
+        const got = asRecord(kid.record);
+        const agrees =
+          direct.isError || want === null
+            ? kid.record === null || kid.record === undefined
+            : got !== null && same(got, want);
+        if (!agrees) {
+          findings.push({
+            id: "I11/expand_regulation-children",
+            severity: "fatal",
+            summary: "expand_regulation embedded a child at a different version than get_regulation serves for the same as_of — the child is shown as the text of a date it may not be.",
+            evidence: [`parent ${id}`, `child ${String(kid.id)}`, `as_of ${last.asOf}`, `expand version: ${String(got?.["document_version"])}`, `get_regulation version: ${String(want?.["document_version"])}`],
+          });
+        }
+      }
+    }
+  }
+
+  // A child the corpus LISTS but has no version of for the date resolves to
+  // nothing, and a null record with no label is exactly what a reference to a
+  // record the corpus does not hold looks like. So whenever expand_regulation
+  // embeds such a child, the reply must say there is a gap and for which date.
+  // Observed from outside: a regulation child that comes back with no record
+  // under as_of although get_regulation serves it without one. Unlike the
+  // substitution check above this does not depend on the parent having no
+  // history - the parent can be fully recorded and the child not.
+  const gapNames = (note: unknown, asOf: string): boolean =>
+    typeof note === "string" && note.trim() !== "" && note.includes(asOf);
+  let gapsProbed = 0;
+  for (const id of ids.slice(0, 8)) {
+    for (const asOf of ladder) {
+      if (gapsProbed >= 12) break;
+      const r = await s.call("expand_regulation", { id, as_of: asOf, detail: "full" });
+      const body = asRecord(r.json);
+      if (r.isError || body === null) continue;
+      const kids = (body["children"] ?? []) as Array<{ type?: string; id?: string; record?: unknown }>;
+      const gaps: string[] = [];
+      for (const kid of kids.filter((k) => k.type === "regulation" && typeof k.id === "string" && (k.record ?? null) === null).slice(0, 3)) {
+        const held = await s.call("get_regulation", { id: kid.id });
+        if (!held.isError) gaps.push(String(kid.id));
+      }
+      if (gaps.length === 0) continue;
+      gapsProbed++;
+      bound++;
+      if (!gapNames(body["as_of_note"], asOf)) {
+        findings.push({
+          id: "I11/expand_regulation-gap",
+          severity: "fatal",
+          summary:
+            "expand_regulation embedded a child the corpus holds but has no version of for the date as a bare id, and said nothing - it reads as a dangling reference rather than a gap in the recorded history.",
+          evidence: [`parent ${id}`, `as_of ${asOf}`, `children with no version: ${gaps.join(", ")}`, `reply keys: ${Object.keys(body).join(", ")}`],
+        });
+      }
+    }
+  }
+
+  if (bound === 0) {
+    return {
+      id: "I11",
+      title,
+      applicable: false,
+      findings: [
+        ...findings,
+        {
+          id: "I11/no-record-without-history",
+          severity: "info",
+          summary: "No record was observed that is served in full under every probe date and never differs from its current text, so as_of substitution could not be tested.",
+          evidence: [`${ids.length} record(s) sampled`, `probe dates ${ladder.join(", ")}`],
+        },
+      ],
+    };
+  }
+  return { id: "I11", title, applicable: true, findings };
+}
+
+// ============================================================================
+// I12 — a decline on a partly held document says so
+// ============================================================================
+
+/**
+ * A corpus holds some provisions of a document, not all of them. "No record for
+ * <id>" and "Nothing in this corpus is numbered 99" are both TRUE and both read
+ * as "there is no Article 99" - absence from the corpus taken for absence from
+ * the law, which is the one error a validator cannot afford.
+ *
+ * So for every document the registry declares partial (the `holdings` the server
+ * itself publishes), an id in that document that does not exist must come back
+ * as a miss that says the document is held in part, on every tool that serves a
+ * regulation by id, and a citation naming the document that the corpus cannot
+ * place must say so in its note. The probes are built from the server's own
+ * output: a sampled record gives the id prefix the document lives under, and an
+ * absent provision is made up under it (and checked to really be absent).
+ *
+ * Only a DECLARED partial binds. An undeclared document is not claimed to be
+ * partial or whole, so the invariant has nothing to hold the server to there;
+ * it reports `applicable: false` rather than passing when no document declares.
+ */
+export async function declineOnPartialDocumentSaysSo(s: Session): Promise<InvariantResult> {
+  const findings: Finding[] = [];
+  const id = "I12";
+  const title = "A decline on a partly held document says so";
+
+  type Holding = { document_id?: unknown; title?: unknown; partial?: unknown };
+  const info = await s.call("get_corpus_info", {});
+  const holdings = ((info.json as { holdings?: Holding[] } | null)?.holdings ?? []).filter(
+    (h): h is Holding & { document_id: string } => typeof h.document_id === "string" && h.partial === true,
+  );
+  if (holdings.length === 0) return { id, title, applicable: false, findings };
+
+  const SAYS_PARTIAL = /\b(?:only part|in part|partly|partial(?:ly)?)\b/i;
+  type Row = { id?: string; document_id?: string };
+  const rowsOf = (json: unknown): Row[] => ((json as { results?: Row[] } | null)?.results ?? []) as Row[];
+
+  // One sampled record per partial document: the id prefix it lives under.
+  const prefixOf = new Map<string, string>();
+  const queries = ["default", "estimation", "risk", "data", "model", "validation"];
+  for (const h of holdings) {
+    const words = typeof h.title === "string" ? h.title.split(/[^A-Za-z0-9]+/).filter((w) => w.length > 3) : [];
+    for (const q of [...queries, ...words.slice(0, 4)]) {
+      if (prefixOf.has(h.document_id)) break;
+      const t = await s.call("search_regulation", { query: q, limit: 50 });
+      const row = rowsOf(t.json).find((r) => r.document_id === h.document_id && typeof r.id === "string");
+      const segment = row?.id?.replace(/^regulation:\/\//, "").split("/")[0];
+      if (segment !== undefined && segment !== "") prefixOf.set(h.document_id, segment);
+    }
+  }
+
+  let bound = 0;
+  for (const h of holdings) {
+    const segment = prefixOf.get(h.document_id);
+    if (segment === undefined) {
+      findings.push({
+        id: "I12/unsampled",
+        severity: "warn",
+        summary: "A document declared partial could not be sampled through search_regulation, so its misses were not probed.",
+        evidence: [`document ${h.document_id}`],
+      });
+      continue;
+    }
+    const absent = `regulation://${segment}/i12-absent-provision`;
+    const direct = await s.call("get_regulation", { id: absent });
+    if (!direct.isError) continue; // it exists after all; nothing to decline
+    const probes: Array<[string, Record<string, unknown>]> = [
+      ["get_regulation", { id: absent }],
+      ["expand_regulation", { id: absent }],
+      ["get_regulation_tree", { id: absent }],
+    ];
+    for (const [tool, args] of probes) {
+      const r = await s.call(tool, args);
+      bound++;
+      if (!r.isError || !SAYS_PARTIAL.test(r.text)) {
+        findings.push({
+          id: `I12/${tool}`,
+          severity: "fatal",
+          summary: `${tool} declined an id in a document the registry declares partly held without saying it is held in part - the miss reads as "no such provision".`,
+          evidence: [`document ${h.document_id}`, `id ${absent}`, `isError ${String(r.isError)}`, `message: ${r.text.slice(0, 200)}`],
+        });
+      }
+    }
+
+    // The same boundary through the citation resolver: a provision number that
+    // exists nowhere, scoped to the document by its own id.
+    const cite = await s.call("resolve_citation", { text: `${h.document_id} 99999` });
+    const body = cite.json as { match?: unknown; coverage_note?: unknown } | null;
+    const note = typeof body?.coverage_note === "string" ? body.coverage_note : "";
+    if (body !== null && body.match === null && /Nothing in this corpus is numbered/.test(note)) {
+      bound++;
+      if (!SAYS_PARTIAL.test(note)) {
+        findings.push({
+          id: "I12/resolve_citation",
+          severity: "fatal",
+          summary: "resolve_citation could not place a provision of a document the registry declares partly held and its note does not say the document is held in part.",
+          evidence: [`document ${h.document_id}`, `note: ${note.slice(0, 200)}`],
+        });
+      }
+    }
+  }
+
+  return { id, title, applicable: bound > 0, findings };
+}
+
+// ============================================================================
+// I13 - a weak best match is declared
+// ============================================================================
+
+/**
+ * "Showing 20 of N matches" for a concept the corpus does not hold: a page of
+ * hits on the commonest query terms, with nothing to say that no hit covers the
+ * distinctive ones. The ranking knows how many query terms each hit matched; the
+ * belief at stake is "the top of this list answers my question".
+ *
+ * The probe is built so that the truth is known WITHOUT trusting the reply: three
+ * invented words that occur in no record (checked - the same three alone must
+ * match nothing) plus one common word the surface does hold. No record can
+ * cover more than one of the four terms, so the envelope must say there are four
+ * meaningful terms, must not claim a best coverage above one, must not decorate a
+ * row with more than one, and must carry a notice that the topic may not be in
+ * this corpus. It does not ask what the server's coverage IS on a real query -
+ * only that it never overstates a match whose truth is fixed by construction.
+ *
+ * Applicable only where a surface holds a record matching one of the seed words;
+ * an empty corpus has nothing to say a weak match about.
+ */
+export async function weakBestMatchIsDeclared(s: Session): Promise<InvariantResult> {
+  const id = "I13";
+  const title = "A weak best match is declared";
+  const findings: Finding[] = [];
+  const INVENTED = ["zqxvjk", "wkvzqp", "qjxzwm"];
+  const SEEDS = ["default", "risk", "model", "data", "validation", "estimation", "test", "check", "area"];
+  const TOOLS = ["search_regulation", "search_checks", "search_tests", "search_playbooks"];
+  type Body = { total_matches?: unknown; query_tokens?: unknown; best_coverage?: unknown; notice?: unknown; results?: unknown };
+  const bodyOf = (t: { json: unknown }): Body => (t.json ?? {}) as Body;
+
+  let bound = 0;
+  for (const tool of TOOLS) {
+    // The invented words alone must match nothing, or the premise is false and
+    // nothing can be concluded from this surface.
+    const alone = await s.call(tool, { query: INVENTED.join(" "), limit: 1 });
+    if (alone.isError || bodyOf(alone).total_matches !== 0) continue;
+
+    let query: string | undefined;
+    let probe: Awaited<ReturnType<Session["call"]>> | undefined;
+    for (const word of SEEDS) {
+      const q = `${INVENTED.join(" ")} ${word}`;
+      const t = await s.call(tool, { query: q, limit: 20 });
+      if (!t.isError && typeof bodyOf(t).total_matches === "number" && (bodyOf(t).total_matches as number) > 0) {
+        query = q;
+        probe = t;
+        break;
+      }
+    }
+    if (query === undefined || probe === undefined) continue;
+    bound++;
+
+    const b = bodyOf(probe);
+    const rows = Array.isArray(b.results) ? (b.results as Array<Record<string, unknown>>) : [];
+    const problems: string[] = [];
+    if (b.query_tokens !== 4) problems.push(`query_tokens is ${JSON.stringify(b.query_tokens)}, the query holds 4 meaningful terms`);
+    if (!Number.isInteger(b.best_coverage)) problems.push(`best_coverage is ${JSON.stringify(b.best_coverage)}, not an integer`);
+    else if ((b.best_coverage as number) > 1) problems.push(`best_coverage is ${String(b.best_coverage)} but no record can match more than 1 of the 4 terms`);
+    const overstated = rows.filter((r) => typeof r["coverage"] === "number" && (r["coverage"] as number) > 1);
+    if (overstated.length > 0) problems.push(`${overstated.length} row(s) claim a coverage above 1`);
+    if (rows.length > 0 && rows.every((r) => !("coverage" in r))) problems.push("rows carry no coverage");
+    const notice = typeof b.notice === "string" ? b.notice : "";
+    if (!/may not be in this corpus/i.test(notice) || !/not about the law/i.test(notice)) {
+      problems.push("the notice does not say the topic may not be in this corpus, and that absence is not absence from the law");
+    }
+    // A single-term query has no "some of the terms" to be short of: a whole word
+    // and a stem (placed only on partial-word matches, coverage 0) alike must not
+    // be told the topic may not be in the corpus.
+    for (const word of SEEDS.flatMap((w) => [w, w.slice(0, Math.max(3, w.length - 2))])) {
+      const one = await s.call(tool, { query: word, limit: 5 });
+      if (one.isError) continue;
+      const ob = bodyOf(one);
+      const n = typeof ob.notice === "string" ? ob.notice : "";
+      if (typeof ob.total_matches === "number" && ob.total_matches > 0 && /meaningful terms|partial-word/i.test(n)) {
+        problems.push(`the single-term query ${JSON.stringify(word)} (${String(ob.total_matches)} matches) carries a weak-match notice`);
+      }
+    }
+    if (problems.length > 0) {
+      findings.push({
+        id: `I13/${tool}`,
+        severity: "fatal",
+        summary: `${tool} returned a page whose best hit matches 1 of 4 query terms without declaring it - a client reads the top of the list as an answer.`,
+        evidence: [`query ${JSON.stringify(query)}`, `total_matches ${String(b.total_matches)}`, ...problems, `notice: ${notice.slice(0, 200) || "(none)"}`],
+      });
+    }
+  }
+  return { id, title, applicable: bound > 0, findings };
+}
+
+// ============================================================================
+// I14 - placeholders are marked
+// ============================================================================
+
+/**
+ * A guideline written before a standard was adopted names it "Regulation (EU)
+ * xx/xx [...]". Served verbatim that reads as a citation, but it cites nothing,
+ * and the instructions' rule ("say such references are unresolved") only works
+ * if the model notices the shape unprompted. So a record whose served text names
+ * an instrument by a placeholder number must come back flagged, on both tools
+ * that serve a record by id: `pre_adoption_placeholders` (the spans) and a
+ * `notice` saying the placeholder is not a citation. Search rows are not asked
+ * to carry it - `detail: 'full'` rows are the canonical record schema.
+ *
+ * The candidates are found WITHOUT trusting the server's own scan, which would
+ * make the invariant agree with itself: a deliberately looser pattern (an
+ * instrument kind within a few words of an act number with a stand-in half) is
+ * run over the text the server serves. Candidates come from the corpus file's
+ * records when the session was opened on one (the text is read locally, never
+ * stored), and from the server's own search output otherwise. The converse is
+ * checked on sampled records the looser pattern does not match: a flag there
+ * says a real citation is not one, which is as wrong as the omission.
+ *
+ * Applicable only when some served record carries a placeholder.
+ */
+export async function placeholdersAreMarked(s: Session): Promise<InvariantResult> {
+  const id = "I14";
+  const title = "Placeholders are marked";
+  const findings: Finding[] = [];
+
+  // Looser than the server's scan by construction: it asks only for an
+  // instrument word shortly before an act number with a stand-in half.
+  const STAND_IN = String.raw`(?:[xX]{2,4}|(?:19|20)(?:\d[xX]|[xX]{1,2})|\[\s*(?:\.{2,}|…)\s*\])`;
+  const LOOSE = new RegExp(
+    String.raw`\b(?:regulation|directive|decision|guideline)\b[^;\n]{0,40}?(?:${STAND_IN}\s*\/\s*(?:${STAND_IN}|\d{1,4})|\d{1,4}\s*\/\s*${STAND_IN})`,
+    "i",
+  );
+  const asRecord = (json: unknown): Record<string, unknown> | null =>
+    json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : null;
+  type Row = { id?: string };
+  const rowsOf = (json: unknown): Row[] =>
+    ((json as { results?: Row[] } | null)?.results ?? []).filter((r) => typeof r.id === "string");
+
+  // Candidate ids: records of the corpus file whose text the loose pattern
+  // matches, plus whatever search surfaces for the obvious queries.
+  const candidates: string[] = [];
+  if (s.corpusFile !== undefined) {
+    try {
+      const parsed = JSON.parse(readFileSync(s.corpusFile, "utf8")) as { regulation?: Array<{ id?: unknown; text?: unknown }> };
+      for (const r of parsed.regulation ?? []) {
+        if (typeof r.id === "string" && typeof r.text === "string" && LOOSE.test(r.text)) candidates.push(r.id);
+      }
+    } catch {
+      // No readable file: fall back to what search surfaces.
+    }
+  }
+  const sampled: string[] = [];
+  for (const q of ["xx/xx", "regulation xx", "placeholder", "default", "risk", "estimation", "data", "model"]) {
+    const t = await s.call("search_regulation", { query: q, limit: 10 });
+    for (const row of rowsOf(t.json)) {
+      if (row.id !== undefined && !sampled.includes(row.id)) sampled.push(row.id);
+    }
+  }
+
+  let bound = 0;
+  let falseFlags = 0;
+  const checked = new Set<string>();
+  for (const rid of [...candidates.slice(0, 12), ...sampled.slice(0, 40)]) {
+    if (checked.has(rid)) continue;
+    checked.add(rid);
+    for (const tool of ["get_regulation", "expand_regulation"] as const) {
+      const r = await s.call(tool, { id: rid });
+      const body = asRecord(r.json);
+      if (r.isError || body === null || typeof body["text"] !== "string") continue;
+      const has = LOOSE.test(body["text"]);
+      const spans = body["pre_adoption_placeholders"];
+      if (!has) {
+        if ("pre_adoption_placeholders" in body && falseFlags++ < 3) {
+          findings.push({
+            id: `I14/false-flag/${tool}`,
+            severity: "fatal",
+            summary: `${tool} flagged a record whose text names no instrument by a placeholder number - a real citation is being called not-a-citation.`,
+            evidence: [`id ${rid}`, `spans ${JSON.stringify(spans)}`],
+          });
+        }
+        continue;
+      }
+      bound++;
+      const problems: string[] = [];
+      if (!Array.isArray(spans) || spans.length === 0) problems.push("pre_adoption_placeholders is missing or empty");
+      else {
+        if (spans.length > 3) problems.push(`${spans.length} spans, at most 3 are allowed`);
+        if (spans.some((x) => typeof x !== "string" || x.length > 120)) problems.push("a span is not a string of at most 120 characters");
+      }
+      const notice = typeof body["notice"] === "string" ? body["notice"] : "";
+      if (!/not a citation/i.test(notice)) problems.push("notice does not say the placeholder is not a citation");
+      if (problems.length > 0) {
+        findings.push({
+          id: `I14/${tool}`,
+          severity: "fatal",
+          summary: `${tool} served a record whose text names an instrument by a pre-adoption placeholder without marking it - the placeholder reads as a citation.`,
+          evidence: [`id ${rid}`, ...problems, `notice: ${notice.slice(0, 200) || "(none)"}`],
+        });
+      }
+    }
+  }
+  return { id, title, applicable: bound > 0, findings };
+}
+
 export const ALL = [
   envelopeIsJson,
   describedIdsResolve,
@@ -1053,4 +2125,8 @@ export const ALL = [
   outputMatchesDeclaredSchema,
   humanRegisterCitationsResolve,
   declinesAreNeverEmpty,
+  asOfIsNeverSilentlySubstituted,
+  declineOnPartialDocumentSaysSo,
+  weakBestMatchIsDeclared,
+  placeholdersAreMarked,
 ] as const;

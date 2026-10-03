@@ -5,18 +5,23 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { adapters } from "../adapters.ts";
+import { MAX_PLACEHOLDER_SPANS, MAX_PLACEHOLDER_SPAN_CHARS, withPlaceholderFlag } from "../placeholders.ts";
 import type { Regulation } from "../schema.ts";
 import { ProvisionKindSchema, RegulationSchema, regulationIdSchema } from "../schema.ts";
-import { rankedSearch, regulationSearchFields } from "../search.ts";
+import { regulationSearchFields } from "../search.ts";
 import {
+  AS_OF_MISS_CONTEXT,
   READ_ONLY_HINTS,
   lenient,
   miss,
   ok,
-  paginate,
+  rankedSearchResult,
+  resolveRegulation,
+  rowCoverageShape,
   searchInputShape,
   searchOutputShape,
-  searchResult,
+  unknownRegulationMiss,
+  withAsOfNote,
 } from "./shared.ts";
 
 // Concise projection served by search_regulation (detail: "concise").
@@ -34,6 +39,7 @@ const ConciseRegulationHit = z.object({
   // it states a requirement or guidance.
   kind: ProvisionKindSchema.optional(),
   obligation: z.enum(["must", "should", "may", "none"]).optional(),
+  ...rowCoverageShape,
 }).passthrough();
 
 /**
@@ -96,24 +102,28 @@ export function registerRegulationTools(server: McpServer): void {
     },
     async ({ query, limit, offset, detail }) => {
       const records = await adapters.regulation.search(query);
-      if (detail === "full") return searchResult(paginate(records.map(capCommentary), limit, offset));
-      // The adapter interface returns records only — recompute matches locally
-      // (cheap at result sizes) to attach the excerpt to each concise hit.
-      const matches = rankedSearch(records, query, regulationSearchFields(query), records.length);
-      const excerpts = new Map(matches.map((m) => [m.record.id, m.matched.excerpt]));
-      const concise = records.map((r) => {
-        const excerpt = excerpts.get(r.id);
-        return {
-          id: r.id,
-          citation: r.citation,
-          ...(excerpt !== undefined ? { matched_excerpt: excerpt } : {}),
-          document_id: r.document_id,
-          ...(r.parent !== undefined ? { parent: r.parent } : {}),
-          ...(r.kind !== undefined ? { kind: r.kind } : {}),
-          ...(r.obligation !== undefined ? { obligation: r.obligation } : {}),
-        };
+      // The excerpt comes from the same local ranking that supplies `coverage`.
+      return rankedSearchResult({
+        records,
+        query,
+        fields: regulationSearchFields(query),
+        detail,
+        limit,
+        offset,
+        full: capCommentary,
+        concise: (r, match) => {
+          const excerpt = match?.matched.excerpt;
+          return {
+            id: r.id,
+            citation: r.citation,
+            ...(excerpt !== undefined ? { matched_excerpt: excerpt } : {}),
+            document_id: r.document_id,
+            ...(r.parent !== undefined ? { parent: r.parent } : {}),
+            ...(r.kind !== undefined ? { kind: r.kind } : {}),
+            ...(r.obligation !== undefined ? { obligation: r.obligation } : {}),
+          };
+        },
       });
-      return searchResult(paginate(concise, limit, offset));
     },
   );
 
@@ -124,31 +134,58 @@ export function registerRegulationTools(server: McpServer): void {
       description:
         "Fetch one regulation paragraph by URI. Returns the full record: citation, verbatim " +
         "text, and attached commentary (supervisor Q&A, interpretive letters). Latest version " +
-        "by default; pass as_of (ISO date) for the text in force on that date — backends " +
-        "without history for the id serve the current text, and an as_of predating every " +
-        "recorded version is a miss, never current text as historical. Unknown ids return " +
-        "isError with a pointer. Use get_referrers to find operationalising checks/playbooks.",
+        "by default; pass as_of (ISO date) for the text in force on that date, or the current text " +
+        "with an as_of_note where no version is recorded for it. A pre-adoption placeholder act " +
+        "number is flagged: pre_adoption_placeholders + notice. An as_of predating every recorded " +
+        "version, or an unknown id, is an isError miss. get_referrers finds operationalising checks/playbooks.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(
           "A regulation id from search_regulation or resolve_citation — shape regulation://{document}/{provision}",
         ),
         as_of: z.string().date().optional().describe("ISO date, e.g. 2019-03-01"),
       },
-      outputSchema: RegulationSchema.passthrough(),
+      // Open at the declaration site only: the canonical RegulationSchema stays
+      // closed. `as_of_note` is published so a caller reading the schema learns
+      // that a hit under as_of can carry a caveat about what it is. The placeholder
+      // flag is declared here too and NOT on the `detail: 'full'` search rows above:
+      // those rows are the canonical record schema served as it stands, and the flag
+      // is one get_regulation away.
+      outputSchema: RegulationSchema.extend({
+        as_of_note: z
+          .string()
+          .optional()
+          .describe(
+            "Present only when as_of was given and the corpus records no version for that date, so the " +
+              "current text was served. Says which version (document_version) and that it must not be " +
+              "presented as the historical text.",
+          ),
+        pre_adoption_placeholders: z
+          .array(z.string().max(MAX_PLACEHOLDER_SPAN_CHARS))
+          .max(MAX_PLACEHOLDER_SPANS)
+          .optional()
+          .describe(
+            "Present only when the text names an instrument by a pre-adoption placeholder number " +
+              "(Regulation (EU) xx/xx): the matched spans. A placeholder is not a citation.",
+          ),
+        notice: z
+          .string()
+          .optional()
+          .describe("Present with pre_adoption_placeholders: what the placeholder is and is not."),
+      }).passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async ({ id, as_of }) => {
-      const record = await adapters.regulation.get(id, as_of);
-      if (record !== null) return ok(record);
+      const { record, note } = await resolveRegulation(id, as_of);
+      if (record !== null) return ok(withAsOfNote(withPlaceholderFlag(record), note));
       if (as_of !== undefined && (await adapters.regulation.get(id)) !== null) {
         return miss(
           `No version of ${id} was in force on ${as_of} according to this corpus's history. ` +
             "Historical coverage rule: as_of resolves against recorded versions only — a date " +
-            "predating every recorded version returns nothing (backends without history for an " +
-            "id always serve the current text). Retry without as_of for the current text.",
+            `predating every recorded version returns nothing. ${AS_OF_MISS_CONTEXT} ` +
+            "Retry without as_of for the current text.",
         );
       }
-      return miss(`No record for ${id}. Verify the id with search_regulation or list_review_areas.`);
+      return unknownRegulationMiss(id);
     },
   );
 }

@@ -78,6 +78,13 @@
         },
         "notes": {
           "type": "string"
+        },
+        "coverage": {
+          "type": "string",
+          "enum": [
+            "full",
+            "partial"
+          ]
         }
       },
       "required": [

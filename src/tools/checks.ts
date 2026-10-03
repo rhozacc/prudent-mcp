@@ -6,16 +6,17 @@ import { z } from "zod";
 
 import { adapters } from "../adapters.ts";
 import { CheckSchema, checkIdSchema, regulationIdSchema } from "../schema.ts";
+import { checkSearchFields } from "../search.ts";
 import {
   READ_ONLY_HINTS,
   firstSentence,
   lenient,
   miss,
   ok,
-  paginate,
+  rankedSearchResult,
+  rowCoverageShape,
   searchInputShape,
   searchOutputShape,
-  searchResult,
 } from "./shared.ts";
 
 // Concise projection served by search_checks (detail: "concise").
@@ -24,6 +25,7 @@ const ConciseCheckHit = z.object({
   name: z.string(),
   expectation_first_sentence: z.string(),
   derived_from: z.array(regulationIdSchema).describe("Regulations this check operationalises"),
+  ...rowCoverageShape,
 }).passthrough();
 
 export function registerCheckTools(server: McpServer): void {
@@ -43,14 +45,20 @@ export function registerCheckTools(server: McpServer): void {
     },
     async ({ query, limit, offset, detail }) => {
       const records = await adapters.check.search(query);
-      if (detail === "full") return searchResult(paginate(records, limit, offset));
-      const concise = records.map((c) => ({
-        id: c.id,
-        name: c.name,
-        expectation_first_sentence: firstSentence(c.expectation),
-        derived_from: c.derived_from,
-      }));
-      return searchResult(paginate(concise, limit, offset));
+      return rankedSearchResult({
+        records,
+        query,
+        fields: checkSearchFields,
+        detail,
+        limit,
+        offset,
+        concise: (c) => ({
+          id: c.id,
+          name: c.name,
+          expectation_first_sentence: firstSentence(c.expectation),
+          derived_from: c.derived_from,
+        }),
+      });
     },
   );
 

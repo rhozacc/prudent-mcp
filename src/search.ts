@@ -57,7 +57,8 @@ export interface SearchMatch<T> {
   record: T;
   score: number;
   /**
-   * How many of the query's distinct tokens this record matched at all. The
+   * How many of the query's distinct tokens this record matched as WHOLE words
+   * (a record placed only on partial-word matches has coverage 0). The
    * primary sort key, and worth surfacing: `coverage < query_tokens` tells a
    * caller the hit is partial before it reads the excerpt and assumes
    * otherwise.
@@ -122,6 +123,17 @@ export function tokenize(query: string): string[] {
   // A query made entirely of stopwords ("the of") is still a query; fall back
   // rather than silently returning nothing.
   return kept.length > 0 ? kept : raw;
+}
+
+/**
+ * How many DISTINCT meaningful terms the query holds - the denominator
+ * `coverage` is read against. Tokens are not deduplicated by `tokenize` (a
+ * repeated word scores twice), but a record can cover a word only once, so
+ * counting the repeat would make a query that says "rate rate" look as if every
+ * hit missed half of it.
+ */
+export function distinctQueryTokens(query: string): number {
+  return new Set(tokenize(query)).size;
 }
 
 const isAlphanumeric = (ch: string): boolean => /[a-z0-9]/.test(ch);
@@ -303,6 +315,7 @@ export function rankedSearch<T>(
 ): SearchMatch<T>[] {
   const tokens = tokenize(query);
   if (tokens.length === 0) return [];
+  const distinct = new Set(tokens).size;
 
   const scored: Array<SearchMatch<T> & { order: number }> = [];
 
@@ -356,7 +369,7 @@ export function rankedSearch<T>(
         record,
         score: total,
         coverage: covered.size,
-        query_tokens: tokens.length,
+        query_tokens: distinct,
         matched: {
           field: best.field,
           excerpt: makeExcerpt(best.text, best.hits),

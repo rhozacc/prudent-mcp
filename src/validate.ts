@@ -35,6 +35,8 @@
  * Staleness (a current source whose `verified` is older than
  * STALE_AFTER_DAYS) is advisory, not fatal — see `corpusWarnings`.
  */
+import { holdingsWarnings } from "./holdings.ts";
+import { preAdoptionPlaceholders } from "./placeholders.ts";
 import type {
   Check,
   Playbook,
@@ -336,10 +338,31 @@ export function validateCorpus(corpus: CorpusInput, now: Date = new Date()): str
 export function corpusWarnings(corpus: CorpusInput, now: Date = new Date()): string[] {
   const sources = corpus.sources ?? [];
   const byId = new Map(sources.map((s) => [s.id, s]));
-  return staleSourceIds(sources, now).map((id) => {
+  const stale = staleSourceIds(sources, now).map((id) => {
     const s = byId.get(id)!;
     return `${id}: verified ${s.verified} is older than ${STALE_AFTER_DAYS} days (stale)`;
   });
+  return [...stale, ...holdingsWarnings(corpus.regulation, sources)];
+}
+
+/**
+ * Informational findings - neither fatal nor a warning. Nothing here asks for a
+ * maintenance run: a pre-adoption placeholder is how a guideline written before
+ * a standard was adopted legitimately names it, and the server already flags the
+ * record when it serves it. The count is for the person who maintains the corpus,
+ * who may want to know which documents still await a numbered act.
+ */
+export function corpusInfo(corpus: CorpusInput): string[] {
+  const lines: string[] = [];
+  const carrying = corpus.regulation.filter((r) => preAdoptionPlaceholders(r.text) !== null);
+  if (carrying.length > 0) {
+    const documents = new Set(carrying.map((r) => r.document_id)).size;
+    lines.push(
+      `${carrying.length} regulation record(s) in ${documents} document(s) name an instrument by a pre-adoption ` +
+        "placeholder number; the server flags each one when served (pre_adoption_placeholders)",
+    );
+  }
+  return lines;
 }
 
 /**

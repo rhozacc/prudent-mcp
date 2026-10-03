@@ -18,7 +18,7 @@ Ranked, field-scoped search across the catalog of validation playbooks: area and
 | `limit` / `offset` | `number` | Optional paging (default 20 per page) |
 | `detail` | `"concise" \| "full"` | Optional, default `"concise"` |
 
-**Returns:** the shared envelope `{ results, returned, total_matches, offset, truncated, next_offset }`. Concise results are `{ id, area, subarea, phase_count }`; `detail: "full"` serves complete records. Use `expand_playbook` for phases with references resolved inline.
+**Returns:** the shared envelope `{ results, returned, total_matches, offset, truncated, next_offset, query_tokens, best_coverage, notice }`. Concise results are `{ id, area, subarea, phase_count }`; `detail: "full"` serves complete records. Use `expand_playbook` for phases with references resolved inline. Concise rows also carry `coverage` — how many of the query's `query_tokens` meaningful terms that row matched; `best_coverage` is the highest of any row across the whole ranked set (page 2 still reports it), and `notice` says so when the best match covers fewer than half the terms. `detail: "full"` records are not decorated; the envelope fields still appear.
 
 **Example:**
 ```ts

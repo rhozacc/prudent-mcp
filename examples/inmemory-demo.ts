@@ -14,6 +14,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 
 import { adapters } from "../src/adapters.ts";
 import type {
+  AsOfResolution,
   CheckAdapter,
   MetaAdapter,
   PlaybookAdapter,
@@ -22,6 +23,7 @@ import type {
   TestAdapter,
 } from "../src/adapters.ts";
 import { resolveCitationDetailed } from "../src/file-adapter.ts";
+import { computeHoldings } from "../src/holdings.ts";
 import { computeReferrers } from "../src/referrers.ts";
 import {
   checkSearchFields,
@@ -390,6 +392,10 @@ const SOURCES: Record<SourceId, Source> = {
     published: "2013-06-26",
     effective_from: "2014-01-01",
     verified: daysAgo(3),
+    // The seed holds a handful of articles, so the registry says so: this is
+    // what makes a miss on an unseeded article read as absent from the corpus
+    // rather than from the law (and what binds eval I12 on the demo).
+    coverage: "partial",
     milestones: [],
     url: "https://eur-lex.europa.eu/eli/reg/2013/575/oj",
   },
@@ -402,6 +408,7 @@ const SOURCES: Record<SourceId, Source> = {
     status: "current",
     published: "2017-11-20",
     effective_from: "2021-01-01",
+    coverage: "full",
     // Deliberately stale — exercises stale_sources and the validate warning.
     verified: daysAgo(45),
     milestones: [],
@@ -455,6 +462,25 @@ const SOURCES: Record<SourceId, Source> = {
 // Adapter implementations
 // ============================================================================
 
+// The one as-of selection, reporting the basis it served on. `get` delegates to
+// it, so the record a tool qualifies with an as_of_note is the record `get`
+// would have returned.
+const resolveRegulationAsOf = async (id: RegulationId, asOf: string): Promise<AsOfResolution> => {
+  const history = HISTORICAL_REGULATIONS[id];
+  if (history === undefined) {
+    // No recorded versions for this id: the current text is all the demo has,
+    // and `basis: "current"` is how the tool says it is not the text of `asOf`.
+    const current = REGULATIONS[id] ?? null;
+    return current === null ? { record: null } : { record: current, basis: "current" };
+  }
+  let chosen: Regulation | null = null;
+  for (const { effectiveFrom, reg } of history) {
+    if (effectiveFrom <= asOf) chosen = reg;
+    else break;
+  }
+  return chosen === null ? { record: null } : { record: chosen, basis: "history" };
+};
+
 const inMemoryRegulation: RegulationAdapter = {
   async search(query) {
     return rankedSearch(Object.values(REGULATIONS), query, regulationSearchFields(query)).map(
@@ -462,16 +488,10 @@ const inMemoryRegulation: RegulationAdapter = {
     );
   },
   async get(id, asOf) {
-    if (asOf && HISTORICAL_REGULATIONS[id]) {
-      let chosen: Regulation | null = null;
-      for (const { effectiveFrom, reg } of HISTORICAL_REGULATIONS[id]!) {
-        if (effectiveFrom <= asOf) chosen = reg;
-        else break;
-      }
-      return chosen;
-    }
-    return REGULATIONS[id] ?? null;
+    if (!asOf) return REGULATIONS[id] ?? null;
+    return (await resolveRegulationAsOf(id, asOf)).record;
   },
+  resolveAsOf: resolveRegulationAsOf,
   async list() {
     return Object.values(REGULATIONS);
   },
@@ -537,6 +557,7 @@ const inMemoryMeta: MetaAdapter = {
       },
       coverage: ["CRR", "EBA-GL-2017-16"],
       stale_sources: staleSourceIds(Object.values(SOURCES)),
+      holdings: computeHoldings(Object.values(REGULATIONS), Object.values(SOURCES)),
     };
   },
   async referrers(id) {
@@ -553,7 +574,11 @@ const inMemoryMeta: MetaAdapter = {
   async resolveCitation(text) {
     // Same deterministic matcher as the file adapter — including its refusals,
     // so the demo declines on the same citations a real corpus declines on.
-    return resolveCitationDetailed(Object.values(REGULATIONS), text);
+    return resolveCitationDetailed(
+      Object.values(REGULATIONS),
+      text,
+      computeHoldings(Object.values(REGULATIONS), Object.values(SOURCES)),
+    );
   },
   async taxonomy() {
     return [...REVIEW_AREAS];

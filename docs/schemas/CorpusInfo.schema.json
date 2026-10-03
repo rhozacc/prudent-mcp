@@ -36,6 +36,35 @@
             "pattern": "^source:\\/\\/.+"
           },
           "default": []
+        },
+        "holdings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "document_id": {
+                "type": "string"
+              },
+              "framework": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "records": {
+                "type": "integer"
+              },
+              "partial": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "document_id",
+              "framework",
+              "records"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [

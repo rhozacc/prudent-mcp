@@ -107,9 +107,13 @@ In the file-adapter format, history lives under the optional top-level `regulati
 | Situation | Result |
 |---|---|
 | no `as_of` | the current record (or `null` if the id is unknown) |
-| `as_of`, no history for the id | the current record — the only version the corpus knows; corpora without `regulation_history` behave exactly as before |
-| `as_of`, history present | the last entry with `effective_from <= as_of` (boundary dates inclusive) |
+| `as_of`, no history for the id | the current record — the only version the corpus knows — **flagged**: the adapter reports `basis: "current"` and the tools attach an `as_of_note`. The exception is a date before the source document existed, which is a miss (see below) |
+| `as_of`, history present | the last entry with `effective_from <= as_of` (boundary dates inclusive), `basis: "history"`, no note |
 | `as_of` predates every entry | `null` — the tool layer explains the rule in its miss message |
+
+"The only version the corpus knows" is not "the version in force then", and the record alone cannot say which it is, so a hit served from current text under a past date says so in an additive `as_of_note` (which names the `document_version` served and tells the reader not to present it as the historical text). The note is absent without `as_of`, when history covers the date, and on a miss. The adapter side of this is the optional `resolveAsOf` method — see [Adapters](../adapters/#saying-which-basis-an-as-of-record-was-served-on).
+
+For an id with no history, the registry still bounds the answer: an `as_of` earlier than the earliest `published` (else `effective_from`) of any source with that record's `document_id` is a miss, because the document did not exist yet. A source that carries neither date makes no claim, and the id behaves as before.
 
 ---
 
@@ -375,6 +379,17 @@ The registry of source documents the corpus derives from — the regulatory-cont
 | `milestones` | `{date, event}[]` | no, default `[]` | Upcoming regulatory dates, kept chronological — the first entry is served as `next_milestone`. Dates are display strings (`"2026-10-19"`, `"Q4 2026"`), never parsed. |
 | `url` | `string` | no | Publisher page. |
 | `notes` | `string` | no | Free-form. |
+| `coverage` | `"full" \| "partial"` | no | How much of the document the corpus holds. **Absent means not declared** — never defaulted. See [Declaring coverage](#declaring-coverage). |
+
+### Declaring coverage
+
+`get_corpus_info.coverage` lists documents ("CRR"), which reads as the whole regulation; a corpus typically holds a subset of its articles. The registry is where that is said, with the optional `coverage` field on the document's current source:
+
+- `"partial"` — the corpus holds only part of the document. A miss on that document says the provision is absent from the corpus, not necessarily from the law, and `resolve_citation` says the same on a decline.
+- `"full"` — the document is held whole. A miss says the id is probably mistyped.
+- *absent* — nobody has declared it. The servers say so ("does not declare that as the whole") rather than assume either; absence of a declaration is a third state, not a synonym for `full`.
+
+Declare it on the **current** source: superseded and pending sources describe other editions and do not speak for the held records. If a document's current sources disagree, partial wins, because reading a partly held document as whole is the error that tells a caller a missing provision does not exist. The server publishes the result as `get_corpus_info.holdings` (record count per document, plus `partial` when declared), computed at serve time from the records and the registry — never stored. `bun run validate` prints a holdings summary and warns when a source declares coverage for a document the corpus holds no regulation records of.
 
 ### On the `document_id` join
 
@@ -484,8 +499,8 @@ Outputs `docs/schemas/*.schema.json` and the rendered [Schema reference](/corpus
 Two scripts operate over whatever corpus is wired (the in-memory demo by default, or a file via `CORPUS_FILE`):
 
 ```bash
-bun run validate      # integrity linter — mirror invariant, dangling refs, cycles, source supersession, verbatim text (no markup); warns on stale sources
+bun run validate      # integrity linter — mirror invariant, dangling refs, cycles, source supersession, verbatim text (no markup); warns on stale sources; counts records with pre-adoption placeholders (info only)
 bun run graph         # regenerates docs/corpus/graph.md, a Mermaid map of the corpus
 ```
 
-`validate` exits non-zero on any violation, so it drops straight into CI. `graph` derives the [corpus graph](/corpus/graph) from the data itself, so the diagram can't drift from what's actually loaded.
+`validate` exits non-zero on any violation, so it drops straight into CI. It also prints an `info:` line counting the regulation records whose text names an instrument by a pre-adoption placeholder ("Regulation (EU) xx/xx"); that is neither an error nor a warning, because a guideline written before a standard was adopted legitimately names it that way. The server flags each such record when it serves it (`pre_adoption_placeholders`, see [`get_regulation`](/tools/regulation#get-regulation)) — computed from the text, so nothing in the corpus file marks them. `graph` derives the [corpus graph](/corpus/graph) from the data itself, so the diagram can't drift from what's actually loaded.

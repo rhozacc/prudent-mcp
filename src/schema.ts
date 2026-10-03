@@ -220,6 +220,13 @@ export const SourceSchema = z.object({
   milestones: z.array(MilestoneSchema).default([]),
   url: z.string().optional(),
   notes: z.string().optional(),
+  // How much of this document the corpus holds. ABSENT means NOT DECLARED, which
+  // is a third state and not a synonym for either value: a registry that never
+  // recorded it cannot be read as "full" (that would assert completeness nobody
+  // checked) or as "partial" (that would assert an incompleteness nobody
+  // checked). Never defaulted, for the same reason `next_milestone` does not
+  // read "nothing upcoming" for a registry whose milestones were never filled in.
+  coverage: z.enum(["full", "partial"]).optional(),
   // Future fields: supersedes, celex_id, ...
 });
 export type Source = z.infer<typeof SourceSchema>;
@@ -254,6 +261,20 @@ export const ReferrersSchema = z.object({
 });
 export type Referrers = z.infer<typeof ReferrersSchema>;
 
+// What the corpus holds of ONE document. `coverage` on CorpusInfo names the
+// documents; this says how much of each, because "CRR" in a coverage list reads
+// as the whole regulation and a corpus holds a subset of its articles.
+export const DocumentHoldingSchema = z.object({
+  document_id: z.string(),
+  framework: z.string(),
+  title: z.string().optional(),          // from the matching source, when there is one
+  records: z.number().int(),             // regulation records held for this document
+  // true: the current source declares the document partly held; false: declares
+  // it fully held; KEY ABSENT: no declaration (absent is not "full").
+  partial: z.boolean().optional(),
+});
+export type DocumentHolding = z.infer<typeof DocumentHoldingSchema>;
+
 export const CorpusInfoSchema = z.object({
   last_updated: z.string().datetime(),
   counts: z.record(SurfaceSchema, z.number()),
@@ -262,6 +283,11 @@ export const CorpusInfoSchema = z.object({
   // src/validate.ts) — computed at serve time, never stored; the default only
   // keeps stored corpus_info blocks parseable.
   stale_sources: z.array(sourceIdSchema).default([]),
+  // Per-document holdings, computed at serve time from the regulation records and
+  // the source registry (src/holdings.ts) — like stale_sources, never trusted from
+  // a stored block. Optional because an adapter that predates it serves none, and
+  // absent is not empty: [] would assert that nothing is held.
+  holdings: z.array(DocumentHoldingSchema).optional(),
 });
 export type CorpusInfo = z.infer<typeof CorpusInfoSchema>;
 

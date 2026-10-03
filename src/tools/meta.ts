@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { adapters } from "../adapters.ts";
 import { playbookInArea, resolveArea } from "../areas.ts";
+import { withPlaceholderFlag } from "../placeholders.ts";
 import type {
   AnyId,
   Check,
@@ -28,7 +29,19 @@ import {
   playbookIdSchema,
   regulationIdSchema,
 } from "../schema.ts";
-import { READ_ONLY_HINTS, fitOrCompact, lenient, miss, ok, stripEdgeNoise } from "./shared.ts";
+import {
+  READ_ONLY_HINTS,
+  AS_OF_MISS_CONTEXT,
+  asOfGroupNote,
+  fitOrCompact,
+  lenient,
+  miss,
+  ok,
+  resolveRegulation,
+  stripEdgeNoise,
+  unknownRegulationMiss,
+  withAsOfNote,
+} from "./shared.ts";
 
 // ── Local return types ────────────────────────────────────────────────────────
 
@@ -134,9 +147,24 @@ const MAX_TREE_NODES = 200;
 
 // TypeScript can't narrow template literal types from startsWith, so each
 // branch requires an explicit `as` cast after the prefix guard.
-async function resolveReference(id: AnyId): Promise<ResolvedReference> {
-  if (id.startsWith("regulation://"))
-    return { type: "regulation", id: id as RegulationId, record: await adapters.regulation.get(id as RegulationId) };
+//
+// `asOf` applies to regulation references only (the one versioned surface). When
+// it is given, `fromCurrent` collects the regulation ids that were answered from
+// current text because no version is recorded for the date, and `noVersion` the
+// ones the corpus lists but has nothing for at that date (they resolve to a null
+// record, which on its own reads as an id the corpus does not hold).
+async function resolveReference(
+  id: AnyId,
+  asOf?: string,
+  fromCurrent?: Set<RegulationId>,
+  noVersion?: Set<RegulationId>,
+): Promise<ResolvedReference> {
+  if (id.startsWith("regulation://")) {
+    const served = await resolveRegulation(id as RegulationId, asOf);
+    if (served.fromCurrent) fromCurrent?.add(id as RegulationId);
+    if (served.noVersion) noVersion?.add(id as RegulationId);
+    return { type: "regulation", id: id as RegulationId, record: served.record };
+  }
   if (id.startsWith("test://"))
     return { type: "test", id: id as TestId, record: await adapters.test.get(id as TestId) };
   if (id.startsWith("check://"))
@@ -161,7 +189,7 @@ async function expandPlaybook(raw: Playbook): Promise<ExpandedPlaybook> {
     raw.phases.map(async (ph) => ({
       name: ph.name,
       description: ph.description,
-      references: await Promise.all(ph.references.map(resolveReference)),
+      references: await Promise.all(ph.references.map((r) => resolveReference(r))),
     })),
   );
   return {
@@ -209,8 +237,18 @@ function toConcisePlaybook(pb: ExpandedPlaybook): ConciseExpandedPlaybook {
 
 // Fetch a regulation's children resolved one level deep. The reverse-direction
 // companion to expandPlaybook — children may now be checks/tests, not just regs.
-export async function expandRegulation(raw: Regulation): Promise<ExpandedRegulation> {
-  const children = await Promise.all(raw.children.map(resolveReference));
+//
+// With `asOf`, regulation children are resolved under the SAME date as the
+// record they hang from (a child's recorded version is served, not its latest),
+// `fromCurrent` collects those answered from current text and `noVersion` those
+// the corpus has no version of for the date.
+export async function expandRegulation(
+  raw: Regulation,
+  asOf?: string,
+  fromCurrent?: Set<RegulationId>,
+  noVersion?: Set<RegulationId>,
+): Promise<ExpandedRegulation> {
+  const children = await Promise.all(raw.children.map((c) => resolveReference(c, asOf, fromCurrent, noVersion)));
   return {
     id: raw.id,
     citation: raw.citation,
@@ -229,15 +267,26 @@ function toConciseRegulation(expanded: ExpandedRegulation): ConciseExpandedRegul
 // Recursive dossier walk. Regulation children recurse (bounded by depth, a
 // visited-set cycle guard, and a shared node budget); checks/tests are
 // resolved leaves. Nodes cut off by any bound are flagged truncated.
+//
+// `fromCurrent` collects the ids of nodes whose as_of was answered from current
+// text because no version is recorded for the date, and `noVersion` those the
+// corpus lists but has nothing for at that date (a null record the walk cannot
+// descend into). The tree reports both once, on its root envelope, rather than
+// stamping every node.
 export async function buildRegulationTree(
   id: RegulationId,
   depth: number,
   visited: Set<RegulationId>,
   asOf?: string,
   budget: { remaining: number } = { remaining: MAX_TREE_NODES },
+  fromCurrent: Set<RegulationId> = new Set(),
+  noVersion: Set<RegulationId> = new Set(),
 ): Promise<RegulationTreeNode> {
   budget.remaining -= 1; // this node
-  const record = await adapters.regulation.get(id, asOf);
+  const served = await resolveRegulation(id, asOf);
+  const record = served.record;
+  if (served.fromCurrent) fromCurrent.add(id);
+  if (served.noVersion) noVersion.add(id);
   const node: RegulationTreeNode = {
     type: "regulation",
     id,
@@ -257,7 +306,9 @@ export async function buildRegulationTree(
       break;
     }
     if (childId.startsWith("regulation://")) {
-      node.children.push(await buildRegulationTree(childId as RegulationId, depth - 1, visited, asOf, budget));
+      node.children.push(
+        await buildRegulationTree(childId as RegulationId, depth - 1, visited, asOf, budget, fromCurrent, noVersion),
+      );
     } else if (childId.startsWith("test://")) {
       budget.remaining -= 1;
       node.children.push({ type: "test", id: childId as TestId, record: await adapters.test.get(childId as TestId) });
@@ -326,9 +377,10 @@ export function registerMetaTools(server: McpServer): void {
       description:
         "What's loaded right now — the entry point before anything else. " +
         "Returns { last_updated, counts: {regulation, test, check, playbook, source}, " +
-        "coverage: [...], stale_sources: [...] } — stale_sources lists current sources " +
-        "whose verified date is older than 30 days; follow up with list_sources, then " +
-        "list_review_areas to map a task onto the corpus.",
+        "coverage: [...], holdings: [...], stale_sources: [...] } — coverage only names documents; " +
+        "holdings gives each one's { document_id, framework, title, records, partial }, partial being " +
+        "what the source registry declares (key absent = undeclared, not full). stale_sources lists " +
+        "current sources verified more than 30 days ago; follow up with list_sources, then list_review_areas.",
       inputSchema: {},
       outputSchema: CorpusInfoSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
@@ -385,15 +437,16 @@ export function registerMetaTools(server: McpServer): void {
         "\"EBA GL 2017/16 para 78\") → the Regulation record it names, or an honest refusal.\n" +
         "Matching is EXACT, in this order: the record's own citation, then its numeric spine " +
         "(article/paragraph/point numbers) scoped to the document the citation names. There is " +
-        "no fuzzy fallback — 1218 is not 121, and a citation naming an instrument this corpus " +
-        "does not hold resolves to null rather than to a same-numbered provision elsewhere.\n" +
+        "no fuzzy fallback — 1218 is not 121, and an instrument this corpus does not hold, named " +
+        "by number or description (\"the RTS on …\"), resolves to null with no candidates rather " +
+        "than to a same-numbered provision elsewhere.\n" +
         "Returns { match, confidence, candidates, ambiguous, unmatched_segments, coverage_note }:\n" +
-        "  match null + candidates non-empty → several records fit (ambiguous: true) or the " +
-        "corpus holds only narrower provisions under the one asked for; open a candidate by id.\n" +
-        "  match null + coverage_note → why, in terms of what this corpus covers.\n" +
-        "  confidence 'exact' | 'segment' says which rule matched.\n" +
-        "Do not present a null match as a citation. Fall back to search_regulation with the " +
-        "citation's key words, or get_corpus_info for the documents actually loaded.",
+        "  match null + candidates → several records fit (ambiguous: true) or only narrower or " +
+        "containing provisions are held; open a candidate by id.\n" +
+        "  match null + coverage_note → why, in terms of what this corpus covers (and whether the " +
+        "document is held only in part).\n" +
+        "  confidence 'exact' | 'alias' | 'segment' says which rule matched.\n" +
+        "A null match is not a citation: fall back to search_regulation on the citation's key words.",
       inputSchema: {
         text: z.string().describe("A loose, human-prose citation."),
       },
@@ -421,9 +474,8 @@ export function registerMetaTools(server: McpServer): void {
         "playbooks a backend authored, so it reflects how the corpus was written up rather than everything " +
         "the corpus holds on a subject, and it may draw on fewer documents than the corpus covers. " +
         "Returns { areas: [{ id, name, parent, children }] }; ids are dotted slugs and a " +
-        "child id is prefixed by its parent's. Backends that author no taxonomy get one " +
-        "derived from the playbooks present, so this is never empty for a corpus that has " +
-        "any.",
+        "child id is prefixed by its parent's. With no authored taxonomy one is derived from " +
+        "the playbooks present, so this is never empty for a corpus that has any.",
       inputSchema: {},
       outputSchema: z.object({ areas: z.array(ReviewAreaSchema) }).passthrough(),
       annotations: READ_ONLY_HINTS,
@@ -443,8 +495,7 @@ export function registerMetaTools(server: McpServer): void {
         "with search_playbooks or list_review_areas.\n" +
         "Use this when you intend to FOLLOW the references. If the question is only what the " +
         "steps are, get_playbook with detail: 'steps' answers it for roughly a fifth of the " +
-        "payload — a dense playbook resolves to ~90 stubs plus a regulatory_scope of a couple " +
-        "of hundred ids, none of which is the walkthrough.",
+        "payload — the stubs and regulatory_scope are not the walkthrough.",
       inputSchema: {
         id: lenient(playbookIdSchema).describe(
           "A playbook id from search_playbooks, list_review_areas or get_area_overview — shape playbook://{document}/{slug}",
@@ -470,11 +521,10 @@ export function registerMetaTools(server: McpServer): void {
         "when the question is about a whole area.\n" +
         "Returns { area, playbooks, regulation_ids, check_ids, test_ids, playbook_ids }. " +
         "By default each playbook is a walkthrough SUMMARY: phase names, descriptions and " +
-        "per-phase reference counts. The references themselves arrive de-duplicated in the " +
-        "flat id lists below, so nothing is missing — expand_playbook gives the per-phase " +
-        "breakdown when the phase a reference belongs to actually matters. " +
-        "detail: 'full' embeds every referenced record inline and is large; ask for it only " +
-        "when the whole area is being read.\n" +
+        "per-phase reference counts. References arrive de-duplicated in the flat id lists, so " +
+        "nothing is missing; expand_playbook gives the per-phase breakdown when it matters. " +
+        "detail: 'full' embeds every referenced record inline and is large; use it only when " +
+        "the whole area is being read.\n" +
         "playbook_ids are playbooks referenced but not already listed, which is how a " +
         "lifecycle playbook names the per-parameter ones. Asking for a top-level area " +
         "includes everything in its subareas. Accepts the slug from list_review_areas " +
@@ -559,9 +609,10 @@ export function registerMetaTools(server: McpServer): void {
         "Fetch a regulation with its children resolved inline — sub-regulations plus the " +
         "checks/tests that operationalize it; the reverse-direction companion to " +
         "expand_playbook. Returns the regulation fields plus children as { type, id, label } " +
-        "stubs (default) or complete records (detail: 'full'). Supports as_of like " +
-        "get_regulation. Unknown ids return isError with a pointer. Use get_regulation_tree " +
-        "to walk the whole sub-tree.",
+        "stubs (default) or complete records (detail: 'full'). as_of and the placeholder flag work as " +
+        "in get_regulation; an as_of_note also covers children served from current text. " +
+        "Unknown ids are isError misses. Use " +
+        "get_regulation_tree to walk the whole sub-tree.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(
           "A regulation id from search_regulation or resolve_citation — shape regulation://{document}/{provision}",
@@ -572,19 +623,36 @@ export function registerMetaTools(server: McpServer): void {
       annotations: READ_ONLY_HINTS,
     },
     async ({ id, as_of, detail }) => {
-      const raw = await adapters.regulation.get(id, as_of);
+      const { record: raw, fromCurrent: rootFromCurrent } = await resolveRegulation(id, as_of);
       if (raw === null) {
         if (as_of !== undefined && (await adapters.regulation.get(id)) !== null) {
           return miss(
             `No version of ${id} was in force on ${as_of} according to this corpus's history — ` +
-              "an as_of predating every recorded version returns nothing. Retry without as_of " +
-              "for the current text.",
+              `an as_of predating every recorded version returns nothing. ${AS_OF_MISS_CONTEXT} ` +
+              "Retry without as_of for the current text.",
           );
         }
-        return miss(`No record for ${id}. Verify the id with search_regulation or list_review_areas.`);
+        return unknownRegulationMiss(id);
       }
-      const expanded = await expandRegulation(raw);
-      return ok(detail === "full" ? expanded : toConciseRegulation(expanded));
+      // Children are resolved under the same date. The note covers the record, the
+      // children that came from current text and the ones the corpus has no
+      // version of, so a history-covered parent with such a child still says so.
+      const fromCurrent = new Set<RegulationId>();
+      const noVersion = new Set<RegulationId>();
+      const expanded = await expandRegulation(raw, as_of, fromCurrent, noVersion);
+      const note =
+        as_of === undefined
+          ? undefined
+          : asOfGroupNote(
+              as_of,
+              { record: raw, fromCurrent: rootFromCurrent },
+              {
+                fromCurrent: [...fromCurrent].filter((n) => n !== raw.id).length,
+                noVersion: [...noVersion].filter((n) => n !== raw.id).length,
+              },
+              "children",
+            );
+      return ok(withAsOfNote(withPlaceholderFlag(detail === "full" ? expanded : toConciseRegulation(expanded)), note));
     },
   );
 
@@ -598,8 +666,9 @@ export function registerMetaTools(server: McpServer): void {
         "as leaves. Returns a tree of { type, id, citation, children } nodes — concise " +
         "(default) keeps citations and leaf labels only; detail: 'full' embeds each node's " +
         "complete record. depth defaults to 5 and the walk is capped at 200 total nodes; " +
-        "nodes cut off by depth, a cycle, or the cap carry truncated: true. Unknown roots " +
-        "return isError — verify with search_regulation.",
+        "nodes cut off by depth, a cycle, or the cap carry truncated: true. With as_of, an " +
+        "as_of_note on the root counts nodes served from current text. Unknown roots are isError misses — " +
+        "verify with search_regulation.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(
           "Root of the tree: a regulation id from search_regulation — shape regulation://{document}/{provision}",
@@ -611,17 +680,30 @@ export function registerMetaTools(server: McpServer): void {
       annotations: READ_ONLY_HINTS,
     },
     async ({ id, depth, as_of, detail }) => {
-      const node = await buildRegulationTree(id, depth ?? 5, new Set<RegulationId>(), as_of);
+      const fromCurrent = new Set<RegulationId>();
+      const noVersion = new Set<RegulationId>();
+      const node = await buildRegulationTree(id, depth ?? 5, new Set<RegulationId>(), as_of, undefined, fromCurrent, noVersion);
       if (node.record === null) {
         if (as_of !== undefined && (await adapters.regulation.get(id)) !== null) {
           return miss(
             `No version of ${id} was in force on ${as_of} according to this corpus's history. ` +
-              "Retry without as_of for the current tree.",
+              `${AS_OF_MISS_CONTEXT} Retry without as_of for the current tree.`,
           );
         }
-        return miss(`No record for ${id}. Verify the id with search_regulation or list_review_areas.`);
+        return unknownRegulationMiss(id);
       }
-      return ok(detail === "full" ? node : toConciseTree(node));
+      const note =
+        as_of === undefined
+          ? undefined
+          : asOfGroupNote(
+              as_of,
+              { record: node.record, fromCurrent: fromCurrent.has(id) },
+              {
+                fromCurrent: [...fromCurrent].filter((n) => n !== id).length,
+                noVersion: [...noVersion].filter((n) => n !== id).length,
+              },
+            );
+      return ok(withAsOfNote(detail === "full" ? node : toConciseTree(node), note));
     },
   );
 
