@@ -17,7 +17,7 @@ The unit is the **call trace**: for every tool call, the bytes that land in the 
 |---|---|---|
 | I1 | Response bodies are valid JSON | the body has the shape the schema promises |
 | I2 | Ids shown in tool descriptions resolve | the addressing scheme the model infers is the real one |
-| I3 | Citation resolution is honest | a returned citation is the one that was asked for; an instrument named by number or by description that the corpus does not hold never returns a match or candidates; a note saying the containing record carries a point is true of the text served for it; a citation the server itself serves for a record resolves to that record, never to a decline |
+| I3 | Citation resolution is honest | a returned citation is the one that was asked for; an instrument named by number (in every standard spelling) or by description that the corpus does not hold never returns a match or candidates, and neither does a document named by an identifier no held document answers to; a note saying the containing record carries a point is true of the text served for it; a citation the server itself serves for a record resolves to that record, never to a decline |
 | I4 | Reported totals are true | "I have seen all the matches" |
 | I5 | Ids handed out are fetchable | an id from a search result can be opened |
 | I6 | Context cost stays within budget | there is context left for the actual task |

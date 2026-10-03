@@ -397,38 +397,169 @@ function scopeToDocument(
   };
 }
 
-/** Instruments a citation can name, and how to recognise them in prose. */
-const INSTRUMENT_PATTERNS: Array<{ key: string; re: RegExp }> = [
-  { key: "crr", re: /\bcrr\b|regulation\s*\(eu\)\s*(no\.?\s*)?575\s*\/\s*2013|\b575\s*\/\s*2013\b/i },
-  { key: "crd", re: /\bcrd\s*(iv|v)?\b|directive\s*2013\s*\/\s*36/i },
-];
-
-/** Is this the YEAR half of an EU act number, rather than the serial? */
-const isYearNumber = (s: string): boolean => /^(?:19|20)\d{2}$/.test(s);
+/**
+ * A document identifier written the way regulators write them: an authority, an
+ * optional kind, then the YEAR and a serial ("EBA/GL/2018/04", "ESMA/2016/1444",
+ * "ECB/2017/20"). A bare year/serial pair is not enough - "06/2026" is a date - so
+ * the authority has to be there, and it cannot be a structural word ("Article
+ * 2018/04"). The pattern takes up to three words in front of the year and
+ * `unplacedIdentifier` drops the leading ones that are only connectives ("of").
+ * A third number after the serial makes it an ISO date ("2019-12-31"), not an
+ * identifier.
+ */
+const DOCUMENT_IDENTIFIER = /\b((?:[A-Za-z]{1,10}[\s/-]+){1,3})((?:19|20)\d{2})\s*[/-]\s*(\d{1,4})\b(?![/-]\d)/g;
 
 /**
- * How an EU act is numbered in prose: kind, "(EU)", then serial/YEAR or
- * YEAR/serial. Defined ONCE, because the gate (`namedInstrument`) and the
- * mention scan (`instrumentMentions`) must agree on what a numbered act is, or
- * the refusal names an instrument the scan then cannot find. `guideline` is here
- * because ECB guidelines are numbered the same way ("Guideline (EU) 2017/697").
+ * Words that carry no document's name: the connectives and determiners of a
+ * citation, and the generic nouns that say what KIND of text a document is. A
+ * word of these in front of a number does not make it an identifier ("of the
+ * Directive 2018/04").
  */
-const NUMBERED_ACT =
-  /\b(regulation|directive|decision|guideline)\s*\((?:eu|ec|euratom)\)\s*(?:no\.?\s*)?(\d{1,4})\s*\/\s*(\d{1,4})\b/gi;
+const NAME_FILLER = new Set([
+  "a", "an", "this", "that", "these", "those", "such", "said", "same", "its", "their", "our", "any", "each",
+  "every", "all", "both", "other", "another", "above", "below", "herein", "thereof", "as", "by", "for", "with",
+  "from", "to", "or", "per", "see", "also", "cited", "referred", "mentioned", "pursuant", "according",
+  "regulation", "regulations", "directive", "directives", "decision", "decisions", "act", "acts", "rule",
+  "rules", "standard", "standards", "technical", "document", "documents", "text", "texts", "law", "framework",
+  "provision", "provisions", "paragraphs", "item", "items", "clause", "clauses", "para", "art", "ibid", "id",
+]);
+
+/**
+ * The identifier-shaped document number still in the citation after the documents
+ * it names were taken out, or null. Its year and serial must both survive in
+ * `rest`, adjacent: a held document's name takes them with it.
+ */
+function unplacedIdentifier(text: string, rest: string[]): string | null {
+  for (const m of text.matchAll(DOCUMENT_IDENTIFIER)) {
+    const [, lead, year, serial] = m;
+    if (lead === undefined || year === undefined || serial === undefined) continue;
+    const words = lead.split(/[\s/-]+/).filter((w) => w !== "");
+    const plain = (w: string | undefined): boolean => STRUCTURAL.has((w ?? "").toLowerCase()) || NAME_FILLER.has((w ?? "").toLowerCase());
+    while (words.length > 0 && plain(words[0])) words.shift();
+    // An authority and at most a kind, neither of them structure: "Article 2018/04" is no identifier.
+    if (words.length === 0 || words.length > 2) continue;
+    if (words.some((w) => plain(w))) continue;
+    if (windowAt(rest, [year, serial]) !== -1) return `${words.join("/")}/${year}/${serial}`;
+  }
+  return null;
+}
+
+/**
+ * Instruments a citation can name, and how to recognise them in prose.
+ *
+ * `acts` lists the numbered-act keys that name the same instrument. The CRR is
+ * "CRR", "Capital Requirements Regulation", "Regulation (EU) No 575/2013" and a
+ * careless "Regulation (EU) 2013/575" alike; a gate that reads only some of those
+ * tells a caller the corpus holds no CRR while it holds exactly that. Identity
+ * only - what the instrument is called, never what it requires.
+ */
+const INSTRUMENT_PATTERNS: Array<{ key: string; re: RegExp; acts: string[] }> = [
+  {
+    key: "crr",
+    re: /\bcrr\b|\bcapital\s+requirements\s+regulation\b|regulation\s*\(eu\)\s*(no\.?\s*)?575\s*\/\s*2013|\b575\s*\/\s*2013\b/i,
+    acts: ["regulation-2013-575"],
+  },
+  {
+    key: "crd",
+    re: /\bcrd\s*(iv|v)?\b|\bcapital\s+requirements\s+directive\b|directive\s*2013\s*\/\s*36/i,
+    acts: ["directive-2013-36"],
+  },
+];
+
+/**
+ * Could this be the YEAR half of an EU act number? The Communities began in 1958,
+ * so 1907 (REACH is Regulation (EC) No 1907/2006) is a serial that merely looks
+ * like a year, and a year does not run past 2099.
+ */
+const isYearNumber = (s: string): boolean => /^(?:19(?:5[89]|[6-9]\d)|20\d\d)$/.test(s);
+
+/** The institution an act number names, in any of the places writers put it. */
+const ACT_TAG = String.raw`(?:eu|ec|eec|euratom)`;
+
+/**
+ * How an EU act is numbered in prose. Defined ONCE, because the gate
+ * (`namedInstruments`) and the mention scan (`instrumentMentions`) must agree on
+ * what a numbered act is, or the refusal names an instrument the scan then cannot
+ * find.
+ *
+ * Kind, then the institution in any of its places - "(EU)", a bare "EU", or the
+ * "/EU" that closes "Directive 2014/65/EU" - then the number as serial/YEAR or
+ * YEAR/serial. `guideline` is here because ECB guidelines are numbered the same
+ * way ("Guideline (EU) 2017/697").
+ *
+ * Capture groups: 1 kind, 2 the institution before the number, 3 and 4 the two
+ * halves of the number, 5 the institution after it.
+ */
+const NUMBERED_ACT = new RegExp(
+  String.raw`\b(regulation|directive|decision|guideline)s?\s*` +
+    String.raw`(\(${ACT_TAG}\)|${ACT_TAG}\b)?\s*(?:no\.?\s*)?` +
+    String.raw`(\d{1,4})\s*\/\s*(\d{1,4})\b` +
+    String.raw`(\s*\/\s*${ACT_TAG}\b)?`,
+  "gi",
+);
+
+interface NumberedAct {
+  /** `kind-YEAR-serial`, the same whichever numbering era or order the citation used. */
+  key: string;
+  /** The institution the citation wrote ("EU", "EC", "EEC", "Euratom"), when it wrote one. */
+  tag?: string;
+  /** Where the act is written in the text, so it can be cut out or scoped as one name. */
+  start: number;
+  end: number;
+}
+
+/**
+ * Which half of a number is the year. Where exactly one half can be a year it is
+ * that one. Where both can (2019/2033), the era decides: regulations were numbered
+ * serial/YEAR until 2015 and YEAR/serial after it, and directives and decisions
+ * have been YEAR/serial throughout. Where neither can, the kind decides.
+ */
+function yearAndSerial(kind: string, first: string, second: string): [string, string] {
+  const yearFirst = kind === "directive" || kind === "decision";
+  if (isYearNumber(first) && !isYearNumber(second)) return [first, second];
+  if (isYearNumber(second) && !isYearNumber(first)) return [second, first];
+  if (isYearNumber(first) && isYearNumber(second)) {
+    return yearFirst || Number(first) >= 2015 ? [first, second] : [second, first];
+  }
+  return yearFirst ? [first, second] : [second, first];
+}
+
+/**
+ * The numbered acts a text names, in either numbering era.
+ *
+ * A bare number needs more to be an act than a tagged one. "Regulation 5/2" is
+ * not an act number, and neither is "Guidelines 2017/16", which is how a caller
+ * names a document that is no act at all (EBA/GL/2017/16): without the
+ * institution tag the number must carry a year, and a guideline needs the tag.
+ */
+function numberedActs(text: string): NumberedAct[] {
+  const acts: NumberedAct[] = [];
+  for (const m of text.matchAll(NUMBERED_ACT)) {
+    const kind = m[1]?.toLowerCase();
+    const first = m[3];
+    const second = m[4];
+    if (kind === undefined || first === undefined || second === undefined) continue;
+    const tagged = m[2] !== undefined || m[5] !== undefined;
+    if (!tagged && (kind === "guideline" || (!isYearNumber(first) && !isYearNumber(second)))) continue;
+    const [year, serial] = yearAndSerial(kind, first, second);
+    const written = (m[2] ?? m[5] ?? "").replace(/[()\s/]/g, "").toLowerCase();
+    const tag = written === "" ? undefined : written === "euratom" ? "Euratom" : written.toUpperCase();
+    acts.push({
+      key: `${kind}-${year}-${serial}`,
+      ...(tag === undefined ? {} : { tag }),
+      start: m.index,
+      end: m.index + m[0].length,
+    });
+  }
+  return acts;
+}
 
 /** One key per instrument, whichever numbering era the citation is written in. */
-function numberedActKeys(text: string): string[] {
-  const keys: string[] = [];
-  for (const m of text.matchAll(NUMBERED_ACT)) {
-    const kind = m[1];
-    const first = m[2];
-    const second = m[3];
-    if (kind === undefined || first === undefined || second === undefined) continue;
-    const [year, serial] = isYearNumber(first) ? [first, second] : [second, first];
-    keys.push(`${kind.toLowerCase()}-${year}-${serial}`);
-  }
-  return keys;
-}
+const numberedActKeys = (text: string): string[] => numberedActs(text).map((a) => a.key);
+
+/** The key a numbered act is known by when a named instrument is the same thing. */
+const canonicalInstrument = (key: string): string =>
+  INSTRUMENT_PATTERNS.find((p) => p.acts.includes(key))?.key ?? key;
 
 /**
  * A numbered EU instrument the citation names, in either numbering era.
@@ -445,11 +576,37 @@ function numberedActKeys(text: string): string[] {
  * skipping it sent the citation into the numeric spine rules, which is why
  * asking for 2021/930 came back "nothing in this corpus is numbered 2021.930" —
  * a malformed-citation shape, when the truth is a coverage boundary.
+ *
+ * The same holds for the other spellings of the same number: "Directive
+ * 2014/65/EU", "Regulation EU 2019/2033", "Decision 2021/451". Each fell through
+ * and had its number read as sub-points of whichever provision shared the first
+ * digits.
  */
-const namedInstrument = (text: string): string | null => {
-  for (const { key, re } of INSTRUMENT_PATTERNS) if (re.test(text)) return key;
-  return numberedActKeys(text)[0] ?? null;
-};
+interface NamedInstrument {
+  key: string;
+  /** The institution the citation wrote for a numbered act, so a refusal can quote it back rightly. */
+  tag?: string;
+}
+
+/**
+ * EVERY instrument the citation names, once each, the instruments with a name of
+ * their own first and the numbered acts after them. Not the first one found: a
+ * citation that names a held instrument and, further on, an act the corpus does not
+ * hold ("... referred to in the Capital Requirements Regulation") would otherwise be
+ * judged by whichever came first, and the gate would wave through a provision of an
+ * act it was written to refuse.
+ */
+function namedInstruments(text: string): NamedInstrument[] {
+  const named: NamedInstrument[] = [];
+  const add = (n: NamedInstrument): void => {
+    if (!named.some((o) => o.key === n.key)) named.push(n);
+  };
+  for (const { key, re } of INSTRUMENT_PATTERNS) if (re.test(text)) add({ key });
+  for (const act of numberedActs(text)) {
+    add({ key: canonicalInstrument(act.key), ...(act.tag === undefined ? {} : { tag: act.tag }) });
+  }
+  return named;
+}
 
 /**
  * Instruments a citation can name by DESCRIPTION rather than by number, and how
@@ -555,6 +712,8 @@ interface DescribedInstrument {
   held: string[][];
   /** Written as a numbered identifier ("RTS/2016/03"), not as a description. */
   identifier: boolean;
+  /** A number follows the descriptor ("ITS 2021/451"), in a shape the number gate does not read. */
+  numbered: boolean;
   /** The issuer the table entry names, if it names one. */
   issuer?: string;
 }
@@ -589,12 +748,19 @@ function descriptorQuote(text: string, start: number, matched: string): string {
   return quote.length === 0 || quote.length > 80 ? matched : quote;
 }
 
-/** Does the number gate read a number starting at the kind word that ends this match? */
-function numberGateReads(text: string, start: number, matched: string): boolean {
-  const sticky = new RegExp(NUMBERED_ACT.source, "iy");
+/** A number straight after a descriptor, as "ITS 2021/451" or "RTS (EU) No 2016/03" give it. */
+const NUMBER_AFTER_DESCRIPTOR = new RegExp(String.raw`^\s*(?:\(${ACT_TAG}\)\s*)?(?:no\.?\s*)?\d{1,4}\s*\/\s*\d{1,4}\b`, "i");
+
+/**
+ * Does the number gate read an act number starting at the kind word that ends this
+ * match? It asks the gate's own reader (`numberedActs`), not the raw pattern: the
+ * pattern also matches "Regulation 5/2", which is no act number, and a descriptor
+ * waved through on the strength of it would be read by neither gate.
+ */
+function numberGateReads(acts: NumberedAct[], start: number, matched: string): boolean {
   // The kind word is the last run of letters of the match, whatever sat between its words.
-  sticky.lastIndex = start + matched.search(/[A-Za-z]+$/);
-  return sticky.test(text);
+  const kindAt = start + matched.search(/[A-Za-z]+$/);
+  return acts.some((a) => a.start === kindAt);
 }
 
 /**
@@ -608,6 +774,7 @@ function describedInstruments(text: string): { found: DescribedInstrument[]; res
   // An all-capitals citation has lost the case that tells ITS from a shouted
   // pronoun. The other kinds have no pronoun reading, so they stay recognised.
   const caseLost = !/[a-z]/.test(text);
+  const acts = numberedActs(text);
   const found: DescribedInstrument[] = [];
   const cut: Array<[number, number]> = [];
   // Every match of every kind, in the order the caller wrote them, so a kind named
@@ -618,7 +785,7 @@ function describedInstruments(text: string): { found: DescribedInstrument[]; res
   for (const { entry: { key, held, issuer }, m } of hits) {
     const start = m.index;
     const end = start + m[0].length;
-    if (numberGateReads(text, start, m[0])) continue;
+    if (numberGateReads(acts, start, m[0])) continue;
     // "EBA/RTS/2016/03" is an identifier. It names its instrument by number, in
     // a shape the number gate does not read, so it is declined for what it is.
     const id = /^\s*\/\s*(\d{4})\s*\/\s*(\d{1,4})\b/.exec(text.slice(end));
@@ -631,6 +798,7 @@ function describedInstruments(text: string): { found: DescribedInstrument[]; res
           quote: whole,
           held: [citationTokens(`${m[0]} ${id[1] ?? ""} ${id[2] ?? ""}`)],
           identifier: true,
+          numbered: true,
         });
       }
       cut.push([start - lead.length, end + id[0].length]);
@@ -640,7 +808,8 @@ function describedInstruments(text: string): { found: DescribedInstrument[]; res
     // The same kind named twice in one phrase ("regulatory technical standards
     // (RTS) on ...") is one instrument, quoted once.
     if (!found.some((f) => f.quote === quote || (f.key === key && !f.identifier))) {
-      found.push({ key, quote, held, identifier: false, ...(issuer === undefined ? {} : { issuer }) });
+      const numbered = NUMBER_AFTER_DESCRIPTOR.test(text.slice(end));
+      found.push({ key, quote, held, identifier: false, numbered, ...(issuer === undefined ? {} : { issuer }) });
     }
     cut.push([start, end]);
   }
@@ -732,7 +901,9 @@ function instrumentMentions(regulations: Regulation[]): Map<string, string[]> {
   if (cached !== undefined) return cached;
   const index = new Map<string, string[]>();
   for (const r of regulations) {
-    const seen = new Set<string>(numberedActKeys(r.text));
+    // Keyed as the gate keys the instrument it names, so "Regulation (EU) No
+    // 575/2013" in a record's text is found under the CRR however the number is written.
+    const seen = new Set<string>(numberedActKeys(r.text).map(canonicalInstrument));
     for (const key of seen) {
       const at = index.get(key);
       if (at === undefined) index.set(key, [r.id]);
@@ -743,16 +914,34 @@ function instrumentMentions(regulations: Regulation[]): Map<string, string[]> {
   return index;
 }
 
-/** Does any served record belong to the instrument this citation names? */
-function corpusHolds(regulations: Regulation[], instrument: string): boolean {
-  const needle = instrument.replace(/[^a-z0-9]/g, "");
-  return regulations.some((r) => {
-    const hay = `${r.framework}${r.document_id}${idDocSegment(r.id)}`
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
-    return hay.includes(needle);
+/**
+ * The ways an instrument's key can appear, squashed, in a document's ids. A numbered
+ * act is looked for in both orders its number is written in ("regulation2013575"
+ * and "regulation5752013"), and the CRR and CRD also by the numbers they are
+ * known by, because a corpus is free to id them either way.
+ */
+function heldNeedles(instrument: string): string[] {
+  const named = INSTRUMENT_PATTERNS.find((p) => p.key === instrument);
+  return [instrument, ...(named?.acts ?? [])].flatMap((key) => {
+    const m = /^([a-z]+)-(\d{2,4})-(\d+)$/.exec(key);
+    return m === null ? [key.replace(/[^a-z0-9]/g, "")] : [`${m[1]}${m[2]}${m[3]}`, `${m[1]}${m[3]}${m[2]}`];
   });
 }
+
+/** The documents whose framework, document id or id segment carry the instrument. */
+function heldInstrumentDocuments(regulations: Regulation[], instrument: string): Set<string> {
+  const needles = heldNeedles(instrument);
+  const docs = new Set<string>();
+  for (const r of regulations) {
+    const hay = `${r.framework}${r.document_id}${idDocSegment(r.id)}`.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (needles.some((n) => hay.includes(n))) docs.add(r.document_id);
+  }
+  return docs;
+}
+
+/** Does any served record belong to the instrument this citation names? */
+const corpusHolds = (regulations: Regulation[], instrument: string): boolean =>
+  heldInstrumentDocuments(regulations, instrument).size > 0;
 
 /** How many candidates a declined resolution is allowed to carry. */
 const MAX_CANDIDATES = 10;
@@ -768,17 +957,24 @@ const asCandidate = (r: Regulation): CitationCandidate => ({
  *
  * The era decides the "No": post-2015 acts are cited "Regulation (EU) 2021/930"
  * and writing "Regulation (EU) No 2021/930" is a wrong citation of a real act —
- * not a thing to emit from a refusal whose whole purpose is not guessing.
+ * not a thing to emit from a refusal whose whole purpose is not guessing. The same
+ * goes for the institution: an act the caller wrote as "(EC)" is quoted back as
+ * "(EC)", never relabelled "(EU)"; one written with none is given "(EU)" only
+ * where the era makes that the only possible tag, and none before it. Only
+ * regulations were numbered serial/YEAR; a directive, decision or guideline is
+ * YEAR/serial in every era.
  */
-const instrumentLabel = (instrument: string): string => {
-  const m = /^(regulation|directive|decision|guideline)-(\d{4})-(\d+)$/.exec(instrument);
+const instrumentLabel = (instrument: string, tag?: string): string => {
+  const m = /^(regulation|directive|decision|guideline)-(\d{2,4})-(\d+)$/.exec(instrument);
   if (m === null) return instrument.toUpperCase();
   const kind = `${(m[1] ?? "").charAt(0).toUpperCase()}${(m[1] ?? "").slice(1)}`;
   const year = m[2] ?? "";
   const serial = m[3] ?? "";
-  return Number(year) >= 2015
-    ? `${kind} (EU) ${year}/${serial}`
-    : `${kind} (EU) No ${serial}/${year}`;
+  const modern = Number(year) >= 2015;
+  const institution = tag ?? (modern ? "EU" : undefined);
+  if (modern) return `${kind} (${institution}) ${year}/${serial}`;
+  if (m[1] === "regulation") return `${kind}${institution === undefined ? "" : ` (${institution})`} No ${serial}/${year}`;
+  return `${kind} ${year}/${serial}${institution === undefined ? "" : `/${institution}`}`;
 };
 
 /** Several equally good matches: report them all, choose none. */
@@ -903,7 +1099,13 @@ export function resolveCitationDetailed(
   // citation can have, and a gate that reads words inside it ("RTS Article 5",
   // "Regulation (EU) 2022/439, Article 14") as a second instrument would refuse
   // the very record the caller quoted.
-  const instrument = namedInstrument(text);
+  // Judged by the first named instrument the corpus does not hold; when it holds
+  // every one, by the first. A held instrument named beside an unheld act does not
+  // vouch for it.
+  const named = namedInstruments(text);
+  const mention = named.find((n) => !corpusHolds(regulations, n.key)) ?? named[0] ?? null;
+  const instrument = mention?.key ?? null;
+  const instrumentName = mention === null ? null : instrumentLabel(mention.key, mention.tag);
   if (instrument !== null && !corpusHolds(regulations, instrument)) {
     // A dead end that names the way out. Two ways out, in fact, and which one
     // is available decides whether the caller goes looking or guesses.
@@ -928,7 +1130,7 @@ export function resolveCitationDetailed(
     const shown = mentions.slice(0, 3);
     return none({
       coverage_note:
-        `This corpus holds no ${instrumentLabel(instrument)}. Nothing was matched, rather than ` +
+        `This corpus holds no ${instrumentName}. Nothing was matched, rather than ` +
         "sourcing a same-numbered provision from another document. " +
         (what === undefined
           ? ""
@@ -968,10 +1170,12 @@ export function resolveCitationDetailed(
     const quoted = unheld.map((d) => `"${d.quote}"`).join(" and ");
     const identifiers = unheld.every((d) => d.identifier);
     const heldNames: string[] = [];
-    if (instrument !== null) heldNames.push(instrumentLabel(instrument));
+    if (instrumentName !== null) heldNames.push(instrumentName);
     const { docs: namedDocs } = scopeToDocument(citationTokens(described.residual), index);
     // `crr` the instrument and `crr` the document are one thing named twice.
+    const instrumentDocs = instrument === null ? new Set<string>() : heldInstrumentDocuments(regulations, instrument);
     for (const d of namedDocs ?? []) {
+      if (instrumentDocs.has(d)) continue;
       if (!heldNames.some((n) => n.toLowerCase() === d.toLowerCase())) heldNames.push(d);
     }
     // An alias naming several documents is a framework ("EBA"), not a document:
@@ -982,7 +1186,7 @@ export function resolveCitationDetailed(
       : `a document this corpus holds (${heldNames.slice(0, 3).join(", ")})`;
     // A number the number gate cannot read is not a reason to say "cite it by
     // number": the caller did, and the form is what was missing.
-    const numberedDescription = !identifiers && unheld.some((d) => /\d\s*\/\s*\d/.test(d.quote));
+    const numberedDescription = !identifiers && unheld.some((d) => d.numbered);
     const wayOut =
       (identifiers
         ? ""
@@ -1009,6 +1213,24 @@ export function resolveCitationDetailed(
             "as, so which of the two the provision belongs to cannot be told. Nothing was matched, " +
             `rather than sourcing a same-numbered provision from either. Name one instrument per ` +
             `citation. ${wayOut}`,
+    });
+  }
+
+  // (0c) A document's number that no held document answers to. "Article 49(3) of
+  // EBA/GL/2018/04" names a document by its number; when the registry holds no
+  // such document, the framework ("EBA") alone scoped the citation and the number
+  // fell through into the provision's spine as points 2018 and 04 - which is how
+  // an unheld guideline was answered with paragraph 49 of two held ones. A number
+  // that a held document's name consumed is gone from `rest`; one still there was
+  // not the number of anything held.
+  const unplaced = unplacedIdentifier(text, rest);
+  if (unplaced !== null) {
+    return none({
+      coverage_note:
+        `"${text}" names a document by the number ${unplaced}, and this corpus holds no document that ` +
+        "answers to it, so the number was not read as part of a provision's. Nothing was matched, " +
+        "rather than sourcing a same-numbered provision from another document. Use get_corpus_info " +
+        "for the documents actually loaded, or search_regulation with the document's name.",
     });
   }
 

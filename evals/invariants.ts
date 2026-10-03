@@ -501,9 +501,20 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
   // cannot reveal that — its second number has four digits, so it matches the
   // old pattern and the probe passes on a gate that is broken for everything
   // real. The post-2015 probe needs a SHORT serial to bind at all.
+  //
+  // And the other spellings of the same kind of number. A directive is cited
+  // "Directive 2014/65/EU", a regulation is cited "Regulation EU 2019/2033" or
+  // bare, a decision bare: a gate that reads only "(EU) 2099/930" drops every one
+  // of these, and the bare article number then goes looking in the whole corpus.
+  // The numbers are invented (no act exists numbered in 2099), so none can be held.
   for (const probe of [
     "Article 1 of Regulation (EU) No 9999/9999", // pre-2015 form
     "Article 1 of Regulation (EU) 2099/930", // post-2015 form, short serial
+    "Article 1 of Directive 2099/77/EU", // the tag after the number
+    "Article 1 of Council Directive 2099/12/EC",
+    "Article 1 of Commission Regulation EU 2099/933", // the tag before the number, bare
+    "Article 1 of Regulation 2099/933", // no tag at all
+    "Article 1 of Decision 2099/12",
   ]) {
     const foreign = await s.call("resolve_citation", { text: probe });
     const foreignMatch = /"id"\s*:\s*"([^"]+)"/.exec(foreign.text)?.[1];
@@ -537,13 +548,31 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
     // post-2015 act is "Regulation (EU) 2099/930"; writing "No 2099/930" is a
     // wrong citation of a real instrument, from the one code path whose whole
     // purpose is not guessing.
-    if (/No\s+2099\s*\/\s*930/.test(foreign.text)) {
+    if (/\bNo\s+2099\s*\/\s*\d+/.test(foreign.text)) {
       findings.push({
         id: "I3/mislabels-instrument",
         severity: "fatal",
         summary:
           'resolve_citation renders a post-2015 EU act with the pre-2015 "No" — a wrong citation of a real instrument, emitted while refusing it.',
         evidence: [`resolve_citation("${probe}") → ${foreign.text.slice(0, 220)}`],
+      });
+    }
+  }
+
+  // A document identified by its number ("EBA/GL/2099/04"), which no held document
+  // answers to. The framework alone can scope such a citation, and the number then
+  // reads as points of a provision. Declined, with no candidates, in any wording.
+  for (const probe of ["Article 1 of EBA/GL/2099/04", "Article 1 of ESMA/2099/1444"]) {
+    const identified = await s.call("resolve_citation", { text: probe });
+    const j = (identified.json ?? {}) as { match?: unknown; candidates?: unknown };
+    const candidates = Array.isArray(j.candidates) ? j.candidates.length : 0;
+    if ((j.match ?? null) !== null || candidates > 0) {
+      findings.push({
+        id: "I3/identifier",
+        severity: "fatal",
+        summary:
+          "resolve_citation answers a citation that names a document by an identifier no held document answers to out of a same-numbered provision of another document, reading the identifier's year and serial as points.",
+        evidence: [`resolve_citation("${probe}") -> match ${(j.match ?? null) === null ? "null" : "set"}, ${candidates} candidate(s)`],
       });
     }
   }

@@ -130,20 +130,32 @@ describe("descriptive instrument gate: declines", () => {
   });
 });
 
-describe("descriptive instrument gate: numbered descriptors the number gate cannot read", () => {
-  it("a descriptor followed by a number without (EU) is declined, not given candidates", () => {
-    for (const text of [
-      "Article 49 of the Delegated Regulation 2022/439",
-      "Article 49 of Commission Delegated Regulation No 2022/439",
-      "Article 49 of the Commission Implementing Regulation 2021/451",
-    ]) {
+describe("descriptive instrument gate: a descriptor followed by a number", () => {
+  it("belongs to the number gate when the number is one it reads, with or without (EU)", () => {
+    // "Delegated Regulation 2022/439" used to fall to the descriptive gate because
+    // the number gate wanted "(EU)"; it reads a bare YEAR/serial now, and the note
+    // is the better one - it names the number.
+    for (const [text, label] of [
+      ["Article 49 of the Delegated Regulation 2022/439", "Regulation (EU) 2022/439"],
+      ["Article 49 of Commission Delegated Regulation No 2022/439", "Regulation (EU) 2022/439"],
+      ["Article 49 of the Commission Implementing Regulation 2021/451", "Regulation (EU) 2021/451"],
+    ] as const) {
+      const r = resolveCitationDetailed(base(), text);
+      declined(r);
+      expect(r.coverage_note, text).toContain(`holds no ${label}`);
+      expect(r.coverage_note, text).not.toContain("by description");
+    }
+  });
+
+  it("stays a description, with advice about the form, where the number gate does not read the kind", () => {
+    for (const text of ["Article 49 of the ITS 2021/451", "Article 49 of the RTS (EU) No 2016/03", "Article 49 of the Delegated Act 12/2020"]) {
       const r = resolveCitationDetailed(base(), text);
       declined(r);
       const note = r.coverage_note ?? "";
-      expect(note).toContain("by description");
+      expect(note, text).toContain("by description");
       // The caller did cite a number; the advice is about its form, not "cite it by number".
-      expect(note).toContain("(EU)");
-      expect(note).not.toContain("Cite the instrument by number");
+      expect(note, text).toContain('kind then "(EU)" then its number');
+      expect(note, text).not.toContain("Cite the instrument by number");
     }
   });
 
@@ -156,6 +168,19 @@ describe("descriptive instrument gate: numbered descriptors the number gate cann
 
   it("a delegated ACT with (EU), which the number gate does not read, is a description", () => {
     const r = resolveCitationDetailed(base(), "Article 49 of the Delegated Act (EU) 2022/439");
+    declined(r);
+    expect(r.coverage_note).toContain("by description");
+  });
+
+  it("a descriptor with no number keeps the advice to cite it by number", () => {
+    const r = resolveCitationDetailed(base(), "Article 49 of the ITS on reporting");
+    expect(r.coverage_note).toContain("Cite the instrument by number");
+  });
+
+  it("a kind word beside a pair that is no act number is still read as a description", () => {
+    // The pattern matches "Regulation 5/2"; the number gate's reader does not call it
+    // an act. The descriptor must not be waved through on the strength of the pattern.
+    const r = resolveCitationDetailed(base(), "Article 49 of the Delegated Regulation 5/2");
     declined(r);
     expect(r.coverage_note).toContain("by description");
   });
