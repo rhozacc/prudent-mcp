@@ -236,6 +236,77 @@ export async function descriptiveInstrumentGateHolds(
 }
 
 /**
+ * A descriptor that names only an issuer's kind of document ("ECB Guideline"),
+ * beside a held document of that same issuer, is a loose name for that document and
+ * not a second instrument: "ECB Guidelines (EGIM) Chapter 3, paragraph 181" says the
+ * one document twice, and the id is the exact half. A server that reads the
+ * descriptor as a second instrument declines what it had just resolved.
+ *
+ * Corpus-agnostic: for a held document whose framework is the issuer, a record the
+ * server serves for it is cited by the document's id and the record's citation,
+ * with and without the descriptor in front. Where the plain citation resolves to
+ * the record, the descriptor must not change the answer.
+ */
+export async function issuerDescriptorIsLoose(s: Session): Promise<{ applicable: boolean; findings: Finding[] }> {
+  const findings: Finding[] = [];
+  const info = await s.call("get_corpus_info");
+  const holdings = ((info.json as { holdings?: Array<{ document_id?: unknown; framework?: unknown }> } | null)?.holdings ?? []);
+  const issuerDocs = new Set(
+    holdings.flatMap((h) =>
+      typeof h.document_id === "string" && typeof h.framework === "string" && h.framework.toLowerCase() === "ecb" ? [h.document_id] : [],
+    ),
+  );
+  if (issuerDocs.size === 0) return { applicable: false, findings };
+  const served = new Map<string, Array<{ id: string; citation: string }>>();
+  for (const q of ["default", "estimation", "downturn", "validation", "model", "risk", "regulation"]) {
+    const t = await s.call("search_regulation", { query: q, limit: 20 });
+    const rows = ((t.json as { results?: Array<{ id?: unknown; citation?: unknown; document_id?: unknown }> } | null)?.results ?? []);
+    for (const row of rows) {
+      if (typeof row.id !== "string" || typeof row.citation !== "string" || typeof row.document_id !== "string") continue;
+      if (!issuerDocs.has(row.document_id) || row.citation.trim() === "") continue;
+      const list = served.get(row.document_id) ?? [];
+      if (list.length < 2 && !list.some((r) => r.id === row.id)) list.push({ id: row.id, citation: row.citation });
+      served.set(row.document_id, list);
+    }
+  }
+  let asked = 0;
+  for (const [documentId, records] of served) {
+    for (const { id, citation } of records) {
+      const plain = await s.call("resolve_citation", { text: `${documentId} ${citation}` });
+      if (plain.isError || ((plain.json as { match?: { id?: unknown } | null } | null)?.match?.id) !== id) continue;
+      for (const text of [`ECB Guideline ${documentId} ${citation}`, `${citation} of the ECB Guidelines (${documentId})`]) {
+        const loose = await s.call("resolve_citation", { text });
+        if (loose.isError) continue;
+        asked++;
+        const matched = ((loose.json as { match?: { id?: unknown } | null } | null)?.match?.id);
+        if (matched !== id) {
+          findings.push({
+            id: "I3/issuer-descriptor",
+            severity: "fatal",
+            summary:
+              "resolve_citation declines, or answers with another record, a citation that names a held document by its id and also calls it by its issuer's kind of text (\"ECB Guideline\") - the descriptor was read as a second instrument.",
+            evidence: [
+              `resolve_citation("${documentId} ${citation}") -> ${id}`,
+              `resolve_citation("${text}") -> ${typeof matched === "string" ? matched : "no match"}`,
+              "the descriptor and the id name one document; the id is the exact half",
+            ],
+          });
+        }
+      }
+    }
+  }
+  if (asked === 0) {
+    findings.push({
+      id: "I3/issuer-descriptor-na",
+      severity: "info",
+      summary: "No record of a document of the descriptor's issuer resolved by its own id, so the descriptor beside a held document could not be tested.",
+      evidence: [`${issuerDocs.size} document(s) of that issuer listed by get_corpus_info`],
+    });
+  }
+  return { applicable: asked > 0, findings };
+}
+
+/**
  * When resolve_citation places a citation inside the record that contains it,
  * the note may say that record's text carries the point. That is a claim about
  * the SERVED text, and it used to be made without looking: an article of seven
@@ -435,6 +506,8 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
   findings.push(...container.findings);
   const own = await ownCitationsResolve(s);
   findings.push(...own.findings);
+  const issuer = await issuerDescriptorIsLoose(s);
+  findings.push(...issuer.findings);
 
   // Discover real article numbers from ids the server itself hands out.
   const seen = new Set<number>();
@@ -449,7 +522,7 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
     return {
       id: "I3",
       title: "Citation resolution is honest",
-      applicable: descriptive.applicable || container.applicable || own.applicable,
+      applicable: descriptive.applicable || container.applicable || own.applicable || issuer.applicable,
       findings: [
         ...findings,
         {

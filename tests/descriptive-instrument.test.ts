@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { openSession, type CallTrace, type Session } from "../evals/harness.ts";
-import { descriptiveInstrumentGateHolds, ownCitationsResolve } from "../evals/invariants.ts";
+import { descriptiveInstrumentGateHolds, issuerDescriptorIsLoose, ownCitationsResolve } from "../evals/invariants.ts";
 import { resolveCitationDetailed } from "../src/file-adapter.ts";
 import type { Regulation } from "../src/schema.ts";
 
@@ -183,6 +183,111 @@ describe("descriptive instrument gate: a descriptor followed by a number", () =>
     const r = resolveCitationDetailed(base(), "Article 49 of the Delegated Regulation 5/2");
     declined(r);
     expect(r.coverage_note).toContain("by description");
+  });
+});
+
+describe("descriptive instrument gate: an issuer's descriptor beside a held document of that issuer", () => {
+  // "ECB Guidelines (EGIM) Chapter 3, paragraph 5" calls one held document twice: by what
+  // its issuer calls such texts and by its id. The id is the exact half. A guideline of
+  // another issuer, with the same chapter and paragraph, is the decoy a mis-scope would find.
+  const ecb = (): Regulation[] => [
+    ...base(),
+    reg("regulation://egim/chapter-3-5", "Chapter 3, paragraph 5", "ecb-guide-internal-models", "ecb"),
+    reg("regulation://egim/chapter-4-5", "Chapter 4, paragraph 5", "ecb-guide-internal-models", "ecb"),
+    reg("regulation://gl-b/chapter-3-5", "Chapter 3, paragraph 5", "acme-gl-b", "acme"),
+  ];
+
+  it("is read as a loose name for the document named, whatever kind the issuer's descriptor says", () => {
+    for (const text of [
+      "ECB Guidelines (egim) Chapter 3, paragraph 5",
+      "ECB Guideline egim para 3.5",
+      "Chapter 3, paragraph 5 of the ECB Guidelines (egim)",
+      "see Chapter 3, paragraph 5 under ECB Guidelines (egim)",
+      "ECB Regulation (egim) Chapter 3, paragraph 5",
+      "ECB Decision egim, Chapter 3, paragraph 5",
+      "ECB recommendation (EGIM): Chapter 3, paragraph 5",
+      "Guidelines of the ECB, egim, Chapter 3, paragraph 5",
+      "European Central Bank guideline egim Chapter 3, paragraph 5",
+      "ecb-guide-internal-models, ECB Guidelines, Chapter 3 paragraph 5",
+    ]) {
+      const r = resolveCitationDetailed(ecb(), text);
+      expect(r.match?.id, text).toBe("regulation://egim/chapter-3-5");
+    }
+  });
+
+  it("resolves the document named, not the one the issuer's word could also fit", () => {
+    const r = resolveCitationDetailed(ecb(), "ECB Guidelines (egim) Chapter 4, paragraph 5");
+    expect(r.match?.id).toBe("regulation://egim/chapter-4-5");
+  });
+
+  it("goes on as it would without the descriptor: a provision the document lacks is its own miss", () => {
+    const r = resolveCitationDetailed(ecb(), "ECB Guidelines (egim) Chapter 9, paragraph 9");
+    declined(r);
+    expect(r.coverage_note).toContain("Nothing in this corpus is numbered 9.9 in the document named");
+    expect(r.coverage_note).not.toContain("by description");
+  });
+
+  it("is still a second instrument when the document named is of another issuer", () => {
+    const r = resolveCitationDetailed(ecb(), "ECB Guideline acme-gl-b, Chapter 3, paragraph 5");
+    declined(r);
+    expect(r.coverage_note).toContain("acme-gl-b");
+    expect(r.coverage_note).toContain('"ECB Guideline"');
+  });
+
+  it("is still a second instrument when the descriptor has no issuer to share", () => {
+    const r = resolveCitationDetailed(ecb(), "Chapter 3, paragraph 5 of the RTS on reporting (egim)");
+    declined(r);
+    expect(r.coverage_note).toContain("which of the two the provision belongs to cannot be told");
+  });
+
+  it("is still a second instrument when another instrument is named too", () => {
+    const r = resolveCitationDetailed(ecb(), "ECB Guidelines (egim) Chapter 3, paragraph 5, CRR");
+    declined(r);
+    expect(r.coverage_note).toContain("CRR");
+    expect(r.coverage_note).toContain("which of the two the provision belongs to cannot be told");
+  });
+
+  it("is one specific instrument, not a kind of text, when it carries a number or an identifier", () => {
+    for (const [text, expected] of [
+      ["ECB Guideline (EU) 2017/697 egim Chapter 3, paragraph 5", "holds no Guideline (EU) 2017/697"],
+      ["ECB Guideline ECB/2014/60 egim Chapter 3, paragraph 5", "names a document this corpus holds"],
+      ["ECB Regulation 468/2014 (egim) Chapter 3, paragraph 5", "holds no Regulation No 468/2014"],
+    ] as const) {
+      const r = resolveCitationDetailed(ecb(), text);
+      declined(r);
+      expect(r.coverage_note, text).toContain(expected);
+    }
+  });
+
+  it("with no document named it still declines, and says the issuer's documents the corpus does hold", () => {
+    for (const text of ["Chapter 3, paragraph 5 of the ECB Guidelines on reporting", "the ECB guidelines, chapter 3 paragraph 5"]) {
+      const r = resolveCitationDetailed(ecb(), text);
+      declined(r);
+      const note = r.coverage_note ?? "";
+      expect(note, text).toContain("holds no document identified as such");
+      expect(note, text).toContain("under the ECB framework (ecb-guide-internal-models)");
+      expect(note, text).toContain("cite it by its id or title");
+    }
+  });
+
+  it("says nothing of an issuer's documents when the corpus holds none", () => {
+    const noEcb = ecb().filter((r) => r.framework !== "ecb");
+    const r = resolveCitationDetailed(noEcb, "Chapter 3, paragraph 5 of the ECB Guidelines on reporting");
+    declined(r);
+    expect(r.coverage_note).not.toContain("framework (");
+  });
+
+  it("does not offer an issuer's documents for a descriptor that has no issuer", () => {
+    const r = resolveCitationDetailed(ecb(), "Article 49 of the RTS on reporting");
+    declined(r);
+    expect(r.coverage_note).not.toContain("framework (");
+  });
+
+  it("quotes the descriptor's own words and stops short of a held document's name", () => {
+    const r = resolveCitationDetailed(ecb(), "Article 49 of the RTS acme-gl-a");
+    declined(r);
+    expect(r.coverage_note).toContain('("RTS")');
+    expect(r.coverage_note).not.toContain('"RTS acme-gl-a"');
   });
 });
 
@@ -711,6 +816,72 @@ describe("eval I3/own-citation", () => {
     const session = await openSession({ corpusFile: file });
     try {
       const r = await ownCitationsResolve(session);
+      expect(r.applicable).toBe(false);
+    } finally {
+      await session.close();
+    }
+  });
+});
+
+// ── Eval I3/issuer-descriptor ─────────────────────────────────────────────────
+
+describe("eval I3/issuer-descriptor", () => {
+  // The words the eval searches for are in the text, so the records are served in rows.
+  const ecbRecords: Regulation[] = ["Chapter 3, paragraph 5", "Chapter 4, paragraph 7"].map((citation, n) => ({
+    ...reg(`regulation://egx/chapter-${n}`, citation, "ecb-guide-x", "ecb"),
+    text: `Synthetic default risk estimation model text ${n}.`,
+  }));
+
+  it("binds on a corpus holding a document of the issuer and finds the server reads the descriptor as loose", async () => {
+    const file = join(dir, "issuer.json");
+    writeFileSync(file, JSON.stringify({ regulation: ecbRecords, sources: [source("ecb", "ecb-guide-x")] }));
+    const session = await openSession({ corpusFile: file });
+    try {
+      const r = await issuerDescriptorIsLoose(session);
+      expect(r.applicable).toBe(true);
+      expect(r.findings.filter((f) => f.severity === "fatal")).toEqual([]);
+      const asked = session.traces.filter((t) => t.tool === "resolve_citation").map((t) => String(t.args["text"]));
+      expect(asked).toContain("ECB Guideline ecb-guide-x Chapter 3, paragraph 5");
+    } finally {
+      await session.close();
+    }
+  });
+
+  // A server that reads the descriptor as a second instrument, as the gate did.
+  const stricter = (): Session => {
+    const trace = (tool: string, args: Record<string, unknown>, json: unknown): CallTrace => ({
+      tool, args, text: JSON.stringify(json), chars: 0, tokens: 0, ms: 0, isError: false, json,
+    });
+    return {
+      tools: [], surfaceTokens: 0, wireTokens: 0, instructions: "", traces: [],
+      async close() {},
+      async call(tool, args = {}) {
+        if (tool === "get_corpus_info") return trace(tool, args, { holdings: [{ document_id: "ecb-guide-x", framework: "ecb" }] });
+        if (tool === "search_regulation") {
+          return trace(tool, args, { results: ecbRecords.map((r) => ({ id: r.id, citation: r.citation, document_id: r.document_id })) });
+        }
+        const text = String(args["text"] ?? "");
+        const hit = ecbRecords.find((r) => text.includes(r.citation));
+        const second = /ECB Guideline/.test(text);
+        return trace(tool, args, { match: second || hit === undefined ? null : { id: hit.id }, candidates: [] });
+      },
+    };
+  };
+
+  it("fails a server that declines a citation it resolves once the descriptor is added", async () => {
+    const r = await issuerDescriptorIsLoose(stricter());
+    const fatal = r.findings.filter((f) => f.severity === "fatal");
+    expect(fatal.length).toBeGreaterThan(0);
+    expect(fatal.every((f) => f.id === "I3/issuer-descriptor")).toBe(true);
+    expect(fatal[0]?.evidence.join(" ")).toContain("ECB Guideline ecb-guide-x");
+  });
+
+  it("is not applicable when the corpus holds no document of the issuer", async () => {
+    const file = join(dir, "issuer-none.json");
+    writeFileSync(file, JSON.stringify({ regulation: [reg("regulation://gl-a/p1", "Paragraph 1", "acme-gl-a", "acme")], sources: [source("acme", "acme-gl-a")] }));
+    const session = await openSession({ corpusFile: file });
+    try {
+      const r = await issuerDescriptorIsLoose(session);
       expect(r.applicable).toBe(false);
     } finally {
       await session.close();

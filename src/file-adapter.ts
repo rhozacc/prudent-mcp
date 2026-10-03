@@ -876,28 +876,50 @@ const DESCRIPTOR_END =
 /** A full stop that ends the sentence rather than abbreviating a word. */
 const SENTENCE_END = /\.(?=\s+[A-Z]|\s*$)/;
 
+/** Where in `after` a held document's name begins (one of `names`, as whole tokens), or -1. */
+function nameStartsAt(after: string, names: string[][]): number {
+  if (names.length === 0) return -1;
+  const words = [...after.matchAll(/[A-Za-z0-9]+/g)].map((m) => ({
+    at: m.index,
+    token: CITATION_EXPANSIONS[m[0].toLowerCase()] ?? m[0].toLowerCase(),
+  }));
+  for (let i = 0; i < words.length; i++) {
+    if (names.some((n) => n.length > 0 && n.every((t, j) => words[i + j]?.token === t))) return words[i]?.at ?? -1;
+  }
+  return -1;
+}
+
 /**
  * The caller's own words for a described instrument, quoted back in a note: the
  * descriptor and what it is on, cut where something else starts. The whole rest
  * of the clause used to be quoted, which put the held document's id and the
- * provision itself inside "the description".
+ * provision itself inside "the description". A held document's name cuts it too:
+ * "ECB Guideline egim para 3.181" describes "ECB Guideline", and names egim.
  */
-function descriptorQuote(text: string, start: number, matched: string): string {
+function descriptorQuote(text: string, start: number, matched: string, names: string[][]): string {
   const after = text.slice(start + matched.length);
-  const stops = [after.search(DESCRIPTOR_END), after.search(SENTENCE_END)].filter((n) => n !== -1);
+  const stops = [after.search(DESCRIPTOR_END), after.search(SENTENCE_END), nameStartsAt(after, names)].filter((n) => n !== -1);
   const own = `${matched}${stops.length === 0 ? after : after.slice(0, Math.min(...stops))}`;
   const body = own
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/(?:\s+(?:of|in|under|from|and|or|to|the|an?|as|by|at|for|with|see))+$/i, "")
+    .replace(/(?:\s+(?:of|in|on|under|from|and|or|to|the|an?|as|by|at|for|with|see))+$/i, "")
     .replace(/[:;,\s]+$/, "");
   // A full stop closes a dotted acronym ("R.T.S.") and nothing else.
   const quote = /(?:\b[A-Za-z]\.){2,}$/.test(body) ? body : body.replace(/\.+$/, "");
   return quote.length === 0 || quote.length > 80 ? matched : quote;
 }
 
-/** A number straight after a descriptor, as "ITS 2021/451" or "RTS (EU) No 2016/03" give it. */
-const NUMBER_AFTER_DESCRIPTOR = new RegExp(String.raw`^\s*(?:\(${ACT_TAG}\)\s*)?(?:no\.?\s*)?\d{1,4}\s*\/\s*\d{1,4}\b`, "i");
+/**
+ * A number straight after a descriptor, as "ITS 2021/451" or "RTS (EU) No 2016/03"
+ * give it, or the identifier an authority numbers it with ("ECB Guideline
+ * ECB/2014/60"): either names one specific instrument, not a kind of text.
+ */
+const NUMBER_AFTER_DESCRIPTOR = new RegExp(
+  String.raw`^\s*(?:\(${ACT_TAG}\)\s*)?(?:no\.?\s*)?\d{1,4}\s*\/\s*\d{1,4}\b` +
+    String.raw`|^\s*\(?\s*[A-Za-z]{2,10}(?:\s*\/\s*[A-Za-z]{2,10})*\s*\/\s*(?:19|20)\d{2}\s*\/\s*\d{1,4}\b`,
+  "i",
+);
 
 /**
  * Does the number gate read an act number starting at the kind word that ends this
@@ -918,7 +940,11 @@ function numberGateReads(acts: NumberedAct[], start: number, matched: string): b
  * POSITION, never by searching for their text: a descriptor spelled "rts" would
  * otherwise be found first inside "reports".
  */
-function describedInstruments(text: string): { found: DescribedInstrument[]; residual: string } {
+function describedInstruments(
+  text: string,
+  // The names of the documents the corpus holds, as token windows, so a quote can stop short of one.
+  names: string[][] = [],
+): { found: DescribedInstrument[]; residual: string } {
   // An all-capitals citation has lost the case that tells ITS from a shouted
   // pronoun. The other kinds have no pronoun reading, so they stay recognised.
   const caseLost = !/[a-z]/.test(text);
@@ -952,7 +978,7 @@ function describedInstruments(text: string): { found: DescribedInstrument[]; res
       cut.push([start - lead.length, end + id[0].length]);
       continue;
     }
-    const quote = descriptorQuote(text, start, m[0]);
+    const quote = descriptorQuote(text, start, m[0], names);
     // The same kind named twice in one phrase ("regulatory technical standards
     // (RTS) on ...") is one instrument, quoted once.
     if (!found.some((f) => f.quote === quote || (f.key === key && !f.identifier))) {
@@ -1436,19 +1462,34 @@ export function resolveCitationDetailed(
   // corpus that does hold an RTS falls through to normal resolution. When the
   // citation ALSO names a held document, which of the two the "Article 49(3)"
   // belongs to is not something this resolver can know: decline, naming both.
-  const described = describedInstruments(text);
+  //
+  // One exception, and it is not a second instrument at all: an ECB-kind descriptor
+  // ("ECB Guidelines", "ECB Regulation") beside a held document whose framework is
+  // that same issuer. "ECB Guidelines (EGIM) Chapter 3, paragraph 181" calls the one
+  // document twice, once by what the ECB calls such texts and once by its id, and
+  // the id is the exact half. The descriptor is then a loose description of the
+  // document named and resolution goes on as if it were absent. Not when the
+  // descriptor is numbered or an identifier (that is one specific act), not when
+  // another instrument is named, and not when the document named is of another issuer.
+  const described = describedInstruments(text, [...index.values()].map((e) => e.tokens));
   const unheld = described.found.filter((d) => !holdsKind(regulations, d.held));
   // Only when there is a provision number to place. Without one nothing can be
   // sourced from a same-numbered provision, and the "no provision number" note
   // below already says the instrument may be described without being held.
   const placeable =
     spineOf(citationTokens(described.residual).filter((t) => !STRUCTURAL.has(t))).length > 0;
-  if (unheld.length > 0 && placeable) {
+  const namedDocs = unheld.length > 0 && placeable ? scopeToDocument(citationTokens(described.residual), index).docs : null;
+  const looselyDescribed = ((): boolean => {
+    if (namedDocs === null || docs === null || instrumentName !== null) return false;
+    if (!unheld.every((d) => d.issuer !== undefined && !d.identifier && !d.numbered)) return false;
+    const frameworks = new Set(regulations.filter((r) => namedDocs.has(r.document_id)).map((r) => r.framework.toLowerCase()));
+    return frameworks.size === 1 && unheld.every((d) => frameworks.has(d.issuer ?? ""));
+  })();
+  if (unheld.length > 0 && placeable && !looselyDescribed) {
     const quoted = unheld.map((d) => `"${d.quote}"`).join(" and ");
     const identifiers = unheld.every((d) => d.identifier);
     const heldNames: string[] = [];
     if (instrumentName !== null) heldNames.push(instrumentName);
-    const { docs: namedDocs } = scopeToDocument(citationTokens(described.residual), index);
     // `crr` the instrument and `crr` the document are one thing named twice.
     const instrumentDocs = instrument === null ? new Set<string>() : heldInstrumentDocuments(regulations, instrument);
     for (const d of namedDocs ?? []) {
@@ -1475,6 +1516,18 @@ export function resolveCitationDetailed(
       " search_regulation with its name for what served records say about it, or " +
       "get_corpus_info for what is loaded. This note states nothing about what it requires.";
     const how = identifiers ? "an identifier" : "description";
+    // A description by an issuer's kind ("ECB Guidelines") does not mean the corpus
+    // holds nothing from that issuer, and "no document identified as such" must not
+    // read as if it did. Listed, never matched: which of them was meant is for the
+    // caller to say.
+    const issuers = [...new Set(unheld.flatMap((d) => (d.issuer === undefined || d.identifier || d.numbered ? [] : [d.issuer])))];
+    const sameIssuer = [...new Set(regulations.filter((r) => issuers.includes(r.framework.toLowerCase())).map((r) => r.document_id))];
+    const issuerNote =
+      sameIssuer.length === 0
+        ? ""
+        : ` It does hold ${sameIssuer.length === 1 ? "a document" : "documents"} under the ${issuers.map((i) => i.toUpperCase()).join("/")} ` +
+          `framework (${sameIssuer.slice(0, 5).join(", ")}${sameIssuer.length > 5 ? ", …" : ""}); ` +
+          "if one of those is what was meant, cite it by its id or title.";
     return none({
       coverage_note:
         heldNames.length === 0
@@ -1484,7 +1537,7 @@ export function resolveCitationDetailed(
               `same-numbered provision from another document. ${wayOut}`
             : `"${text}" names an instrument by description (${quoted}), and this corpus holds no ` +
               "document identified as such. Nothing was matched, rather than sourcing a same-numbered " +
-              `provision from another document. ${wayOut}`
+              `provision from another document.${issuerNote} ${wayOut}`
           : `"${text}" names ${heldList} ` +
             `and also an instrument by ${how} (${quoted}) that it holds no document identified ` +
             "as, so which of the two the provision belongs to cannot be told. Nothing was matched, " +
