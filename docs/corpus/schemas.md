@@ -493,6 +493,52 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
             "full",
             "partial"
           ]
+        },
+        "pending_changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "reference": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "announced",
+                  "adopted"
+                ]
+              },
+              "effective_from": {
+                "type": "string",
+                "format": "date"
+              },
+              "ingested": {
+                "type": "boolean"
+              },
+              "affects": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "note": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "status",
+              "ingested"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -741,6 +787,54 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
               "document_id",
               "framework",
               "records"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "pending_changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "pattern": "^source:\\/\\/.+"
+              },
+              "document_id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "reference": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "announced",
+                  "adopted"
+                ]
+              },
+              "effective_from": {
+                "type": "string",
+                "format": "date"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "upcoming",
+                  "in_force_not_ingested",
+                  "undated"
+                ]
+              }
+            },
+            "required": [
+              "source",
+              "document_id",
+              "title",
+              "status",
+              "state"
             ],
             "additionalProperties": false
           }

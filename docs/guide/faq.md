@@ -77,6 +77,12 @@ Internally, the adapter is expected to hold the full version history per `Regula
 
 Where the corpus records no version of a provision for the date you asked about, it serves the current text rather than nothing — and the response carries an `as_of_note` saying that this is the version named in `document_version`, that it may differ from the text in force on that date, and that it must not be presented as the historical text. `expand_regulation` and `get_regulation_tree` carry the same note. A date before the source document existed is a miss.
 
+### Is the text I am reading about to change — or already out of date?
+
+A corpus is a snapshot, so the source registry says what the snapshot is behind on. Where it records a change to a document that this corpus has not ingested, `get_regulation`, `expand_regulation`, `get_regulation_tree` (on the root) and a `resolve_citation` match carry a `pending_changes_note`: which change, when it applies (and how many days away), and that the text served is the version before it — or, once the date has passed, that it "may no longer be the text in force". `search_regulation` adds one sentence to `notice` for a page that includes such a document, and `get_corpus_info.pending_changes` lists every open change. The note says nothing about what the change provides; the corpus does not hold it. Under an `as_of` earlier than the change, it is left out (the text of that date is not behind it).
+
+**No note is not "nothing is coming".** It means the registry records no open change for the document, or nobody has declared the field; `get_source` shows which (`pending_changes: []` is "looked, none found", `verified` says when; a missing key is "never looked"). See [Declaring pending changes](../corpus/#declaring-pending-changes).
+
 ### A passage cites "Regulation (EU) xx/xx". Is that a regulation?
 
 No. A guideline written before a technical standard was adopted names it with a placeholder number. `get_regulation` and `expand_regulation` flag such a record with `pre_adoption_placeholders` (the spans) and a `notice`: the placeholder is not a citation, the instrument may be identified elsewhere in the corpus or not at all, and the passage is not the current state of the law. The flag is computed from the text; search rows and `resolve_citation` matches do not carry it.

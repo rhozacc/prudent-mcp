@@ -42,6 +42,7 @@ import {
   unknownRegulationMiss,
   withAsOfNote,
 } from "./shared.ts";
+import { pendingNoteFor, withPendingNote } from "./pending.ts";
 
 // ── Local return types ────────────────────────────────────────────────────────
 
@@ -377,10 +378,11 @@ export function registerMetaTools(server: McpServer): void {
       description:
         "What's loaded right now — the entry point before anything else. " +
         "Returns { last_updated, counts: {regulation, test, check, playbook, source}, " +
-        "coverage: [...], holdings: [...], stale_sources: [...] } — coverage only names documents; " +
+        "coverage: [...], holdings: [...], stale_sources: [...], pending_changes: [...] } — coverage only names documents; " +
         "holdings gives each one's { document_id, framework, title, records, partial }, partial being " +
         "what the source registry declares (key absent = undeclared, not full). stale_sources lists " +
-        "current sources verified more than 30 days ago; follow up with list_sources, then list_review_areas.",
+        "current sources verified more than 30 days ago; pending_changes lists registry-recorded changes not yet " +
+        "ingested (key absent = none declared).",
       inputSchema: {},
       outputSchema: CorpusInfoSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
@@ -445,7 +447,7 @@ export function registerMetaTools(server: McpServer): void {
         "containing provisions are held; open a candidate by id.\n" +
         "  match null + coverage_note → why, in terms of what this corpus covers (and whether the " +
         "document is held only in part).\n" +
-        "  confidence 'exact' | 'alias' | 'segment' says which rule matched.\n" +
+        "  confidence 'exact' | 'alias' | 'segment' says which rule matched; a match carries pending_changes_note.\n" +
         "A null match is not a citation: fall back to search_regulation on the citation's key words.",
       inputSchema: {
         text: z.string().describe("A loose, human-prose citation."),
@@ -453,7 +455,13 @@ export function registerMetaTools(server: McpServer): void {
       outputSchema: CitationResolutionSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
     },
-    async ({ text }) => ok(await adapters.meta.resolveCitation(text)),
+    async ({ text }) => {
+      const resolution = await adapters.meta.resolveCitation(text);
+      // A match is a record, and a record of a document with a change the corpus
+      // has not ingested needs the same caveat it carries from get_regulation.
+      const pending = resolution.match === null ? undefined : await pendingNoteFor(resolution.match);
+      return ok(withPendingNote({ ...resolution }, pending));
+    },
   );
 
   server.registerTool(
@@ -474,8 +482,7 @@ export function registerMetaTools(server: McpServer): void {
         "playbooks a backend authored, so it reflects how the corpus was written up rather than everything " +
         "the corpus holds on a subject, and it may draw on fewer documents than the corpus covers. " +
         "Returns { areas: [{ id, name, parent, children }] }; ids are dotted slugs and a " +
-        "child id is prefixed by its parent's. With no authored taxonomy one is derived from " +
-        "the playbooks present, so this is never empty for a corpus that has any.",
+        "child id is prefixed by its parent's.",
       inputSchema: {},
       outputSchema: z.object({ areas: z.array(ReviewAreaSchema) }).passthrough(),
       annotations: READ_ONLY_HINTS,
@@ -609,8 +616,8 @@ export function registerMetaTools(server: McpServer): void {
         "Fetch a regulation with its children resolved inline — sub-regulations plus the " +
         "checks/tests that operationalize it; the reverse-direction companion to " +
         "expand_playbook. Returns the regulation fields plus children as { type, id, label } " +
-        "stubs (default) or complete records (detail: 'full'). as_of and the placeholder flag work as " +
-        "in get_regulation; an as_of_note also covers children served from current text. " +
+        "stubs (default) or complete records (detail: 'full'). as_of, the placeholder flag and pending_changes_note " +
+        "work as in get_regulation; an as_of_note also covers children served from current text. " +
         "Unknown ids are isError misses. Use " +
         "get_regulation_tree to walk the whole sub-tree.",
       inputSchema: {
@@ -652,7 +659,13 @@ export function registerMetaTools(server: McpServer): void {
               },
               "children",
             );
-      return ok(withAsOfNote(withPlaceholderFlag(detail === "full" ? expanded : toConciseRegulation(expanded)), note));
+      const pending = await pendingNoteFor(raw, as_of);
+      return ok(
+        withAsOfNote(
+          withPendingNote(withPlaceholderFlag(detail === "full" ? expanded : toConciseRegulation(expanded)), pending),
+          note,
+        ),
+      );
     },
   );
 
@@ -667,7 +680,7 @@ export function registerMetaTools(server: McpServer): void {
         "(default) keeps citations and leaf labels only; detail: 'full' embeds each node's " +
         "complete record. depth defaults to 5 and the walk is capped at 200 total nodes; " +
         "nodes cut off by depth, a cycle, or the cap carry truncated: true. With as_of, an " +
-        "as_of_note on the root counts nodes served from current text. Unknown roots are isError misses — " +
+        "as_of_note on the root counts nodes served from current text; pending_changes_note covers the root's document. Unknown roots are isError misses — " +
         "verify with search_regulation.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(
@@ -703,7 +716,9 @@ export function registerMetaTools(server: McpServer): void {
                 noVersion: [...noVersion].filter((n) => n !== id).length,
               },
             );
-      return ok(withAsOfNote(detail === "full" ? node : toConciseTree(node), note));
+      // One note for the root's document; nodes in another document are not walked for theirs.
+      const pending = await pendingNoteFor(node.record, as_of);
+      return ok(withAsOfNote(withPendingNote(detail === "full" ? node : toConciseTree(node), pending), note));
     },
   );
 

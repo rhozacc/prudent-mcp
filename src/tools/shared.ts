@@ -242,6 +242,12 @@ export interface RankedSearchPage<T extends { id: string }, Row extends object> 
   concise: (record: T, match: SearchMatch<T> | undefined) => Row;
   /** The `detail: 'full'` row; the record itself when omitted. */
   full?: (record: T) => object;
+  /**
+   * A sentence for `notice` computed from the rows that actually ended up on the
+   * page (after any shortening), appended after the truncation and weak-match
+   * notices and never in place of them.
+   */
+  pageNotice?: (pageRows: object[]) => string | undefined;
 }
 
 /**
@@ -272,7 +278,10 @@ export function rankedSearchResult<T extends { id: string }, Row extends object>
         });
   // Highest of the whole ranked set, taken before paging.
   const best = ranked.reduce<number | undefined>((b, m) => (b === undefined || m.coverage > b ? m.coverage : b), undefined);
-  return searchResult(withQueryCoverage(paginate(rows, limit, offset), distinctQueryTokens(query), best));
+  const envelope = withQueryCoverage(paginate(rows, limit, offset), distinctQueryTokens(query), best);
+  const extra = page.pageNotice?.(envelope.results);
+  if (extra === undefined) return searchResult(envelope);
+  return searchResult({ ...envelope, notice: envelope.notice === undefined ? extra : `${envelope.notice} ${extra}` });
 }
 
 /**
@@ -303,7 +312,7 @@ export function searchInputShape(fieldsDoc: string) {
     query: z
       .string()
       .min(2)
-      .describe(`Search phrase, at least 2 characters — ranked, field-scoped search over ${fieldsDoc}. Empty/one-char queries are rejected; enumeration is not search's job.`),
+      .describe(`Search phrase, 2+ characters: ranked, field-scoped search over ${fieldsDoc}.`),
     limit: z
       .number()
       .int()

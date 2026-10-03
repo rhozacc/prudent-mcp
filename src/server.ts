@@ -52,8 +52,10 @@ export function createServer(): McpServer {
         "resolve_citation declines rather than guesses: a citation naming an instrument or provision this corpus does " +
         "not hold comes back with match null and a coverage_note (candidates only where narrower or containing provisions are held). A null match is not a citation — " +
         "never present one as though the text were found.\n" +
-        "Sources are the currency registry (verified dates, supersession, milestones); they join regulation via " +
-        "framework + document_id, never by URI reference.\n" +
+        "Sources are the currency registry (verified dates, supersession, milestones, pending_changes); they join " +
+        "regulation via framework + document_id, never by URI reference. A `pending_changes_note` on a record (or " +
+        "get_corpus_info.pending_changes) means a change to that document applies, or will, that this corpus has not " +
+        "ingested: the served text is the version before it and may already be out of date — say so, with the date.\n" +
         // The three rules below are about the EDGE of the corpus, and they exist
         // because a grounded answer once lost to an ungrounded one on exactly
         // this: the server was authoritative about what it held and silent

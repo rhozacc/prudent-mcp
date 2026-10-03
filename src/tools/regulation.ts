@@ -9,6 +9,7 @@ import { MAX_PLACEHOLDER_SPANS, MAX_PLACEHOLDER_SPAN_CHARS, withPlaceholderFlag 
 import type { Regulation } from "../schema.ts";
 import { ProvisionKindSchema, RegulationSchema, regulationIdSchema } from "../schema.ts";
 import { regulationSearchFields } from "../search.ts";
+import { pendingNoteFor, pendingPageNotice, withPendingNote } from "./pending.ts";
 import {
   AS_OF_MISS_CONTEXT,
   READ_ONLY_HINTS,
@@ -102,9 +103,13 @@ export function registerRegulationTools(server: McpServer): void {
     },
     async ({ query, limit, offset, detail }) => {
       const records = await adapters.regulation.search(query);
+      // Rows from a document with a change the corpus has not ingested say so once
+      // per page, in `notice`; the note on each record is one get_regulation away.
+      const pageNotice = await pendingPageNotice(records);
       // The excerpt comes from the same local ranking that supplies `coverage`.
       return rankedSearchResult({
         records,
+        pageNotice,
         query,
         fields: regulationSearchFields(query),
         detail,
@@ -135,7 +140,8 @@ export function registerRegulationTools(server: McpServer): void {
         "Fetch one regulation paragraph by URI. Returns the full record: citation, verbatim " +
         "text, and attached commentary (supervisor Q&A, interpretive letters). Latest version " +
         "by default; pass as_of (ISO date) for the text in force on that date, or the current text " +
-        "with an as_of_note where no version is recorded for it. A pre-adoption placeholder act " +
+        "with an as_of_note where no version is recorded for it. A registry-recorded change not yet ingested is " +
+        "flagged: pending_changes_note. A pre-adoption placeholder act " +
         "number is flagged: pre_adoption_placeholders + notice. An as_of predating every recorded " +
         "version, or an unknown id, is an isError miss. get_referrers finds operationalising checks/playbooks.",
       inputSchema: {
@@ -159,6 +165,10 @@ export function registerRegulationTools(server: McpServer): void {
               "current text was served. Says which version (document_version) and that it must not be " +
               "presented as the historical text.",
           ),
+        pending_changes_note: z
+          .string()
+          .optional()
+          .describe("A registry-recorded change to this document the corpus has not ingested."),
         pre_adoption_placeholders: z
           .array(z.string().max(MAX_PLACEHOLDER_SPAN_CHARS))
           .max(MAX_PLACEHOLDER_SPANS)
@@ -176,7 +186,10 @@ export function registerRegulationTools(server: McpServer): void {
     },
     async ({ id, as_of }) => {
       const { record, note } = await resolveRegulation(id, as_of);
-      if (record !== null) return ok(withAsOfNote(withPlaceholderFlag(record), note));
+      if (record !== null) {
+        const pending = await pendingNoteFor(record, as_of);
+        return ok(withAsOfNote(withPendingNote(withPlaceholderFlag(record), pending), note));
+      }
       if (as_of !== undefined && (await adapters.regulation.get(id)) !== null) {
         return miss(
           `No version of ${id} was in force on ${as_of} according to this corpus's history. ` +

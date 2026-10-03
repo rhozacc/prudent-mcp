@@ -24,6 +24,7 @@ import type {
 } from "../src/adapters.ts";
 import { resolveCitationDetailed } from "../src/file-adapter.ts";
 import { computeHoldings } from "../src/holdings.ts";
+import { pendingChangeSummaries } from "../src/pending.ts";
 import { computeReferrers } from "../src/referrers.ts";
 import {
   checkSearchFields,
@@ -396,6 +397,19 @@ const SOURCES: Record<SourceId, Source> = {
     // what makes a miss on an unseeded article read as absent from the corpus
     // rather than from the law (and what binds eval I12 on the demo).
     coverage: "partial",
+    // An amendment the registry knows is coming and the seed does not carry. It is
+    // dated relative to today, like `verified`, so the demo permanently shows an
+    // UPCOMING change instead of one that rots into "in force" (and it is what
+    // binds eval I15 on the demo).
+    pending_changes: [
+      {
+        title: "Amending Regulation (demo)",
+        status: "adopted",
+        effective_from: daysAgo(-60),
+        ingested: false,
+        affects: ["Article 178"],
+      },
+    ],
     milestones: [],
     url: "https://eur-lex.europa.eu/eli/reg/2013/575/oj",
   },
@@ -409,6 +423,8 @@ const SOURCES: Record<SourceId, Source> = {
     published: "2017-11-20",
     effective_from: "2021-01-01",
     coverage: "full",
+    // Looked at and nothing pending: `[]` is a statement, an absent key is not.
+    pending_changes: [],
     // Deliberately stale — exercises stale_sources and the validate warning.
     verified: daysAgo(45),
     milestones: [],
@@ -546,6 +562,7 @@ const inMemorySource: SourceAdapter = {
 
 const inMemoryMeta: MetaAdapter = {
   async info() {
+    const pending = pendingChangeSummaries(Object.values(SOURCES));
     return {
       last_updated: "2024-10-01T00:00:00Z",
       counts: {
@@ -558,6 +575,7 @@ const inMemoryMeta: MetaAdapter = {
       coverage: ["CRR", "EBA-GL-2017-16"],
       stale_sources: staleSourceIds(Object.values(SOURCES)),
       holdings: computeHoldings(Object.values(REGULATIONS), Object.values(SOURCES)),
+      ...(pending === undefined ? {} : { pending_changes: pending }),
     };
   },
   async referrers(id) {

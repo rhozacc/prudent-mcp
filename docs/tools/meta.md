@@ -31,6 +31,15 @@ What's loaded right now. Tells Claude what's actually queryable before it starts
     partial?: boolean;        // true: source declares partly held · false: declares full · key ABSENT: undeclared
   }>;
   stale_sources: SourceId[];  // current sources whose verified date is >30 days old — computed, never stored
+  pending_changes?: Array<{   // registry-recorded changes this corpus has NOT ingested — computed at serve time
+    source: SourceId;
+    document_id: string;
+    title: string;
+    reference?: string;
+    status: "announced" | "adopted";
+    effective_from?: string;  // ISO date, when the registry records one
+    state: "upcoming" | "in_force_not_ingested" | "undated";
+  }>;
 }
 ```
 
@@ -46,6 +55,8 @@ get_corpus_info()
 **`coverage` names documents; `holdings` says how much of each.** A corpus holds a subset of the articles of a regulation, and `"CRR"` in a list reads as the whole of it. `partial` is what the source registry *declares* about the document (see [Corpus structure → Declaring coverage](../corpus/#declaring-coverage)): `true` means the document is held in part, so a provision missing from the corpus is not necessarily missing from the law; `false` means the registry declares it held in full; **an absent `partial` key means nothing was declared** — it is not "full". Only a current source speaks for a document, and where a document's current sources disagree, partial wins. `holdings` is computed from the records and the registry each time, even when the corpus file ships a stored `corpus_info` block, and `coverage` is left exactly as authored. An adapter that predates the field omits it.
 
 A non-empty `stale_sources` means the registry needs a maintenance run — follow up with `list_sources`.
+
+**`pending_changes` says what the corpus is behind on.** A snapshot is silent about a change applying after it, and a text that has been overtaken reads exactly like one that has not. The list holds every change the registry records for a document and the corpus has **not** ingested, each with its computed `state`: `upcoming` (applies after today: the served text is the version before it), `in_force_not_ingested` (applies today or earlier: the served text may no longer be the text in force) or `undated` (no application date recorded). Ingested changes are not listed. The key is **absent** when no source declares `pending_changes` at all (the registry never looked) and `[]` when some do and nothing is open; absent is not "nothing is coming". Only current sources speak. The state is computed from the dates on every call, never stored. See [Corpus structure → Declaring pending changes](../corpus/#declaring-pending-changes); the same statement rides on the records themselves as [`pending_changes_note`](./regulation#get-regulation).
 
 ---
 
@@ -106,6 +117,8 @@ Passes, in order, and nothing below them:
    The note does not assume the container carries the point: the container's text is read for it first (`textCarriesPoint`), each deeper segment looked for only inside the span of the one before it — point `(b)` must follow paragraph 2's marker and precede paragraph 3's. Markers are read as `1.`, `(1)` or `1)` for numbers and `(a)` or `a)` for letters, only where a list item can start (at a line head, or after `;` `:` `.`), and only as a run: `9.` is a paragraph only after `1.` to `8.`. The verdict decides the wording. **yes** (every marker found in place): "whose text carries point …". **no** (the text numbers items that way and the marker is not there): "no point … was found in its text; its numbering may differ. Open it and check before anything is cited from this resolution." **unknown** (no markers at all, another numbering style, an irregular run, an inserted `1a`, roman sub-points): "whether its text has point … could not be established". Only a verified `yes` says the text carries the point; a `no` is a statement about markers found, not about the law.
 
 The `match` record is served undecorated: it does not carry `pre_adoption_placeholders`, so a resolved record whose text names an instrument by a placeholder number (Regulation (EU) xx/xx) is not flagged here. Fetch it with `get_regulation` for the flag.
+
+A response with a `match` whose document has a change the corpus has not ingested carries `pending_changes_note` beside the resolution (the same sentence `get_regulation` attaches; see [`get_regulation`](./regulation#get-regulation)), because a citation resolved to text that may be out of date should say so before it is quoted. A declined citation has no record to qualify and carries none.
 
 **Inputs:**
 
@@ -323,10 +336,13 @@ type ExpandedRegulation = {
   parent: RegulationId | null;
   children: { type, id, label }[];   // stubs by default; detail: "full" embeds the complete records
   as_of_note?: string;               // only with as_of, when the current text was served because no version is recorded for that date
+  pending_changes_note?: string;     // only when the registry records a change to this document that the corpus has not ingested
   pre_adoption_placeholders?: string[]; // only when the record's own text names an instrument by a placeholder number
   notice?: string;                   // with pre_adoption_placeholders: the placeholder is not a citation
 }
 ```
+
+`pending_changes_note` is the statement [`get_regulation`](./regulation#get-regulation) attaches, for the document of the record asked for; with `as_of`, a change that applies after the requested date is left out of it.
 
 `pre_adoption_placeholders` and `notice` are the same flag [`get_regulation`](./regulation#get-regulation) attaches (one scan, `src/placeholders.ts`), computed over the record asked for and not over the children it embeds.
 
@@ -372,8 +388,11 @@ type RegulationTreeNode = {
   children: (RegulationTreeNode | { type: "test" | "check"; id; label })[];
   truncated?: boolean;
   as_of_note?: string;               // root envelope only, with as_of — see below
+  pending_changes_note?: string;     // root envelope only: the registry records a change to the root's document that the corpus has not ingested
 }
 ```
+
+`pending_changes_note` covers the **root's document** and is stated once on the root, for the same reason `as_of_note` is: a walk can reach 200 nodes, and a tree crossing documents does not repeat it per node. A node of another document in the tree is covered by `get_regulation` on that node. With `as_of`, a change that applies after the requested date is left out.
 
 **`as_of_note`.** Each regulation node resolves as of the date on its own. Where no version is recorded for a node's date, its current text is served — and the root envelope carries one `as_of_note` saying so. If the root itself was served that way the note is the same as `get_regulation`'s, followed by a count of the other nodes treated the same; if only other nodes were, it says how many. There is no per-node field: a walk can reach 200 nodes and the same sentence 200 times is the cost the note exists to avoid. `detail: "full"` shows each node's `document_version`. No note without `as_of`, or when every node came from a recorded version.
 

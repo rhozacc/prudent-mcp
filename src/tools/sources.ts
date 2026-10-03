@@ -8,7 +8,15 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { adapters } from "../adapters.ts";
-import { MilestoneSchema, SourceSchema, SourceStatusSchema, sourceIdSchema } from "../schema.ts";
+import { isoDay, pendingState } from "../pending.ts";
+import {
+  MilestoneSchema,
+  PendingChangeSchema,
+  PendingChangeStateSchema,
+  SourceSchema,
+  SourceStatusSchema,
+  sourceIdSchema,
+} from "../schema.ts";
 import type { Milestone, Source, SourceId, SourceStatus } from "../schema.ts";
 import { READ_ONLY_HINTS, lenient, miss, ok } from "./shared.ts";
 
@@ -24,6 +32,8 @@ type SourceSummary = {
   effective_from: string | undefined;
   superseded_by: SourceId | undefined;
   next_milestone: Milestone | undefined;
+  /** Pending changes the corpus has not ingested; undefined (absent) when there are none or none are declared. */
+  open_pending_changes: number | undefined;
 };
 
 const SourceSummarySchema = z.object({
@@ -35,7 +45,18 @@ const SourceSummarySchema = z.object({
   effective_from: z.string().optional(),
   superseded_by: sourceIdSchema.optional(),
   next_milestone: MilestoneSchema.optional().describe("First upcoming regulatory date"),
+  open_pending_changes: z.number().int().optional().describe("Changes not yet ingested."),
 });
+
+// A pending change as get_source serves it: the stored fields plus where it stands
+// today, computed at serve time (src/pending.ts) and never stored.
+const ServedPendingChangeSchema = PendingChangeSchema.extend({ state: PendingChangeStateSchema }).passthrough();
+
+const openCount = (s: Source): number | undefined => {
+  const today = isoDay(new Date());
+  const n = (s.pending_changes ?? []).filter((c) => pendingState(c, today) !== "ingested").length;
+  return n === 0 ? undefined : n;
+};
 
 export function registerSourceTools(server: McpServer): void {
   server.registerTool(
@@ -47,8 +68,8 @@ export function registerSourceTools(server: McpServer): void {
         "'is my regulatory context current?' answer. Returns { sources: [...] } with, per " +
         "source: id, title, doc_type, status (current | pending | superseded), verified " +
         "(last date currency was confirmed against the publisher), effective_from, " +
-        "superseded_by, and next_milestone (the first upcoming regulatory date; milestones " +
-        "are kept chronological). Optionally filter by status. Call get_source for the full " +
+        "superseded_by, next_milestone (the first upcoming regulatory date) and open_pending_changes " +
+        "(changes not yet ingested). Optionally filter by status. Call get_source for the full " +
         "record including all milestones, or search_regulation for corpus content under a " +
         "document (sources join regulation records via framework + document_id).",
       inputSchema: {
@@ -70,6 +91,7 @@ export function registerSourceTools(server: McpServer): void {
             effective_from: s.effective_from,
             superseded_by: s.superseded_by,
             next_milestone: s.milestones[0],
+            open_pending_changes: openCount(s),
           }),
         ),
       });
@@ -84,7 +106,8 @@ export function registerSourceTools(server: McpServer): void {
         "Fetch one source document record by ID. Returns the full record: title, framework, " +
         "document_id (joins to Regulation.document_id), doc_type, status, published / " +
         "effective_from / verified dates, superseded_by (set when status is superseded), " +
-        "milestones (upcoming regulatory dates, chronological), url, and notes. Unknown ids " +
+        "milestones (upcoming regulatory dates, chronological), pending_changes (each with its state today: " +
+        "upcoming | in_force_not_ingested | undated | ingested), url, and notes. Unknown ids " +
         "return isError with a pointer. Use list_sources to see the whole registry, or " +
         "search_regulation for the corpus content derived from this document.",
       inputSchema: {
@@ -92,13 +115,18 @@ export function registerSourceTools(server: McpServer): void {
           "A source id from list_sources — shape source://{framework}/{document-id}",
         ),
       },
-      outputSchema: SourceSchema.passthrough(),
+      outputSchema: SourceSchema.extend({ pending_changes: z.array(ServedPendingChangeSchema).optional() }).passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async ({ id }) => {
       const record = await adapters.source.get(id);
       if (record === null) return miss(`No record for ${id}. Verify the id with list_sources.`);
-      return ok(record);
+      if (record.pending_changes === undefined) return ok(record);
+      const today = isoDay(new Date());
+      return ok({
+        ...record,
+        pending_changes: record.pending_changes.map((c) => ({ ...c, state: pendingState(c, today) })),
+      });
     },
   );
 }

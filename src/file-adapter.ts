@@ -11,6 +11,7 @@ import type {
 } from "./adapters.ts";
 import { deriveTaxonomy } from "./areas.ts";
 import { citationPartialClause, computeHoldings, idDocSegment } from "./holdings.ts";
+import { pendingChangeSummaries } from "./pending.ts";
 import { computeReferrers } from "./referrers.ts";
 import {
   checkSearchFields,
@@ -1961,12 +1962,18 @@ export function createFileAdapters(corpus: CorpusFile): {
       // Holdings likewise: a stored block cannot know what the registry now
       // declares, and its `coverage` list stays exactly as authored.
       const holdings = computeHoldings(corpus.regulation, corpus.sources);
+      // Open pending changes likewise (src/pending.ts): derived from the registry and
+      // today's date, so a stored block can never go on saying "upcoming". Absent
+      // unless some source declares the field.
+      const pending = pendingChangeSummaries(corpus.sources);
+      const pendingKey = pending === undefined ? {} : { pending_changes: pending };
       if (corpus.corpus_info) {
         return {
           ...corpus.corpus_info,
           counts: { ...corpus.corpus_info.counts, source: corpus.sources.length },
           stale_sources,
           holdings,
+          ...pendingKey,
         };
       }
       return {
@@ -1981,6 +1988,7 @@ export function createFileAdapters(corpus: CorpusFile): {
         coverage: [...new Set(corpus.regulation.map(r => r.framework.toUpperCase()))],
         stale_sources,
         holdings,
+        ...pendingKey,
       };
     },
     async referrers(id: string): Promise<Referrers> {

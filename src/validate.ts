@@ -36,6 +36,7 @@
  * STALE_AFTER_DAYS) is advisory, not fatal — see `corpusWarnings`.
  */
 import { holdingsWarnings } from "./holdings.ts";
+import { isoDay, openPendingChanges, pendingChangeWarnings } from "./pending.ts";
 import { preAdoptionPlaceholders } from "./placeholders.ts";
 import type {
   Check,
@@ -342,7 +343,7 @@ export function corpusWarnings(corpus: CorpusInput, now: Date = new Date()): str
     const s = byId.get(id)!;
     return `${id}: verified ${s.verified} is older than ${STALE_AFTER_DAYS} days (stale)`;
   });
-  return [...stale, ...holdingsWarnings(corpus.regulation, sources)];
+  return [...stale, ...holdingsWarnings(corpus.regulation, sources), ...pendingChangeWarnings(sources, now)];
 }
 
 /**
@@ -352,7 +353,7 @@ export function corpusWarnings(corpus: CorpusInput, now: Date = new Date()): str
  * record when it serves it. The count is for the person who maintains the corpus,
  * who may want to know which documents still await a numbered act.
  */
-export function corpusInfo(corpus: CorpusInput): string[] {
+export function corpusInfo(corpus: CorpusInput, now: Date = new Date()): string[] {
   const lines: string[] = [];
   const carrying = corpus.regulation.filter((r) => preAdoptionPlaceholders(r.text) !== null);
   if (carrying.length > 0) {
@@ -360,6 +361,15 @@ export function corpusInfo(corpus: CorpusInput): string[] {
     lines.push(
       `${carrying.length} regulation record(s) in ${documents} document(s) name an instrument by a pre-adoption ` +
         "placeholder number; the server flags each one when served (pre_adoption_placeholders)",
+    );
+  }
+  const today = isoDay(now);
+  const open = openPendingChanges(corpus.sources ?? [], today);
+  if (open.length > 0) {
+    const behind = open.filter((o) => o.state === "in_force_not_ingested").length;
+    lines.push(
+      `${open.length} pending change(s) the corpus has not ingested (${behind} already in force); the server says so ` +
+        "on every record of the document (pending_changes_note)",
     );
   }
   return lines;
