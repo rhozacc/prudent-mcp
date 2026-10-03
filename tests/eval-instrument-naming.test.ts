@@ -58,6 +58,9 @@ describe("eval I3 on a synthetic corpus", () => {
         "Article 1 of Directive 2099/77/EU",
         "Article 1 of Regulation 2099/933",
         "Article 1 of Decision 2099/12",
+        "Article 1 of 2099/77/EU Directive",
+        "Article 1 of 2099/933 Regulation",
+        "Article 12 of 575/2013 Directive",
         "Article 1 of EBA/GL/2099/04",
       ]) {
         expect(asked).toContain(probe);
@@ -77,7 +80,7 @@ describe("eval I3 on a synthetic corpus", () => {
  * ("Article N") by whether the corpus has N (two documents do, so several records
  * fit), a title or the CRR by its own document, anything else by declining.
  */
-function leaky(leaks: { numberedShape?: RegExp; identifier?: boolean; englishName?: boolean; title?: boolean }): Session {
+function leaky(leaks: { numberedShape?: RegExp; identifier?: boolean; englishName?: boolean; title?: boolean; kindMismatch?: boolean }): Session {
   const trace = (tool: string, args: Record<string, unknown>, json: unknown): CallTrace => ({
     tool, args, text: JSON.stringify(json), chars: 0, tokens: 0, ms: 0, isError: false, json,
   });
@@ -120,6 +123,14 @@ function leaky(leaks: { numberedShape?: RegExp; identifier?: boolean; englishNam
             })
           : trace(tool, args, declined(`Nothing in this corpus is numbered ${plain}`));
       }
+      // A held number with the word of another kind of act names another act: no directive
+      // or decision is numbered 575/2013, so the regulation that carries it is not the answer.
+      if (/575\/2013\s+(?:Directive|Decision)|(?:Directive|Decision)\s+575\/2013/i.test(text)) {
+        const n = /Article (\d+)/.exec(text)?.[1];
+        return leaks.kindMismatch === true && n !== undefined && Number(n) <= 12
+          ? trace(tool, args, { match: { id: `regulation://crr/article-${n}` }, candidates: [] })
+          : trace(tool, args, declined("This corpus holds no Directive 2013/575"));
+      }
       // The CRR is held: its own articles resolve in every spelling, unless leaking.
       if (/\bCRR\b|Capital Requirements Regulation|575\/2013/.test(text)) {
         const n = /Article (\d+)/.exec(text)?.[1];
@@ -152,6 +163,20 @@ describe("eval I3 fails a server that leaks", () => {
     const fatal = r.findings.filter((f) => f.severity === "fatal");
     expect(fatal.some((f) => f.id === "I3/wrong-instrument")).toBe(true);
     expect(fatal.map((f) => f.evidence.join(" ")).join(" ")).toContain("Directive 2099/77/EU");
+  });
+
+  it("is fatal when a number written first is sourced from another document", async () => {
+    const r = await citationResolutionIsHonest(leaky({ numberedShape: /2099\/\d+(?:\/EU)? (?:Directive|Regulation|Decision)/ }));
+    const fatal = r.findings.filter((f) => f.severity === "fatal");
+    expect(fatal.some((f) => f.id === "I3/wrong-instrument")).toBe(true);
+    expect(fatal.map((f) => f.evidence.join(" ")).join(" ")).toContain("2099/77/EU Directive");
+  });
+
+  it("is fatal when a held number with the word of another kind of act is answered out of the held instrument", async () => {
+    const r = await citationResolutionIsHonest(leaky({ kindMismatch: true }));
+    const fatal = r.findings.filter((f) => f.severity === "fatal");
+    expect(fatal.some((f) => f.id === "I3/wrong-instrument")).toBe(true);
+    expect(fatal.map((f) => f.evidence.join(" ")).join(" ")).toContain("575/2013");
   });
 
   it("is fatal when a document named by an identifier is answered with candidates from others", async () => {

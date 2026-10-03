@@ -614,10 +614,41 @@ const ACT_FORMULA = String.raw`(?:\s+of\s+the\s+european\s+parliament\s+and\s+(?
  * halves of the number, 5 the institution after it.
  */
 const NUMBERED_ACT = new RegExp(
+  // Each run of white space follows a token of its own, so a long run can be split
+  // between the quantifiers in only one way.
   String.raw`\b(regulation|directive|decision|guideline)s?\s*` +
-    String.raw`(\(${ACT_TAG}\)|${ACT_TAG}\b)?\s*(?:no\.?\s*)?` +
+    String.raw`(?:(\(${ACT_TAG}\)|${ACT_TAG}\b)\s*)?(?:no\.?\s*)?` +
     String.raw`(\d{1,4})\s*\/\s*(\d{1,4})\b` +
     String.raw`(\s*\/\s*${ACT_TAG}\b)?` +
+    ACT_FORMULA,
+  "gi",
+);
+
+/**
+ * The same number written the other way round, the number and then the kind
+ * ("575/2013 Regulation", "the 2013/36/EU Directive"): how an act is named in prose
+ * that does not give its formal citation. Read by the same rules and for the same
+ * reason. A gate that reads one order is walked round by the other, and then the
+ * number goes on to be read as the CRR's, with the kind word - the only thing that
+ * says it is not - ignored: "Article 178 of 575/2013 Directive" was answered with
+ * the CRR's Article 178.
+ *
+ * A number that already belongs to a kind in front of it is not read again
+ * (`numberedActs` keeps the kind-first reading), and a kind word that begins the
+ * NEXT act ("Directive 2013/36/EU Regulation (EU) No 575/2013") is not this
+ * number's kind. Not `guideline`: an EBA guideline is numbered EBA/GL/YYYY/NN and
+ * a guideline's "2017/16 Guidelines" names a document, not an act.
+ *
+ * Capture groups: 1 and 2 the two halves of the number, 3 the institution after it
+ * ("/EU"), 4 the institution in brackets, 5 the kind.
+ */
+const NUMBER_FIRST_ACT = new RegExp(
+  // One run of white space at a time, so a long run cannot be split between
+  // quantifiers in more than one way.
+  String.raw`(?<![\d/])(?:no\.?\s*)?(\d{1,4})\s*\/\s*(\d{1,4})\b\s*` +
+    String.raw`(\/\s*${ACT_TAG}\b\s*)?(\(${ACT_TAG}\)\s*)?` +
+    String.raw`(regulation|directive|decision)s?\b` +
+    String.raw`(?!\s*(?:(?:\(${ACT_TAG}\)|${ACT_TAG}\b)\s*)?(?:no\.?\s*)?\d{1,4}\s*\/\s*\d{1,4}\b)` +
     ACT_FORMULA,
   "gi",
 );
@@ -649,7 +680,9 @@ function yearAndSerial(kind: string, first: string, second: string): [string, st
 }
 
 /**
- * The numbered acts a text names, in either numbering era.
+ * The numbered acts a text names, in either numbering era and in either order: the
+ * kind and then the number (`NUMBERED_ACT`), or the number and then the kind
+ * (`NUMBER_FIRST_ACT`). The one reader the gate and the mention scan share.
  *
  * A bare number needs more to be an act than a tagged one. "Regulation 5/2" is
  * not an act number, and neither is "Guidelines 2017/16", which is how a caller
@@ -658,24 +691,30 @@ function yearAndSerial(kind: string, first: string, second: string): [string, st
  */
 function numberedActs(text: string): NumberedAct[] {
   const acts: NumberedAct[] = [];
+  const add = (kind: string, first: string, second: string, institution: string | undefined, start: number, end: number): void => {
+    const tagged = institution !== undefined;
+    if (!tagged && (kind === "guideline" || (!isYearNumber(first) && !isYearNumber(second)))) return;
+    const [year, serial] = yearAndSerial(kind, first, second);
+    const written = (institution ?? "").replace(/[()\s/]/g, "").toLowerCase();
+    const tag = written === "" ? undefined : written === "euratom" ? "Euratom" : written.toUpperCase();
+    acts.push({ key: `${kind}-${year}-${serial}`, ...(tag === undefined ? {} : { tag }), start, end });
+  };
   for (const m of text.matchAll(NUMBERED_ACT)) {
     const kind = m[1]?.toLowerCase();
-    const first = m[3];
-    const second = m[4];
-    if (kind === undefined || first === undefined || second === undefined) continue;
-    const tagged = m[2] !== undefined || m[5] !== undefined;
-    if (!tagged && (kind === "guideline" || (!isYearNumber(first) && !isYearNumber(second)))) continue;
-    const [year, serial] = yearAndSerial(kind, first, second);
-    const written = (m[2] ?? m[5] ?? "").replace(/[()\s/]/g, "").toLowerCase();
-    const tag = written === "" ? undefined : written === "euratom" ? "Euratom" : written.toUpperCase();
-    acts.push({
-      key: `${kind}-${year}-${serial}`,
-      ...(tag === undefined ? {} : { tag }),
-      start: m.index,
-      end: m.index + m[0].length,
-    });
+    if (kind === undefined || m[3] === undefined || m[4] === undefined) continue;
+    add(kind, m[3], m[4], m[2] ?? m[5], m.index, m.index + m[0].length);
   }
-  return acts;
+  // The number written first. Only where no kind-first act already has those
+  // characters: "Directive 2013/36/EU Regulation ..." is one act and the start of another.
+  const kindFirst = acts.length;
+  for (const m of text.matchAll(NUMBER_FIRST_ACT)) {
+    const kind = m[5]?.toLowerCase();
+    const end = m.index + m[0].length;
+    if (kind === undefined || m[1] === undefined || m[2] === undefined) continue;
+    if (acts.slice(0, kindFirst).some((a) => m.index < a.end && a.start < end)) continue;
+    add(kind, m[1], m[2], m[3] ?? m[4], m.index, end);
+  }
+  return acts.sort((a, b) => a.start - b.start);
 }
 
 /** One key per instrument, whichever numbering era the citation is written in. */
@@ -798,6 +837,8 @@ const DESCRIBED_INSTRUMENTS: Array<{
   pronoun?: boolean;
   /** Who issues it, for kinds that name an issuer ("ECB Guideline"): lets a held document of the same issuer be told apart from the described one. */
   issuer?: string;
+  /** The descriptor is the pattern's one capture group; the rest of the match is only what has to stand before it. */
+  inGroup?: boolean;
 }> = [
   { key: "rts", re: /\bR\.T\.S\b\.?|\bRTSs?\b/gi, held: [["rts"]] },
   {
@@ -808,17 +849,20 @@ const DESCRIBED_INSTRUMENTS: Array<{
   { key: "its", re: /\bITSs?\b/g, held: [["its"]], pronoun: true },
   { key: "its", re: /\bI\.T\.S\b\.?/gi, held: [["its"]] },
   // "its" cannot be a pronoun straight after an article ("the its on reporting").
-  // Not "that": "a rule that its text amends" is ordinary English.
-  { key: "its", re: /(?<=\b(?:the|an?|this)\s+)its\b/gi, held: [["its"]] },
+  // Not "that": "a rule that its text amends" is ordinary English. The article is
+  // matched, not looked behind for: a look-behind over white space is tried at every
+  // position of a run of it, which made a long run cost the square of its length.
+  { key: "its", re: /\b(?:the|an?|this)\s+(its)\b/gi, held: [["its"]], inGroup: true },
   {
     key: "its",
     re: new RegExp(`\\b${kindWords("implementing", "technical", "standards?")}\\b`, "gi"),
     held: [["its"], ["implementing", "technical", "standard"], ["implementing", "technical", "standards"]],
   },
   {
-    // Not preceded by the word that makes it one of the two above, or one phrase is read twice.
+    // Not when the word that makes it one of the two above stands before it: that phrase
+    // is one of them, and `describedInstruments` leaves it out where it lies inside one.
     key: "technical-standards",
-    re: new RegExp(`(?<!\\b(?:regulatory|implementing)${KIND_GAP})\\b${kindWords("technical", "standards?")}\\b`, "gi"),
+    re: new RegExp(`\\b${kindWords("technical", "standards?")}\\b`, "gi"),
     held: [["rts"], ["its"], ["technical", "standard"], ["technical", "standards"]],
   },
   {
@@ -917,7 +961,7 @@ function descriptorQuote(text: string, start: number, matched: string, names: st
  */
 const NUMBER_AFTER_DESCRIPTOR = new RegExp(
   String.raw`^\s*(?:\(${ACT_TAG}\)\s*)?(?:no\.?\s*)?\d{1,4}\s*\/\s*\d{1,4}\b` +
-    String.raw`|^\s*\(?\s*[A-Za-z]{2,10}(?:\s*\/\s*[A-Za-z]{2,10})*\s*\/\s*(?:19|20)\d{2}\s*\/\s*\d{1,4}\b`,
+    String.raw`|^\s*(?:\(\s*)?[A-Za-z]{2,10}(?:\s*\/\s*[A-Za-z]{2,10})*\s*\/\s*(?:19|20)\d{2}\s*\/\s*\d{1,4}\b`,
   "i",
 );
 
@@ -953,24 +997,39 @@ function describedInstruments(
   const cut: Array<[number, number]> = [];
   // Every match of every kind, in the order the caller wrote them, so a kind named
   // twice is quoted at its first (and usually fuller) mention.
-  const hits = DESCRIBED_INSTRUMENTS.flatMap((entry) =>
-    entry.pronoun === true && caseLost ? [] : [...text.matchAll(entry.re)].map((m) => ({ entry, m })),
-  ).sort((a, b) => a.m.index - b.m.index || b.m[0].length - a.m[0].length);
-  for (const { entry: { key, held, issuer }, m } of hits) {
-    const start = m.index;
-    const end = start + m[0].length;
-    if (numberGateReads(acts, start, m[0])) continue;
+  const all = DESCRIBED_INSTRUMENTS.flatMap((entry) =>
+    entry.pronoun === true && caseLost
+      ? []
+      : [...text.matchAll(entry.re)].map((m) => {
+          // The descriptor's own words: the whole match, or the group an entry names.
+          const matched = entry.inGroup === true ? (m[1] ?? "") : m[0];
+          return { entry, start: m.index + m[0].length - matched.length, matched };
+        }),
+  );
+  // "technical standards" is not a kind of its own where "regulatory" or "implementing"
+  // stands before it: the longer phrase is the instrument, and it has already matched.
+  const qualified = all.filter((h) => h.entry.key === "rts" || h.entry.key === "its");
+  const hits = all
+    .filter(
+      (h) =>
+        h.entry.key !== "technical-standards" ||
+        !qualified.some((q) => q.start <= h.start && h.start + h.matched.length <= q.start + q.matched.length),
+    )
+    .sort((a, b) => a.start - b.start || b.matched.length - a.matched.length);
+  for (const { entry: { key, held, issuer }, start, matched } of hits) {
+    const end = start + matched.length;
+    if (numberGateReads(acts, start, matched)) continue;
     // "EBA/RTS/2016/03" is an identifier. It names its instrument by number, in
     // a shape the number gate does not read, so it is declined for what it is.
     const id = /^\s*\/\s*(\d{4})\s*\/\s*(\d{1,4})\b/.exec(text.slice(end));
     if (id !== null) {
       const lead = /(?:\b[A-Za-z]+\s*\/\s*)*$/.exec(text.slice(0, start))?.[0] ?? "";
-      const whole = `${lead}${m[0]}${id[0]}`.replace(/\s+/g, "");
+      const whole = `${lead}${matched}${id[0]}`.replace(/\s+/g, "");
       if (!found.some((f) => f.quote === whole)) {
         found.push({
           key,
           quote: whole,
-          held: [citationTokens(`${m[0]} ${id[1] ?? ""} ${id[2] ?? ""}`)],
+          held: [citationTokens(`${matched} ${id[1] ?? ""} ${id[2] ?? ""}`)],
           identifier: true,
           numbered: true,
         });
@@ -978,10 +1037,16 @@ function describedInstruments(
       cut.push([start - lead.length, end + id[0].length]);
       continue;
     }
-    const quote = descriptorQuote(text, start, m[0], names);
     // The same kind named twice in one phrase ("regulatory technical standards
-    // (RTS) on ...") is one instrument, quoted once.
-    if (!found.some((f) => f.quote === quote || (f.key === key && !f.identifier))) {
+    // (RTS) on ...") is one instrument, quoted once - and not worked out again: the
+    // quote reads the rest of the text, so doing it for every mention of a kind made
+    // a text that names one many times cost the square of its length.
+    if (found.some((f) => f.key === key && !f.identifier)) {
+      cut.push([start, end]);
+      continue;
+    }
+    const quote = descriptorQuote(text, start, matched, names);
+    if (!found.some((f) => f.quote === quote)) {
       const numbered = NUMBER_AFTER_DESCRIPTOR.test(text.slice(end));
       found.push({ key, quote, held, identifier: false, numbered, ...(issuer === undefined ? {} : { issuer }) });
     }
@@ -1102,14 +1167,25 @@ function heldNeedles(instrument: string): string[] {
   });
 }
 
-/** The documents whose framework, document id or id segment carry the instrument. */
+/**
+ * The documents whose framework, document id or id segment carry the instrument.
+ * Asked once per mention of an instrument in a citation, so it is remembered per
+ * corpus: a citation that names one many times would otherwise read every record
+ * for each.
+ */
+const heldDocumentsCache = new WeakMap<object, Map<string, Set<string>>>();
 function heldInstrumentDocuments(regulations: Regulation[], instrument: string): Set<string> {
+  const byInstrument = heldDocumentsCache.get(regulations) ?? new Map<string, Set<string>>();
+  heldDocumentsCache.set(regulations, byInstrument);
+  const known = byInstrument.get(instrument);
+  if (known !== undefined) return known;
   const needles = heldNeedles(instrument);
   const docs = new Set<string>();
   for (const r of regulations) {
     const hay = `${r.framework}${r.document_id}${idDocSegment(r.id)}`.toLowerCase().replace(/[^a-z0-9]/g, "");
     if (needles.some((n) => hay.includes(n))) docs.add(r.document_id);
   }
+  byInstrument.set(instrument, docs);
   return docs;
 }
 

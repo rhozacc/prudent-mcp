@@ -580,6 +580,13 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
   // bare, a decision bare: a gate that reads only "(EU) 2099/930" drops every one
   // of these, and the bare article number then goes looking in the whole corpus.
   // The numbers are invented (no act exists numbered in 2099), so none can be held.
+  //
+  // And the number written first ("2099/933 Regulation"), which the kind-first
+  // pattern never saw. Its worst case is a number the corpus DOES hold with the word
+  // of a kind it does not have: no directive or decision is numbered 575/2013, so
+  // "575/2013 Directive" names another act, and answering it out of the regulation
+  // that carries the number is the confident wrong citation. Declined whether or not
+  // the corpus holds that regulation, so the probe does not assume it.
   for (const probe of [
     "Article 1 of Regulation (EU) No 9999/9999", // pre-2015 form
     "Article 1 of Regulation (EU) 2099/930", // post-2015 form, short serial
@@ -588,6 +595,14 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
     "Article 1 of Commission Regulation EU 2099/933", // the tag before the number, bare
     "Article 1 of Regulation 2099/933", // no tag at all
     "Article 1 of Decision 2099/12",
+    "Article 1 of 2099/77/EU Directive", // the number first
+    "Article 1 of 2099/933 Regulation",
+    "Article 1 of 2099/12 Decision",
+    // A held number with another kind's word, for an article the corpus has, so that a
+    // reader that ignores the word resolves it.
+    `Article ${present} of 575/2013 Directive`,
+    `Article ${present} of Directive 575/2013`,
+    `Article ${present} of 575/2013 Decision`,
   ]) {
     const foreign = await s.call("resolve_citation", { text: probe });
     const foreignMatch = /"id"\s*:\s*"([^"]+)"/.exec(foreign.text)?.[1];

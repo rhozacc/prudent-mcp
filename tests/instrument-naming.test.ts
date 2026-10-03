@@ -117,6 +117,83 @@ describe("a numbered act in every standard spelling is an instrument the corpus 
   });
 });
 
+describe("a numbered act written number first is read as the same act written kind first", () => {
+  // "2019/2033 Regulation", "the 2014/65/EU Directive": how an act is named in prose that
+  // does not give its formal citation. The number was read as points of the provision,
+  // and when it was the CRR's number the kind word that says it is not the CRR was ignored.
+  const unheld: Array<[string, string]> = [
+    ["Article 5(4) of 2014/65/EU Directive", "Directive 2014/65/EU"],
+    ["Article 5 of the 2014/59/EU Directive", "Directive 2014/59/EU"],
+    ["Article 12 of 2019/2033 Regulation", "Regulation (EU) 2019/2033"],
+    ["Article 12 of the 2019/2033/EU Regulation", "Regulation (EU) 2019/2033"],
+    ["Article 12 of 2021/451 Decision", "Decision (EU) 2021/451"],
+    ["Article 12 of 1606/2002 (EC) Regulation", "Regulation (EC) No 1606/2002"],
+    ["2019/2033 Regulation, Article 12", "Regulation (EU) 2019/2033"],
+  ];
+  for (const [text, label] of unheld) {
+    it(`declines by name: ${text}`, () => {
+      const r = resolveCitationDetailed(corpus(), text);
+      declined(r);
+      expect(r.coverage_note, text).toContain(`holds no ${label}.`);
+      expect(r.unmatched_segments).toEqual([]);
+    });
+  }
+
+  it("a held instrument's number with the word of another kind of act is that other act", () => {
+    // No directive or decision is numbered 575/2013. Resolving the citation into the
+    // CRR would be the confident wrong citation: the caller named something else.
+    for (const [text, label] of [
+      ["Article 12 of 575/2013 Directive", "Directive 2013/575"],
+      ["Article 12 of the 575/2013/EU Directive", "Directive 2013/575/EU"],
+      ["Article 12 of No 575/2013 Decision", "Decision 2013/575"],
+      ["Article 12, 575/2013 Decision", "Decision 2013/575"],
+      ["575/2013 Directive, Article 12", "Directive 2013/575"],
+    ] as const) {
+      const r = resolveCitationDetailed(corpus(), text);
+      declined(r);
+      expect(r.coverage_note, text).toContain(`holds no ${label}.`);
+    }
+  });
+
+  it("the same number with the kind it has is the CRR, as written kind first", () => {
+    for (const text of [
+      "Article 12 of 575/2013 Regulation",
+      "Article 12 of the 575/2013/EU Regulation",
+      "Article 12 of 575/2013 (EU) Regulation",
+      "Article 12 of Regulation (EU) No 575/2013",
+    ]) {
+      expect(resolveCitationDetailed(corpus(), text).match?.id, text).toBe("regulation://crr/article-12");
+    }
+  });
+
+  it("a kind word that begins the next act is not this number's kind", () => {
+    const next = resolveCitationDetailed(corpus(), "Article 5 of Directive 2014/65/EU Regulation (EU) No 575/2013");
+    declined(next);
+    expect(next.coverage_note).toContain("holds no Directive 2014/65/EU.");
+    expect(next.coverage_note).not.toContain("Regulation (EU) 2014/65");
+    const before = resolveCitationDetailed(corpus(), "Article 5 of Regulation (EU) No 575/2013 Directive 2013/36/EU");
+    declined(before);
+    expect(before.coverage_note).toContain("holds no CRD");
+    expect(before.coverage_note).not.toContain("Directive 2013/575");
+  });
+
+  it("what is not an act number is not read as one", () => {
+    // No year and no institution, a date, a document's own number: none is an act.
+    for (const text of ["Article 5 of 5/2 Regulation", "Article 5 of 3/4 Decision", "Article 5 of 26/06/2013 Regulation", "Article 5 of 2017/16 Guidelines"]) {
+      expect(resolveCitationDetailed(corpus(), text).coverage_note ?? "", text).not.toContain("holds no");
+    }
+  });
+
+  it("names the served records that mention the act written number first", () => {
+    const regs = [
+      ...corpus(),
+      reg("regulation://gl-a/p77", "Paragraph 77", "acme-gl-a", "acme", { text: "Institutions apply the 2014/65/EU Directive here." }),
+    ];
+    const note = resolveCitationDetailed(regs, "Article 5 of Directive 2014/65/EU").coverage_note ?? "";
+    expect(note).toContain("1 served record(s) name it: regulation://gl-a/p77");
+  });
+});
+
 describe("what is not an act number stays what it was", () => {
   const guidelines = (): Regulation[] => [
     ...corpus(),
