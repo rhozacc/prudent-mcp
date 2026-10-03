@@ -3,9 +3,14 @@ name: Notify
 # Emails the owner when something big happens in the release pipeline: a release
 # going out, or the thing that publishes it failing.
 #
-# There is no secret and no mail provider. A notice is an issue, labelled
-# `pipeline-notice`, assigned to the owner with an @mention, and GitHub turns
-# that into an email (and a push, in the mobile app).
+# A notice is one POST to the dashboard (/api/ops/notify). The dashboard checks
+# the OpenID Connect token GitHub mints for this very run (which repository,
+# which workflow file, read from main) and emails the owner through its own mail
+# provider. No secret lives in any repository, and the owner's address is in none
+# of them. If the email cannot be sent (the endpoint is down, not configured, or
+# refuses the run) the notice becomes an issue instead, labelled
+# `pipeline-notice` and assigned to the owner with an @mention, so it still
+# exists and GitHub can still try to reach them.
 #
 # It runs AFTER the workflows it reports on, from the default branch, so it can
 # fail without turning a good release red. It is not a step in release.yml
@@ -29,6 +34,7 @@ permissions:
   contents: read
   actions: read
   issues: write
+  id-token: write   # the identity token the email is sent under
 
 jobs:
   notify:
@@ -44,6 +50,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           OWNER: ${{ github.repository_owner }}
+          MAIL_URL: https://prudent.alenrozac.com/api/ops/notify
+          MAIL_AUDIENCE: prudent-ops-notify
           EVENT_NAME: ${{ github.event_name }}
           RUN_NAME: ${{ github.event.workflow_run.name }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
@@ -58,10 +66,40 @@ jobs:
           # One short line, no backticks, safe to put inside a code span.
           oneline() { printf '%s' "$1" | tr -d '`\r' | head -n1 | cut -c1-160; }
 
+          # The notice bodies are Markdown (they are issue text too); an email is plain text.
+          plain() { sed -E 's/\*\*//g; s/`//g; s/\[([^]]+)\]\(([^)]+)\)/\1: \2/g'; }
+
+          # Email the owner through the dashboard. Returns 0 only if the endpoint
+          # accepted the notice, so the caller knows whether to fall back.
+          MAIL_FAILURE=""
+          email() {
+            local token code
+            if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+              MAIL_FAILURE="no identity token available to this run"; echo "$MAIL_FAILURE"; return 1
+            fi
+            token="$(curl -fsS --max-time 20 -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$MAIL_AUDIENCE" | jq -r '.value // empty')"
+            if [ -z "$token" ]; then
+              MAIL_FAILURE="GitHub did not issue an identity token"; echo "$MAIL_FAILURE"; return 1
+            fi
+            echo "::add-mask::$token"
+            printf '%s' "$2" | plain > "$RUNNER_TEMP/mail.txt"
+            jq -n --arg subject "$1" --rawfile text "$RUNNER_TEMP/mail.txt" '{subject: $subject, text: $text}' > "$RUNNER_TEMP/mail.json"
+            code="$(curl -sS --max-time 40 -o "$RUNNER_TEMP/mail.out" -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+              --data-binary "@$RUNNER_TEMP/mail.json" "$MAIL_URL")" || code=000
+            if [ "$code" = 200 ]; then echo "Emailed the owner."; return 0; fi
+            MAIL_FAILURE="HTTP $code $(head -c 200 "$RUNNER_TEMP/mail.out" 2>/dev/null | tr -d '\r\n`')"
+            echo "Email not sent: $MAIL_FAILURE"
+            return 1
+          }
+
+          # Email first; an issue only if the email did not go.
           notice() {
+            if email "$1" "$2"; then return 0; fi
             gh label create pipeline-notice --repo "$REPO" --color 5319e7 \
-              --description "Automatic pipeline notice (emails the owner)" >/dev/null 2>&1 || true
-            printf '%s\n\n— posted by `.github/workflows/notify.yml` · @%s\n' "$2" "$OWNER" > "$RUNNER_TEMP/notice.md"
+              --description "Pipeline notice that could not be emailed" >/dev/null 2>&1 || true
+            printf '%s\n\n— posted by `.github/workflows/notify.yml` · @%s · email not sent: %s\n' "$2" "$OWNER" "$MAIL_FAILURE" > "$RUNNER_TEMP/notice.md"
             gh issue create --repo "$REPO" --title "$1" --body-file "$RUNNER_TEMP/notice.md" \
               --label pipeline-notice --assignee "$OWNER" \
               || gh issue create --repo "$REPO" --title "$1" --body-file "$RUNNER_TEMP/notice.md" \
@@ -70,7 +108,7 @@ jobs:
 
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             notice "✅ $NAME: notices are on" \
-              "Test notice. From now on a release going out, or the release workflow or CI on \`main\` failing, opens an issue like this one and GitHub emails you."
+              "Test notice. From now on a release going out, or the release workflow or CI on \`main\` failing, is emailed to you. If an email cannot be sent, an issue like this one is opened instead."
             exit 0
           fi
 
@@ -98,9 +136,7 @@ jobs:
                 exit 0
               fi
               notice "🚀 $NAME $tag released" \
-                "**$tag** is out: [release notes](https://github.com/$REPO/releases/tag/$tag)
-
-          Built from \`$SUBJECT\` ($SHORT). The corpus and dashboard repositories get their pin-bump pull requests next."
+                "**$tag** is out."$'\n\n'"[Release notes](https://github.com/$REPO/releases/tag/$tag)"$'\n\n'"Built from \`$SUBJECT\` ($SHORT). The corpus and dashboard repositories get their pin-bump pull requests next."
               ;;
             *)
               echo "Conclusion '$CONCLUSION': nothing to say."
