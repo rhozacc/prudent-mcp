@@ -204,6 +204,34 @@ export type Milestone = z.infer<typeof MilestoneSchema>;
 export const SourceStatusSchema = z.enum(["current", "pending", "superseded"]);
 export type SourceStatus = z.infer<typeof SourceStatusSchema>;
 
+// A change to a document that the registry knows is coming (or has come) and that
+// the corpus may not yet reflect. `ingested` is the whole point: a validator told
+// that "an amendment applies from 19 October" is told something different when the
+// text in front of them already carries it and when it does not.
+//
+// Dates are ISO and PARSED (unlike `milestones`, which are display strings never
+// parsed): the server derives, at serve time, whether the change is still ahead,
+// has come into force without being ingested (the served text is then out of
+// date), or has no date recorded. Nothing derived is ever stored.
+export const PendingChangeStatusSchema = z.enum(["announced", "adopted"]);
+export const PendingChangeSchema = z.object({
+  title: z.string(),                         // short, e.g. "Amending Guidelines EBA/GL/2026/05"
+  reference: z.string().optional(),          // the amending instrument's own reference, when the title omits it
+  status: PendingChangeStatusSchema,         // announced = proposed/expected; adopted = decided or published
+  effective_from: z.string().date().optional(),  // absent = no application date recorded
+  ingested: z.boolean(),                     // does the text this corpus serves already reflect the change?
+  affects: z.array(z.string()).optional(),   // provisions concerned, free text for a reader — never parsed or matched
+  note: z.string().optional(),
+  url: z.string().optional(),
+});
+export type PendingChange = z.infer<typeof PendingChangeSchema>;
+
+// Where a pending change stands today, computed at serve time from `ingested` and
+// `effective_from` (src/pending.ts). "ingested" is the quiet state: nothing is
+// out of step, so nothing is surfaced beside a record.
+export const PendingChangeStateSchema = z.enum(["upcoming", "in_force_not_ingested", "undated", "ingested"]);
+export type PendingChangeState = z.infer<typeof PendingChangeStateSchema>;
+
 export const SourceSchema = z.object({
   id: sourceIdSchema,                    // source://{framework}/{document-id}, e.g. source://eba/gl-2017-16
   title: z.string(),                     // human-readable, e.g. "EBA-GL-2017-16 PD/LGD Estimation Guidelines"
@@ -227,6 +255,11 @@ export const SourceSchema = z.object({
   // checked). Never defaulted, for the same reason `next_milestone` does not
   // read "nothing upcoming" for a registry whose milestones were never filled in.
   coverage: z.enum(["full", "partial"]).optional(),
+  // Changes to this document that are coming or have come, and whether the corpus
+  // has ingested them. ABSENT means the registry never looked; `[]` means it looked
+  // and found nothing pending (`verified` says when). Never defaulted to `[]`: that
+  // would turn "nobody checked" into "nothing is coming".
+  pending_changes: z.array(PendingChangeSchema).optional(),
   // Future fields: supersedes, celex_id, ...
 });
 export type Source = z.infer<typeof SourceSchema>;
@@ -275,6 +308,18 @@ export const DocumentHoldingSchema = z.object({
 });
 export type DocumentHolding = z.infer<typeof DocumentHoldingSchema>;
 
+// One open (not yet ingested) pending change, as get_corpus_info lists it.
+export const PendingChangeSummarySchema = z.object({
+  source: sourceIdSchema,
+  document_id: z.string(),
+  title: z.string(),
+  reference: z.string().optional(),
+  status: PendingChangeStatusSchema,
+  effective_from: z.string().date().optional(),
+  state: z.enum(["upcoming", "in_force_not_ingested", "undated"]),
+});
+export type PendingChangeSummary = z.infer<typeof PendingChangeSummarySchema>;
+
 export const CorpusInfoSchema = z.object({
   last_updated: z.string().datetime(),
   counts: z.record(SurfaceSchema, z.number()),
@@ -288,6 +333,11 @@ export const CorpusInfoSchema = z.object({
   // a stored block. Optional because an adapter that predates it serves none, and
   // absent is not empty: [] would assert that nothing is held.
   holdings: z.array(DocumentHoldingSchema).optional(),
+  // Changes the registry knows are coming or have come that the corpus has NOT
+  // ingested, computed at serve time (src/pending.ts). Absent when no source
+  // declares `pending_changes` at all (the registry never looked); `[]` when some
+  // do and nothing is open.
+  pending_changes: z.array(PendingChangeSummarySchema).optional(),
 });
 export type CorpusInfo = z.infer<typeof CorpusInfoSchema>;
 

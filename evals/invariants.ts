@@ -945,9 +945,16 @@ export interface Budget {
  *          get_regulation_tree, get_area_overview, list_review_areas and
  *          expand_playbook were tightened without dropping a rule. Zero headroom:
  *          the next rule has to be paid for the same way.
+ *   6,200  raised, 2026-10-03: 6,099 -> 6,149 for the pending-change signal (one
+ *          rule in the instructions, a sentence on six cards). Paid for in part
+ *          first: the search-phrase hint (four copies) and the tail of
+ *          list_review_areas were tightened, about -120 tok. The rest is a new
+ *          rule a caller cannot do without - whether the text in front of it is
+ *          about to be, or already is, out of date - so it is recorded here
+ *          rather than squeezed out of a card that has no slack left.
  */
 export const DEFAULT_BUDGET: Budget = {
-  surface: 6100,
+  surface: 6200,
   call: 6000,
   bundle: 9000,
   entryPath: 8000,
@@ -2113,6 +2120,217 @@ export async function placeholdersAreMarked(s: Session): Promise<InvariantResult
   return { id, title, applicable: bound > 0, findings };
 }
 
+// ============================================================================
+// I15 - a pending change is never silent
+// ============================================================================
+
+/**
+ * The registry knows something the snapshot does not: an amendment adopted and not
+ * yet applying, or one that has come into force since the text was ingested. The
+ * belief at stake is "the text I was handed is the law" - and a text that has been
+ * overtaken reads exactly like one that has not.
+ *
+ * So for every CURRENT source whose `pending_changes` has an entry the corpus has
+ * not ingested (read from the server's own `get_source`), a record of that
+ * document must come back carrying a `pending_changes_note` on every tool that
+ * serves a regulation by id (and on a citation that resolves to it), the note must
+ * name each change and say what its state means (the date when it is ahead; that
+ * the text may be out of date when it has come into force), `get_corpus_info`
+ * must list it, a search page that returns the document must say so in its
+ * notice, and a record asked for as of a date BEFORE the change applied must NOT
+ * carry it. The converse is checked too: a record of a document with nothing open
+ * must carry no note, because a warning that is always present is not read.
+ *
+ * The served `state` of each change is checked against the date arithmetic the
+ * registry's own fields imply, so a state cannot be wrong in the one direction
+ * (a change in force reading as "upcoming") that makes the note misleading.
+ *
+ * Applicable only when some current source has a change that is not ingested and
+ * a record of its document can be reached through search.
+ */
+export async function pendingChangesAreNeverSilent(s: Session): Promise<InvariantResult> {
+  const id = "I15";
+  const title = "A pending change is never silent";
+  const findings: Finding[] = [];
+
+  type Change = { title?: string; reference?: string; status?: string; effective_from?: string; ingested?: boolean; state?: string };
+  type Src = { id: string; status?: string; document_id?: string; framework?: string; title?: string; pending_changes?: Change[] };
+  type Row = { id?: string; citation?: string; document_id?: string };
+  const asRecord = (json: unknown): Record<string, unknown> | null =>
+    json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : null;
+  const rowsOf = (json: unknown): Row[] => ((asRecord(json)?.["results"] ?? []) as Row[]).filter((r) => typeof r.id === "string");
+
+  const listed = await s.call("list_sources", {});
+  const sourceIds = ((asRecord(listed.json)?.["sources"] ?? []) as Array<{ id?: unknown }>).flatMap((x) =>
+    typeof x.id === "string" ? [x.id] : [],
+  );
+  const sources: Src[] = [];
+  for (const sid of sourceIds) {
+    const t = await s.call("get_source", { id: sid });
+    const j = asRecord(t.json) as Src | null;
+    if (j !== null && typeof j.id === "string") sources.push(j);
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const expectedState = (c: Change): string =>
+    c.ingested === true ? "ingested" : c.effective_from === undefined ? "undated" : c.effective_from > today ? "upcoming" : "in_force_not_ingested";
+
+  // The served state must be the date arithmetic the stored fields imply.
+  for (const src of sources) {
+    for (const c of src.pending_changes ?? []) {
+      if (c.state !== expectedState(c)) {
+        findings.push({
+          id: "I15/state",
+          severity: "fatal",
+          summary: "get_source served a pending change whose state does not follow from its ingested flag and effective date.",
+          evidence: [`source ${src.id}`, `change ${String(c.title)}`, `served ${String(c.state)}, expected ${expectedState(c)} on ${today}`],
+        });
+      }
+    }
+  }
+
+  const current = sources.filter((x) => x.status === "current");
+  const openOf = (x: Src): Change[] => (x.pending_changes ?? []).filter((c) => c.ingested === false);
+  const withOpen = current.filter((x) => openOf(x).length > 0);
+  if (withOpen.length === 0) return { id, title, applicable: false, findings };
+
+  // The corpus-wide list.
+  const info = await s.call("get_corpus_info", {});
+  const listedInfo = (asRecord(info.json)?.["pending_changes"] ?? null) as Array<{ source?: string; title?: string }> | null;
+  for (const src of withOpen) {
+    for (const c of openOf(src)) {
+      if (listedInfo === null || !listedInfo.some((e) => e.source === src.id && e.title === c.title)) {
+        findings.push({
+          id: "I15/corpus_info",
+          severity: "fatal",
+          summary: "get_corpus_info does not list a pending change the registry records as not ingested.",
+          evidence: [`source ${src.id}`, `change ${String(c.title)}`, `pending_changes ${listedInfo === null ? "(absent)" : "present"}`],
+        });
+      }
+    }
+  }
+
+  // One sampled record per document, found the way a caller would: through search.
+  const queries = ["default", "estimation", "risk", "data", "model", "validation", "institution", "article"];
+  const sample = async (documentId: string): Promise<{ row: Row; notice: string | undefined } | null> => {
+    for (const q of queries) {
+      const t = await s.call("search_regulation", { query: q, limit: 100 });
+      const row = rowsOf(t.json).find((r) => r.document_id === documentId);
+      if (row !== undefined) {
+        const notice = asRecord(t.json)?.["notice"];
+        return { row, notice: typeof notice === "string" ? notice : undefined };
+      }
+    }
+    return null;
+  };
+
+  let bound = 0;
+  const day = (iso: string, delta: number): string => new Date(Date.parse(`${iso}T00:00:00Z`) + delta * 86_400_000).toISOString().slice(0, 10);
+
+  for (const src of withOpen) {
+    if (src.document_id === undefined) continue;
+    const found = await sample(src.document_id);
+    if (found === null) continue;
+    const open = openOf(src);
+    const rid = found.row.id as string;
+    bound++;
+
+    if (found.notice === undefined || !/not ingested/i.test(found.notice)) {
+      findings.push({
+        id: "I15/search",
+        severity: "fatal",
+        summary: "A search page returned a record of a document with a change the corpus has not ingested and its notice does not say so.",
+        evidence: [`document ${src.document_id}`, `notice: ${found.notice?.slice(0, 200) ?? "(none)"}`],
+      });
+    }
+
+    const mustSay = (note: string): string[] => {
+      const problems: string[] = [];
+      for (const c of open.slice(0, 3)) {
+        if (typeof c.title === "string" && !note.includes(c.title)) problems.push(`does not name "${c.title}"`);
+        const st = expectedState(c);
+        if (st === "upcoming" && c.effective_from !== undefined && !note.includes(c.effective_from)) problems.push(`does not give the date ${c.effective_from}`);
+        if (st === "in_force_not_ingested" && !/out of date|no longer/i.test(note)) problems.push("does not say the text may be out of date");
+      }
+      return problems;
+    };
+
+    for (const tool of ["get_regulation", "expand_regulation", "get_regulation_tree"] as const) {
+      const r = await s.call(tool, { id: rid });
+      const note = asRecord(r.json)?.["pending_changes_note"];
+      if (r.isError || typeof note !== "string") {
+        findings.push({
+          id: `I15/${tool}`,
+          severity: "fatal",
+          summary: `${tool} served a record of a document with a change the corpus has not ingested and said nothing about it.`,
+          evidence: [`id ${rid}`, `document ${src.document_id}`, `isError ${String(r.isError)}`],
+        });
+        continue;
+      }
+      const problems = mustSay(note);
+      if (problems.length > 0) {
+        findings.push({
+          id: `I15/${tool}/note`,
+          severity: "fatal",
+          summary: `${tool}'s pending_changes_note does not say enough: it ${problems.join("; ")}.`,
+          evidence: [`id ${rid}`, `note: ${note.slice(0, 240)}`],
+        });
+      }
+    }
+
+    // The same record reached through a citation.
+    if (typeof found.row.citation === "string") {
+      const cite = await s.call("resolve_citation", { text: found.row.citation });
+      const body = asRecord(cite.json);
+      const match = asRecord(body?.["match"]);
+      if (match !== null && match["id"] === rid && typeof body?.["pending_changes_note"] !== "string") {
+        findings.push({
+          id: "I15/resolve_citation",
+          severity: "fatal",
+          summary: "resolve_citation matched a record of a document with a change the corpus has not ingested and said nothing about it.",
+          evidence: [`id ${rid}`, `citation ${found.row.citation}`],
+        });
+      }
+    }
+
+    // As of a date before every open change applied: the text is not behind them.
+    const dates = open.map((c) => c.effective_from);
+    if (dates.every((d): d is string => typeof d === "string")) {
+      const earliest = [...(dates as string[])].sort()[0];
+      if (earliest !== undefined) {
+        const asOf = day(earliest, -1);
+        const before = await s.call("get_regulation", { id: rid, as_of: asOf });
+        if (!before.isError && typeof asRecord(before.json)?.["pending_changes_note"] === "string") {
+          findings.push({
+            id: "I15/as_of",
+            severity: "fatal",
+            summary: "get_regulation under an as_of earlier than every open change carried a pending_changes_note: the text served for that date is not behind a change that had not applied.",
+            evidence: [`id ${rid}`, `as_of ${asOf}`, `earliest change ${earliest}`],
+          });
+        }
+      }
+    }
+  }
+
+  // The converse: a document with nothing open carries no note.
+  const quiet = current.filter((x) => openOf(x).length === 0 && x.document_id !== undefined);
+  for (const src of quiet.slice(0, 2)) {
+    const found = await sample(src.document_id as string);
+    if (found === null) continue;
+    const r = await s.call("get_regulation", { id: found.row.id as string });
+    bound++;
+    if (!r.isError && asRecord(r.json)?.["pending_changes_note"] !== undefined) {
+      findings.push({
+        id: "I15/false-flag",
+        severity: "fatal",
+        summary: "get_regulation carried a pending_changes_note on a record of a document with no open pending change: a warning that is always present is not read.",
+        evidence: [`id ${String(found.row.id)}`, `document ${String(src.document_id)}`],
+      });
+    }
+  }
+
+  return { id, title, applicable: bound > 0, findings };
+}
+
 export const ALL = [
   envelopeIsJson,
   describedIdsResolve,
@@ -2129,4 +2347,5 @@ export const ALL = [
   declineOnPartialDocumentSaysSo,
   weakBestMatchIsDeclared,
   placeholdersAreMarked,
+  pendingChangesAreNeverSilent,
 ] as const;

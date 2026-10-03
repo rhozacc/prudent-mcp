@@ -136,6 +136,20 @@ Rules for implementers:
 - **Never default `partial`.** The key is absent when no current source declares `coverage`; absent is not "full".
 - **`resolveCitationDetailed(regulations, text, holdings?)`** takes the holdings as an optional third parameter. Without it the notes are exactly what they were; with it a decline on a partly held document says the absence is the corpus's, not necessarily the law's. `match` and `confidence` are unaffected — pass the holdings from your `MetaAdapter.resolveCitation`.
 
+## Saying what the corpus has not ingested
+
+A registry that knows an amendment is coming — or has come — and the corpus has not caught up, says so through `Source.pending_changes` (see [Corpus structure → Declaring pending changes](../corpus/#declaring-pending-changes)). The tool layer turns that into `pending_changes_note` on `get_regulation`, `expand_regulation`, `get_regulation_tree` (root) and a `resolve_citation` match, a sentence in a search page's `notice`, `get_corpus_info.pending_changes`, `open_pending_changes` on `list_sources` rows and a computed `state` on each change `get_source` serves.
+
+It needs **nothing new from an adapter**: the tool layer reads `adapters.source.list()` and joins on `framework` + `document_id`, so a backend that serves sources gets the signal with no extra method, and a backend with no sources serves none (an empty registry has nothing to say). What a state means and the words that describe one live once, in `src/pending.ts` (`pendingState`, `openPendingChanges`, `openPendingFor`, `pendingChangesNote`, `pendingSearchNotice`, `pendingChangeSummaries`); the tool-layer helpers that attach it are in `src/tools/pending.ts`.
+
+Rules for implementers:
+
+- **Store `ingested` and `effective_from`; never store the state.** `upcoming`, `in_force_not_ingested` and `undated` are computed from the two and today's date on every call. A stored state is wrong the morning after the day. `pending_changes` on the source records is the only authored input.
+- **Absent is not `[]`.** `pending_changes: []` says the registry looked and found nothing pending; a missing key says nothing. Do not default it. `MetaAdapter.info()` may return `pending_changes` (the open changes, computed by `pendingChangeSummaries(sources)`, which returns `undefined` until some source declares the field); `createFileAdapters` and the in-memory demo both call it, and the key is spread in only when defined.
+- **Only current sources speak** for a document's records (`openPendingChanges` enforces it), as with `coverage`.
+- **The tool layer calls `source.list()` once per record it serves** (and once per search page), because the registry is small and list-shaped. A backend where that is a network round trip should cache it for the length of a request.
+- **Under `as_of`, a change that applies later is left out** of that request's note (`openPendingFor`). The demo's CRR source carries an open change applying in 60 days, so the note, its `as_of` omission and the corpus-wide list are all exercised.
+
 ## The in-memory demo as a template
 
 `examples/inmemory-demo.ts` is the reference implementation for hand-coded adapters. It seeds a small slice of PD-calibration content into in-memory maps and implements all six adapter interfaces against them. Use it as the template when building your own backend.
@@ -146,7 +160,7 @@ Key things the demo shows:
 - **`get(id, asOf?)`** — direct map lookup; `asOf` selects from per-id version history (the last entry whose `effectiveFrom` ≤ `asOf`; predating all entries → `null`; no history → current). It delegates to **`resolveAsOf`**, which reports `basis: "history" | "current"` so the tools can attach an `as_of_note`
 - **`list()`** — returns every record on the surface; the sources variant filters by status
 - **`resolveCitation(text)`** — delegates to `resolveCitationDetailed` from the file adapter, the deterministic citation matcher, passing `computeHoldings(...)` so a decline on a partly held document says so
-- **`info()`** — serves `holdings` from the same `computeHoldings`; the seed's CRR source declares `coverage: "partial"` (the demo holds a handful of articles) and the EBA guideline `"full"`, so both kinds of miss are exercised
+- **`info()`** — serves `holdings` from the same `computeHoldings`; the seed's CRR source declares `coverage: "partial"` (the demo holds a handful of articles) and the EBA guideline `"full"`, so both kinds of miss are exercised. It also serves `pending_changes` from `pendingChangeSummaries`: the CRR source carries one open change (not ingested, applying in 60 days) and the EBA guideline `pending_changes: []` ("looked, none"), so the note, the quiet case and the absence rule are all exercised
 - **`referrers(id)`** — delegates to `computeReferrers` from `src/referrers.ts`, the ONE reverse index over parent/children, `derived_from`, `regulatory_basis`, `regulatory_scope`, and playbook phase references
 
 For a production adapter, replace the in-memory maps with HTTP calls, a database, or whatever backs the corpus. The interface contract is the same.

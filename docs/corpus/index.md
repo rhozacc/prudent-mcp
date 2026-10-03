@@ -380,6 +380,7 @@ The registry of source documents the corpus derives from — the regulatory-cont
 | `url` | `string` | no | Publisher page. |
 | `notes` | `string` | no | Free-form. |
 | `coverage` | `"full" \| "partial"` | no | How much of the document the corpus holds. **Absent means not declared** — never defaulted. See [Declaring coverage](#declaring-coverage). |
+| `pending_changes` | `PendingChange[]` | no | Changes to the document that are coming or have come, and whether the corpus has ingested them. **Absent means the registry never looked; `[]` means it looked and found none** — never defaulted. See [Declaring pending changes](#declaring-pending-changes). |
 
 ### Declaring coverage
 
@@ -390,6 +391,54 @@ The registry of source documents the corpus derives from — the regulatory-cont
 - *absent* — nobody has declared it. The servers say so ("does not declare that as the whole") rather than assume either; absence of a declaration is a third state, not a synonym for `full`.
 
 Declare it on the **current** source: superseded and pending sources describe other editions and do not speak for the held records. If a document's current sources disagree, partial wins, because reading a partly held document as whole is the error that tells a caller a missing provision does not exist. The server publishes the result as `get_corpus_info.holdings` (record count per document, plus `partial` when declared), computed at serve time from the records and the registry — never stored. `bun run validate` prints a holdings summary and warns when a source declares coverage for a document the corpus holds no regulation records of.
+
+### Declaring pending changes
+
+A corpus is a snapshot, and the registry usually knows something the snapshot does not: an amendment adopted and not yet applying, or one that has come into force since the text was ingested. A text that has been overtaken reads exactly like one that has not, so the registry is where it is said — `pending_changes` on the document's **current** source:
+
+```json
+"pending_changes": [
+  {
+    "title": "Amending Regulation (example)",
+    "reference": "EXAMPLE/2030/01",
+    "status": "adopted",
+    "effective_from": "2030-01-01",
+    "ingested": false,
+    "affects": ["Article 178", "Article 180(1)"],
+    "note": "Published in the Official Journal; text not yet extracted",
+    "url": "https://example.org/amending-regulation"
+  }
+]
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `title` | `string` | yes | Short name of the change, e.g. `"Amending Regulation (EU) 2024/1623"`. |
+| `reference` | `string` | no | The amending instrument's own reference, when the title omits it. |
+| `status` | `"announced" \| "adopted"` | yes | `announced` = proposed or expected; `adopted` = decided or published. |
+| `effective_from` | `string` (ISO date) | no | When it applies. **Parsed**, unlike `milestones`: the server compares it with today's date. Absent = no application date recorded. |
+| `ingested` | `boolean` | yes | Does the text this corpus serves already reflect the change? The whole point of the entry: "an amendment applies from 19 October" means one thing when the text in front of the reader already carries it and another when it does not. |
+| `affects` | `string[]` | no | The provisions concerned, as a hint for a reader. Free text, **never parsed or matched** against records. |
+| `note`, `url` | `string` | no | Free-form. |
+
+**The state is computed at serve time, never stored** (one definition, `src/pending.ts`), from `ingested`, `effective_from` and today's date, so a note cannot go on saying "upcoming" the morning after the day (dates are compared as UTC calendar days, and the day a change applies *from* is a day it applies):
+
+| State | When | What the server says about the served text |
+|---|---|---|
+| `ingested` | `ingested: true` | nothing — the text is in step; this is the quiet state |
+| `upcoming` | not ingested, `effective_from` after today | "applies from D (in N days) and is not ingested here, so the text served is the version before it" |
+| `in_force_not_ingested` | not ingested, `effective_from` today or earlier | "has applied since D and is not ingested here, so the text served may no longer be the text in force" — the one that needs saying loudest |
+| `undated` | not ingested, no `effective_from` | "… with no application date recorded and is not ingested here" |
+
+An `announced` change in the past is worded as *was expected to apply*, since nothing says it did.
+
+- **Absent is not empty.** A source with `pending_changes: []` says the registry looked and found nothing pending (`verified` says when); a source without the key says nothing. The server never defaults it, for the same reason `next_milestone` does not read "nothing upcoming" for a registry whose milestones were never filled in. Where no change is open, **nothing is said at all** — "no pending change recorded" is not "none is coming", so the server does not offer it as reassurance.
+- **Only a current source speaks.** A superseded or pending source describes another edition of the document, whose changes are not changes to what is served (the rule `coverage` follows).
+- **Document-level, not provision-level.** The join is `framework` + `document_id`, the registry's only join, so a note rides on every record of the document. `affects` is quoted back to the reader as the registry's hint ("Registry: concerns paragraphs 61-66…") and never used to decide which records get the note — the server cannot know what an amendment says, because the corpus does not hold it.
+- **Under `as_of`, an earlier date is not behind the change.** A change whose `effective_from` is after the requested `as_of` is left out of the note for that request, whichever version of the text is served; an undated change has no such bound and stays.
+- **Where it shows.** `get_regulation`, `expand_regulation` and `get_regulation_tree` (the root's document) and a `resolve_citation` match carry `pending_changes_note` ahead of the record fields; `search_regulation` adds one sentence to `notice` naming the documents on the page that have a change not ingested; `get_corpus_info.pending_changes` lists every open change (absent when no source declares the field, `[]` when some do and nothing is open); `list_sources` rows carry `open_pending_changes` (a count, absent at zero) and `get_source` serves each change with its computed `state`.
+
+**Keeping it true is the maintenance job** (`/maintain-context`): when a change is published, add the entry with `ingested: false`; when the text is re-ingested, flip `ingested` to `true` (or delete the entry) in the same edit that adds the new records. `bun run validate` warns on every change that has come into force and is still not ingested — the corpus is then serving text that is behind the law — and prints how many open changes the corpus carries. Both are advisory: the registry may be ahead of the extraction by design.
 
 ### On the `document_id` join
 

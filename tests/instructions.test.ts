@@ -30,6 +30,7 @@ describe("server instructions", () => {
       "best_coverage", // read it before treating the top of a list as an answer
       "query_tokens",
       "pre_adoption_placeholders", // a placeholder is not a citation
+      "pending_changes_note", // a change the corpus has not ingested: the served text is the version before it
     ]) {
       expect(text).toContain(key);
     }

@@ -19,7 +19,7 @@ Ranked, field-scoped search across all loaded regulatory frameworks: citation (w
 | `offset` | `number` | Optional — skip this many ranked matches |
 | `detail` | `"concise" \| "full"` | Optional, default `"concise"` |
 
-**Returns:** the shared envelope `{ results, returned, total_matches, offset, truncated, next_offset, query_tokens, best_coverage, notice }` — latest versions only. Concise results are `{ id, citation, matched_excerpt, document_id, parent }`, where `matched_excerpt` is a run of whole sentences around the best match — quotable as it stands, so a hit can be answered from without re-fetching the record. `detail: "full"` serves complete records with `commentary` capped per row and `commentary_omitted` declaring what was withheld; `get_regulation` serves every entry. Concise rows also carry `coverage` — how many of the query's `query_tokens` meaningful terms that row matched; `best_coverage` is the highest of any row across the whole ranked set (page 2 still reports it), and `notice` says so when the best match covers fewer than half the terms. `detail: "full"` records are not decorated; the envelope fields still appear.
+**Returns:** the shared envelope `{ results, returned, total_matches, offset, truncated, next_offset, query_tokens, best_coverage, notice }` — latest versions only. Concise results are `{ id, citation, matched_excerpt, document_id, parent }`, where `matched_excerpt` is a run of whole sentences around the best match — quotable as it stands, so a hit can be answered from without re-fetching the record. `detail: "full"` serves complete records with `commentary` capped per row and `commentary_omitted` declaring what was withheld; `get_regulation` serves every entry. Concise rows also carry `coverage` — how many of the query's `query_tokens` meaningful terms that row matched; `best_coverage` is the highest of any row across the whole ranked set (page 2 still reports it), and `notice` says so when the best match covers fewer than half the terms. `detail: "full"` records are not decorated; the envelope fields still appear. When the rows on the returned page include a document the registry records a change for that the corpus has not ingested, `notice` gains one sentence naming the document and the change ("Some results come from a document with a change this corpus has not ingested: … The text served is the version before it; open a record or get_source for the details."). It is computed for the rows actually on the page, appended after any truncation or weak-match notice, and said once per page rather than per row; the full statement is the [`pending_changes_note`](#get-regulation) on the record.
 
 **Example:**
 ```ts
@@ -48,7 +48,7 @@ Fetch a regulation paragraph by URI.
 | `id` | `RegulationId` | yes | e.g. `regulation://crr/178/1/a` |
 | `as_of` | `string` (ISO date) | no | Returns the version in force on this date; carries an `as_of_note` when the corpus records no version for it (below) |
 
-**Returns:** `Regulation` — unknown ids are an `isError` result pointing at `search_regulation`. Two additive keys, `pre_adoption_placeholders` and `notice`, appear only when the text names an instrument by a placeholder number (below).
+**Returns:** `Regulation` — unknown ids are an `isError` result pointing at `search_regulation`. Three kinds of additive key appear only when they apply: `as_of_note` (the text is the current record, not the text of the requested date), `pending_changes_note` (the registry records a change to the document that this corpus has not ingested), and `pre_adoption_placeholders` with `notice` (the text names an instrument by a placeholder number). Each is below.
 
 **Misses say what kind of absence they are.** "No record for X" is true and reads as "there is no X", but a corpus holds some provisions of a document, not all of them. The same sentence is used by `get_regulation`, `expand_regulation` and `get_regulation_tree` (one helper, `unknownRegulationMiss`), and it works out the document from the id's first path segment against the documents held (`holdings`, see [`get_corpus_info`](./meta#get-corpus-info)):
 
@@ -74,6 +74,32 @@ get_regulation("regulation://crr/180/1/a", as_of: "2024-12-31")   // an id with 
 ```
 
 The record is still the best text the corpus has, so it is served and not turned into a miss — but it must not be cited as the text of that date. The key is **absent** (never present and empty) when `as_of` is not given, when a recorded version covers the date, and on a miss. It is declared optional in the tool's published output schema, which stays open. `expand_regulation` carries the same note next to its record fields, and counts any regulation children that were also served from current text, and any the corpus holds but has no version of for the date (listed by id only); `get_regulation_tree` puts one note on the root envelope and counts any other nodes in the same two situations rather than stamping each node. A miss says in its message that a date the corpus has no version for is otherwise answered with the current text and a note.
+
+**`pending_changes_note`.** A corpus is a snapshot, and a text that has been overtaken by an amendment reads exactly like one that has not. When the source registry records a change to the record's document that the corpus has not ingested, the response carries an additive string key `pending_changes_note`, ahead of the record fields (after `as_of_note`, when both apply):
+
+```ts
+get_regulation("regulation://crr/178/1/a")   // the registry records an amendment applying later
+→ {
+    pending_changes_note: "Pending change to this document: Amending Regulation (demo) applies from 2026-12-02 (in 60 days) and is not ingested here, so the text served is the version before it. Registry: concerns Article 178. See get_source for the registry entry.",
+    id: "regulation://crr/178/1/a", document_version: "2024-01-09", text: "...", ...
+  }
+```
+
+What it says depends on where the change stands today, computed from the registry's `ingested` and `effective_from` and today's date on every call (never stored):
+
+| State | The note says |
+|---|---|
+| `upcoming` (not ingested, applies after today) | "Pending change to this document: … applies from D (in N days) and is not ingested here, so the text served is the version before it." |
+| `in_force_not_ingested` (not ingested, applies today or earlier) | "Text may be out of date: … has applied since D and is not ingested here, so the text served may no longer be the text in force." |
+| `undated` (not ingested, no application date) | "… is adopted/announced with no application date recorded and is not ingested here." |
+
+An `announced` change reads "is expected to apply" (or "was expected to apply" once its date has passed), because nothing says it did. The note names at most three changes, most urgent first (already in force, then the soonest, then undated) and counts the rest ("(2 more in get_source.)"). It quotes the registry's `affects` hints as "Registry: concerns …" and says **nothing about what the change provides**: the corpus does not hold it, and the note is a statement about the corpus, not about the law. It always ends by pointing at `get_source`, which has the entry.
+
+- **Document-level.** The join is `framework` + `document_id`, so the note rides on every record of the document; `affects` is a hint for the reader and is never used to decide which records get it.
+- **Absent, never empty.** No note when no change is open, when the registry declared nothing, when the only declaring source is not current, and under an `as_of` earlier than every open change's `effective_from` (the text of a date before the change is not behind it; `as_of_note` still says what it says). An undated change has no such bound and stays. "No pending change recorded" is not "none is coming", so the server never offers the absence as reassurance.
+- **Tools.** `get_regulation`, `expand_regulation` (the record asked for), `get_regulation_tree` (once, on the root, for the root's document) and a `resolve_citation` match carry it. `search_regulation` rows do not carry it; the page's `notice` gains one sentence naming the documents on the page that have a change not ingested. `get_corpus_info.pending_changes` lists every open change, `list_sources` rows carry `open_pending_changes`, and `get_source` serves each change with its computed `state`.
+
+It is declared optional in the tool's published output schema, which stays open; the canonical `RegulationSchema` is unchanged.
 
 **`pre_adoption_placeholders` and `notice`.** A guideline written before a technical standard was adopted cannot cite it, so it writes "Regulation (EU) xx/xx [RTS on …]". Served as it stands that reads as a citation, but there is no such regulation to look up. When the record's text contains such a reference, the response carries two additive keys ahead of the record fields:
 

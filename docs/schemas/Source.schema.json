@@ -85,6 +85,52 @@
             "full",
             "partial"
           ]
+        },
+        "pending_changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "reference": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "announced",
+                  "adopted"
+                ]
+              },
+              "effective_from": {
+                "type": "string",
+                "format": "date"
+              },
+              "ingested": {
+                "type": "boolean"
+              },
+              "affects": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "note": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "status",
+              "ingested"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
