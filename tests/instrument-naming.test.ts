@@ -469,9 +469,9 @@ describe("a name the registry or the instrument supplies scopes a citation only 
 
   it("with the names taken off, a citation that is exactly a record's own is resolved, whatever the name", () => {
     // The scope is accepted on an exact hit: nothing is left over that could name anything.
-    const regs = [...corpus(), reg("regulation://crr/section-p1", "Section P1.TI-a", "crr", "crr")];
-    const r = resolveCitationDetailed(regs, "Regulation (EU) No 575/2013 - Section P1.TI-a", holdings);
-    expect(r.match?.id).toBe("regulation://crr/section-p1");
+    const regs = [...corpus(), reg("regulation://crr/section-q9", "Section Q9.ZK-a", "crr", "crr")];
+    const r = resolveCitationDetailed(regs, "Regulation (EU) No 575/2013 - Section Q9.ZK-a", holdings);
+    expect(r.match?.id).toBe("regulation://crr/section-q9");
     expect(r.confidence).toBe("exact");
   });
 
