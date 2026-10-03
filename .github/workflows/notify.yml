@@ -1,0 +1,108 @@
+name: Notify
+
+# Emails the owner when something big happens in the release pipeline: a release
+# going out, or the thing that publishes it failing.
+#
+# There is no secret and no mail provider. A notice is an issue, labelled
+# `pipeline-notice`, assigned to the owner with an @mention, and GitHub turns
+# that into an email (and a push, in the mobile app).
+#
+# It runs AFTER the workflows it reports on, from the default branch, so it can
+# fail without turning a good release red. It is not a step in release.yml
+# because a release created with GITHUB_TOKEN does not trigger `on: release`,
+# and a step there would ride on the release's permissions.
+#
+# What is NOT a notice: pull-request runs, forks, and a successful run that
+# published nothing (release.yml is a no-op on every push that does not bump the
+# version). To turn the whole thing off, delete this file.
+#
+# Every event field reaches the script through `env:`, never interpolated into
+# it: a commit message is text somebody else wrote.
+
+on:
+  workflow_run:
+    workflows: ["Release MCPB bundle", "CI"]
+    types: [completed]
+  workflow_dispatch: {}   # sends a test notice
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    # This repository's own main only, never a fork's branch that happens to be called main.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.head_branch == 'main')
+    steps:
+      - name: Open the notice
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_MSG: ${{ github.event.workflow_run.head_commit.message }}
+        run: |
+          set -uo pipefail
+          NAME="${REPO#*/}"
+
+          # One short line, no backticks, safe to put inside a code span.
+          oneline() { printf '%s' "$1" | tr -d '`\r' | head -n1 | cut -c1-160; }
+
+          notice() {
+            gh label create pipeline-notice --repo "$REPO" --color 5319e7 \
+              --description "Automatic pipeline notice (emails the owner)" >/dev/null 2>&1 || true
+            printf '%s\n\n— posted by `.github/workflows/notify.yml` · @%s\n' "$2" "$OWNER" > "$RUNNER_TEMP/notice.md"
+            gh issue create --repo "$REPO" --title "$1" --body-file "$RUNNER_TEMP/notice.md" \
+              --label pipeline-notice --assignee "$OWNER" \
+              || gh issue create --repo "$REPO" --title "$1" --body-file "$RUNNER_TEMP/notice.md" \
+                   --label pipeline-notice
+          }
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            notice "✅ $NAME: notices are on" \
+              "Test notice. From now on a release going out, or the release workflow or CI on \`main\` failing, opens an issue like this one and GitHub emails you."
+            exit 0
+          fi
+
+          SHORT="${HEAD_SHA:0:7}"
+          SUBJECT="$(oneline "$HEAD_MSG")"
+
+          case "$CONCLUSION" in
+            failure|timed_out)
+              failed="$(gh run view "$RUN_ID" --repo "$REPO" --json jobs --jq \
+                '[.jobs[] | select(.conclusion == "failure") | .name + ": " + ([.steps[] | select(.conclusion == "failure") | .name] | join(", "))] | join("; ")' \
+                2>/dev/null || true)"
+              body="**$RUN_NAME** failed on \`main\` at $SHORT: \`$SUBJECT\`"
+              [ -n "$failed" ] && body="$body"$'\n\n'"Failed: $failed"
+              body="$body"$'\n\n'"[Open the run]($RUN_URL)"
+              notice "❌ $NAME: $RUN_NAME failed ($SHORT)" "$body"
+              ;;
+            success)
+              # Only a release published BY THIS RUN is news: the tag it made points at this commit.
+              [ "$RUN_NAME" = "Release MCPB bundle" ] || exit 0
+              tag="$(gh release list --repo "$REPO" --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || true)"
+              [ -n "$tag" ] || exit 0
+              sha="$(gh api "repos/$REPO/commits/$tag" --jq .sha 2>/dev/null || true)"
+              if [ "$sha" != "$HEAD_SHA" ]; then
+                echo "No release was published by this run (the latest is $tag)."
+                exit 0
+              fi
+              notice "🚀 $NAME $tag released" \
+                "**$tag** is out: [release notes](https://github.com/$REPO/releases/tag/$tag)
+
+          Built from \`$SUBJECT\` ($SHORT). The corpus and dashboard repositories get their pin-bump pull requests next."
+              ;;
+            *)
+              echo "Conclusion '$CONCLUSION': nothing to say."
+              ;;
+          esac
