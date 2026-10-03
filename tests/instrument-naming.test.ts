@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
 
 import { resolveCitationDetailed } from "../src/file-adapter.ts";
-import type { Regulation } from "../src/schema.ts";
+import type { DocumentHolding, Regulation } from "../src/schema.ts";
 
-// ── Naming an instrument: by number, in every standard spelling ───────────────
+// ── Naming an instrument: by number, by name, by title ─────────────────────────
 //
 // A citation names the instrument a provision belongs to in whatever spelling the
 // writer knows. Every spelling the resolver does not recognise drops the
@@ -13,6 +13,11 @@ import type { Regulation } from "../src/schema.ts";
 // with the act's own number read as sub-points. These pin the spellings, each
 // against a synthetic corpus in which several documents share the numbers, so a
 // leak would be seen. (Act numbers here are public law; the corpus is invented.)
+//
+// The second half is the other direction: a held document or instrument named by
+// its English name, its official number or its registry title must be found in
+// that document and nowhere else, and a name that is NOT one of those must never
+// be answered out of a same-numbered provision of whichever document has one.
 
 const reg = (id: string, citation: string, documentId: string, framework: string, extra: Partial<Regulation> = {}): Regulation => ({
   id: id as Regulation["id"],
@@ -24,6 +29,15 @@ const reg = (id: string, citation: string, documentId: string, framework: string
   commentary: [],
   children: [],
   ...extra,
+});
+
+// A registry entry for a document, as `holdings` carries it.
+const holding = (documentId: string, framework: string, title: string, records: number, partial?: boolean): DocumentHolding => ({
+  document_id: documentId,
+  framework,
+  title,
+  records,
+  ...(partial === undefined ? {} : { partial }),
 });
 
 /** Articles of a regulation held in part, and two guidelines that number PARAGRAPHS the same way. */
@@ -190,19 +204,44 @@ describe("the CRR and the CRD are one instrument however they are named", () => 
 });
 
 describe("a held instrument named beside an unheld act is judged by the act", () => {
-  it("declines naming the act, whichever of the two comes first", () => {
+  it("declines naming the act when the act is where the provision is", () => {
     // The corpus holds the CRR. A citation that also names an act it does not hold is
     // about that act as far as this gate can tell: the held name does not vouch for it,
     // and the bare article number must not go looking in every document.
     for (const [text, label] of [
       ["Article 3(4) of implementing regulation 2021/451 referred to in the Capital Requirements Regulation", "Regulation (EU) 2021/451"],
       ["Article 5 of Directive 2014/65/EU referred to in the CRR", "Directive 2014/65/EU"],
-      ["Article 5 of the CRR, as amended by Regulation (EU) 2024/1623", "Regulation (EU) 2024/1623"],
       ["Article 5 of Regulation (EU) 2024/1623 amending the CRR", "Regulation (EU) 2024/1623"],
+      ["Article 5 of Directive 2014/65/EU and the CRR", "Directive 2014/65/EU"],
     ] as const) {
       const r = resolveCitationDetailed(corpus(), text);
       declined(r);
       expect(r.coverage_note, text).toContain(`holds no ${label}.`);
+    }
+  });
+
+  it("does not refuse a held instrument's own provision for the act that only amends or implements it", () => {
+    // "... of the CRR, as amended by Regulation (EU) 2024/1623" asks about the CRR. The
+    // refusal "this corpus holds no Regulation (EU) 2024/1623" would be true and beside
+    // the point; the act's number is not read as the provision's, so nothing is matched,
+    // but the held article is offered, and only from the held document.
+    for (const text of [
+      "Article 5 of the CRR, as amended by Regulation (EU) 2024/1623",
+      "Article 5 of the Capital Requirements Regulation, as amended by Regulation (EU) 2024/1623",
+      "Article 5 of Regulation (EU) No 575/2013 as supplemented by Commission Delegated Regulation (EU) 2022/439",
+      "Article 5 CRR, referred to in Directive 2014/65/EU",
+      "Article 5 CRR, implemented in accordance with Regulation 2021/451",
+    ]) {
+      const r = resolveCitationDetailed(corpus(), text);
+      expect(r.match, text).toBeNull();
+      expect(r.coverage_note ?? "", text).not.toContain("holds no");
+      expect(r.candidates.map((c) => c.document_id), text).toEqual(["crr"]);
+    }
+  });
+
+  it("an act that is the only instrument named is always the gate's, whatever precedes it", () => {
+    for (const text of ["Article 5 as amended by Regulation (EU) 2024/1623", "Article 5, referred to in Directive 2014/65/EU"]) {
+      declined(resolveCitationDetailed(corpus(), text));
     }
   });
 
@@ -288,5 +327,413 @@ describe("a document number that no held document answers to", () => {
     const r = resolveCitationDetailed(guidelines(), "EBA/GL/2018/04");
     declined(r);
     expect(r.coverage_note).toContain("names a document by the number EBA/GL/2018/04");
+  });
+});
+
+describe("a held instrument named in the citation scopes it to the documents that carry it", () => {
+  const holdings = [
+    holding("crr", "crr", "Regulation (EU) No 575/2013 (CRR)", 3, true),
+    holding("acme-gl-a", "acme", "Acme guidelines on alpha estimation methods", 3),
+    holding("acme-gl-b", "acme", "Acme guidelines on beta estimation (consolidated)", 4),
+  ];
+  const names = [
+    "the Capital Requirements Regulation",
+    "Regulation (EU) No 575/2013",
+    "Regulation (EU) 2013/575",
+    "Regulation 575/2013",
+    "the CRR (Regulation (EU) No 575/2013)",
+    "CRR",
+  ];
+
+  for (const name of names) {
+    it(`Article 153 of ${name}: nothing is matched, and the absence is the corpus's`, () => {
+      // Paragraph 153 of a guideline is the only record numbered 153 anywhere. It is
+      // not what was asked for, and it used to be returned as a confident match.
+      const r = resolveCitationDetailed(corpus(), `Article 153 of ${name}`, holdings);
+      declined(r);
+      expect(r.unmatched_segments).toEqual(["153"]);
+      expect(r.coverage_note).toContain("Nothing in this corpus is numbered 153 in the document named");
+      expect(r.coverage_note).toContain("This corpus holds only part of Regulation (EU) No 575/2013 (CRR)");
+    });
+
+    it(`Article 12 of ${name}: the CRR's article, though both guidelines have a paragraph 12`, () => {
+      const r = resolveCitationDetailed(corpus(), `Article 12 of ${name}`, holdings);
+      expect(r.match?.id).toBe("regulation://crr/article-12");
+      expect(r.confidence).toBe("segment");
+    });
+  }
+
+  it("the number of the act never becomes points of the provision", () => {
+    // At 2013 and 575 the spine was [160, 575, 2013]; only the first is the provision.
+    const r = resolveCitationDetailed(corpus(), "Article 160 of Regulation (EU) No 575/2013");
+    expect(r.match?.id).toBe("regulation://crr/article-160");
+    const miss = resolveCitationDetailed(corpus(), "Article 161 of Regulation (EU) No 575/2013");
+    expect(miss.unmatched_segments).toEqual(["161"]);
+  });
+
+  it("a containing article is reported from the instrument named, and from no other document", () => {
+    const regs = [...corpus(), reg("regulation://crr/article-181", "Article 181", "crr", "crr", { text: "1. First.\n2. Second:\n(a) one;\n(b) two." })];
+    const r = resolveCitationDetailed(regs, "Article 181(2)(b) of Regulation (EU) No 575/2013");
+    expect(r.candidates.map((c) => c.id)).toEqual(["regulation://crr/article-181"]);
+    expect(r.coverage_note).toContain("whose text carries point 2.b");
+  });
+
+  it("a held numbered act with ids that carry its number is found by that number", () => {
+    const regs = [
+      ...corpus(),
+      reg("regulation://regulation-2021-930/article-3", "Article 3", "regulation-2021-930", "acme"),
+      reg("regulation://gl-a/p3", "Paragraph 3", "acme-gl-a", "acme"),
+      reg("regulation://gl-b/p3", "Paragraph 3", "acme-gl-b", "acme"),
+    ];
+    for (const text of [
+      "Article 3 of Commission Delegated Regulation (EU) 2021/930",
+      "Article 3 of Regulation 2021/930",
+      "Article 3 of Regulation (EU) No 930/2021",
+    ]) {
+      const r = resolveCitationDetailed(regs, text);
+      expect(r.match?.id, text).toBe("regulation://regulation-2021-930/article-3");
+    }
+  });
+
+  it("the formula an act is cited with is not a second name", () => {
+    for (const text of [
+      "Article 12 of Regulation (EU) No 575/2013 of the European Parliament and of the Council",
+      "Article 12 of Regulation (EU) No 575/2013 of the European Parliament and of the Council of 26 June 2013",
+      "Article 12 of Commission Delegated Regulation (EU) No 575/2013",
+      "Article 12, in the first sentence, of Regulation (EU) No 575/2013",
+    ]) {
+      expect(resolveCitationDetailed(corpus(), text, holdings).match?.id, text).toBe("regulation://crr/article-12");
+    }
+  });
+
+  it("a deeper point is reported from the instrument's own document, with the numerals of a list left alone", () => {
+    const r = resolveCitationDetailed(corpus(), "Article 12(2)(a)(ii) of Regulation (EU) No 575/2013 of the European Parliament and of the Council", holdings);
+    expect(r.match).toBeNull();
+    expect(r.candidates.map((c) => c.id)).toEqual(["regulation://crr/article-12"]);
+  });
+});
+
+describe("a name the registry or the instrument supplies scopes a citation only when it is accounted for", () => {
+  const holdings = [
+    holding("crr", "crr", "Regulation (EU) No 575/2013 (CRR)", 3, true),
+    holding("acme-gl-a", "acme", "Acme guidelines on alpha estimation methods", 3),
+    holding("acme-gl-b", "acme", "Acme guidelines on beta estimation (consolidated)", 4),
+  ];
+
+  it("a mention in a clause that only says what an unrecognised guideline is issued under is not the home of the provision", () => {
+    // Paragraph 153 exists once in the corpus, in alpha. The caller is citing a guideline
+    // the corpus does not hold, "referred to in" the regulation. Scoped to the regulation
+    // (which has no 153) this declines; scoped to the framework's other documents it would
+    // be paragraph 153 of alpha. Neither may come back as a match.
+    for (const text of [
+      "Paragraph 153 of Acme guidelines on gamma identification referred to in Regulation (EU) No 575/2013",
+      "Paragraph 12 of Acme guidelines on gamma identification referred to in Regulation (EU) No 575/2013",
+      "Paragraph 12 of the Capital Requirements Regulation referred to in Acme guidelines on gamma identification",
+    ]) {
+      const r = resolveCitationDetailed(corpus(), text, holdings);
+      expect(r.match, text).toBeNull();
+      expect(r.confidence, text).toBe("none");
+    }
+  });
+
+  it("two documents named by title are never resolved into either", () => {
+    const r = resolveCitationDetailed(
+      corpus(),
+      "Paragraph 12 of Acme guidelines on alpha estimation methods referred to in Acme guidelines on beta estimation",
+      holdings,
+    );
+    expect(r.match).toBeNull();
+    expect(r.confidence).toBe("none");
+  });
+
+  it("a held document and a named instrument are never resolved into either", () => {
+    // The number of the instrument is still in the citation, so the scope is not
+    // taken and the number is not read away: the provision is not found in either.
+    for (const text of [
+      "Paragraph 12 of acme-gl-a (Regulation (EU) No 575/2013)",
+      "Paragraph 12 of Acme guidelines on alpha estimation methods (Regulation (EU) No 575/2013)",
+      "Article 12 of Regulation (EU) No 575/2013 (Acme guidelines on alpha estimation methods)",
+    ]) {
+      const r = resolveCitationDetailed(corpus(), text, holdings);
+      expect(r.match, text).toBeNull();
+      expect(r.confidence, text).toBe("none");
+    }
+  });
+
+  it("another act, by number, still in the citation stops the scope", () => {
+    // The number of the second act would read as points of the provision.
+    const r = resolveCitationDetailed(corpus(), "Article 5 of Regulation (EU) No 575/2013 and Regulation (EU) 2022/439", holdings);
+    declined(r);
+    expect(r.coverage_note).toContain("holds no Regulation (EU) 2022/439");
+  });
+
+  it("with the names taken off, a citation that is exactly a record's own is resolved, whatever the name", () => {
+    // The scope is accepted on an exact hit: nothing is left over that could name anything.
+    const regs = [...corpus(), reg("regulation://crr/section-p1", "Section P1.TI-a", "crr", "crr")];
+    const r = resolveCitationDetailed(regs, "Regulation (EU) No 575/2013 - Section P1.TI-a", holdings);
+    expect(r.match?.id).toBe("regulation://crr/section-p1");
+    expect(r.confidence).toBe("exact");
+  });
+
+  it("the ids alone scope as before, whatever else the citation says", () => {
+    // A name the records carry is not derived: it is not withheld by the words around it.
+    expect(resolveCitationDetailed(corpus(), "Article 12 of CRR on the treatment of exposures", holdings).match?.id).toBe("regulation://crr/article-12");
+    expect(resolveCitationDetailed(corpus(), "Paragraph 4 of acme-gl-b in the consolidated version", holdings).match?.id).toBe("regulation://gl-b/p4");
+  });
+
+  it("a number that belongs to another kind of act is not the CRR's", () => {
+    // No directive is numbered 575/2013. Reading the bare number out of "Directive (EC)
+    // 575/2013" would hand a provision of one body of law to another.
+    for (const text of ["Article 12 of Directive (EC) 575/2013", "Annex 12 in Directive (Euratom) 575/2013", "Article 12 of Decision 575/2013"]) {
+      const r = resolveCitationDetailed(corpus(), text, holdings);
+      declined(r);
+      expect(r.coverage_note, text).toMatch(/holds no (Directive|Decision)/);
+    }
+  });
+
+  it("two held instruments named by number are not a second name for one document", () => {
+    // Directive 2013/36/EU names the CRD; the corpus holds the CRR alone. The CRD is
+    // the gate's business, and the number of the CRR does not vouch for it.
+    const r = resolveCitationDetailed(corpus(), "Article 5 of Directive 2013/36/EU and Regulation (EU) No 575/2013", holdings);
+    declined(r);
+    expect(r.coverage_note).toContain("holds no CRD");
+  });
+});
+
+describe("a registry title names its document", () => {
+  const holdings = [
+    holding("acme-gl-a", "acme", "Acme guidelines on alpha estimation methods", 3),
+    holding("acme-gl-b", "acme", "Acme guidelines on beta estimation (consolidated)", 4),
+    holding("crr", "crr", "Acme Code of Practice \u2014 consolidated edition", 3),
+  ];
+
+  it("the whole title scopes the citation, though both guidelines have a paragraph 12", () => {
+    const r = resolveCitationDetailed(corpus(), "Paragraph 12 of Acme guidelines on alpha estimation methods", holdings);
+    expect(r.match?.id).toBe("regulation://gl-a/p12");
+    expect(r.confidence).toBe("segment");
+  });
+
+  it("so does the title without its parenthetical", () => {
+    const r = resolveCitationDetailed(corpus(), "Paragraph 12 of Acme guidelines on beta estimation", holdings);
+    expect(r.match?.id).toBe("regulation://gl-b/p12");
+  });
+
+  it("so does a parenthetical that is itself a name, but not one too short to be", () => {
+    const named = [
+      holding("acme-gl-a", "acme", "Acme guidelines on alpha estimation methods ('Alpha estimation toolkit') (consolidated, June 2026)", 3),
+      holding("acme-gl-b", "acme", "Acme guidelines on beta estimation (BETA)", 4),
+    ];
+    // Three words: a name. Two (consolidated, June) and one (BETA) are not.
+    expect(resolveCitationDetailed(corpus(), "Paragraph 12 of the Alpha estimation toolkit", named).match?.id).toBe("regulation://gl-a/p12");
+    expect(resolveCitationDetailed(corpus(), "Paragraph 12 of Alpha estimation toolkit guidelines", named).match?.id).toBe("regulation://gl-a/p12");
+    expect(resolveCitationDetailed(corpus(), "Paragraph 12 of the consolidated version", named).match).toBeNull();
+  });
+
+  it("so does the part before a dash", () => {
+    const r = resolveCitationDetailed(corpus(), "Article 12 of Acme Code of Practice", holdings);
+    expect(r.match?.id).toBe("regulation://crr/article-12");
+  });
+
+  it("so does the part before the clause that names its legal basis", () => {
+    // How a guideline is called: the title minus "under Article N of Regulation ...".
+    const legal = [
+      holding("acme-gl-a", "acme", "Acme guidelines on alpha estimation methods under Article 178 of Regulation (EU) No 575/2013", 3),
+      holding("acme-gl-b", "acme", "Acme guidelines on beta estimation (consolidated)", 4),
+    ];
+    const r = resolveCitationDetailed(corpus(), "Paragraph 12 of the Acme guidelines on alpha estimation methods", legal);
+    expect(r.match?.id).toBe("regulation://gl-a/p12");
+    // ...and the number of the regulation inside the title is not an instrument named beside it.
+    const whole = resolveCitationDetailed(
+      corpus(),
+      "Paragraph 12 of Acme guidelines on alpha estimation methods under Article 178 of Regulation (EU) No 575/2013",
+      legal,
+    );
+    expect(whole.match?.id).toBe("regulation://gl-a/p12");
+  });
+
+  it("an instrument quoted inside a recognised title is part of the title, not a claim that it is held", () => {
+    const legal = [holding("acme-gl-a", "acme", "Acme guidelines on alpha estimation methods under Article 178 of Regulation (EU) No 575/2013", 3)];
+    const noCrr = corpus().filter((r) => r.document_id !== "crr");
+    const title = "Paragraph 12 of Acme guidelines on alpha estimation methods under Article 178 of Regulation (EU) No 575/2013";
+    const r = resolveCitationDetailed(noCrr, title, legal);
+    expect(r.coverage_note ?? "").not.toContain("holds no");
+    // ...while naming the regulation on its own is still a claim about it.
+    const alone = resolveCitationDetailed(noCrr, "Article 12 of Regulation (EU) No 575/2013", legal);
+    declined(alone);
+    expect(alone.coverage_note).toContain("holds no CRR");
+  });
+
+  it("only exact words scope: part of a title does not, and nothing is guessed", () => {
+    // "Acme guidelines on alpha" is a prefix of the title. The framework "acme" scopes it to both guidelines, which
+    // share the number: ambiguous, never resolved to the one whose title it resembles.
+    const r = resolveCitationDetailed(corpus(), "Paragraph 12 of Acme guidelines on alpha", holdings);
+    expect(r.match).toBeNull();
+    expect(r.ambiguous).toBe(true);
+  });
+
+  it("a title too short to be a name scopes nothing", () => {
+    const short = [holding("acme-gl-a", "acme", "Guidelines on alpha", 3), holding("acme-gl-b", "acme", "Guidelines on beta", 4)];
+    const r = resolveCitationDetailed(corpus(), "Paragraph 12 of the Guidelines on alpha", short);
+    expect(r.match).toBeNull();
+  });
+
+  it("the title scopes the citation only as far as it is accounted for", () => {
+    // Words after the title that could name something else withhold the scope: this
+    // is the framework's two guidelines again, ambiguous, not alpha.
+    const r = resolveCitationDetailed(corpus(), "Paragraph 12 of Acme guidelines on alpha estimation methods for retail exposures", holdings);
+    expect(r.match).toBeNull();
+  });
+});
+
+describe("a citation with a connective left on it is a record's own citation, not a tie", () => {
+  // A section whose label reduces to the same number as the article ties with it on the
+  // numeric spine. "Article 3 CRR" is exact; "Article 3 of the CRR" has "of the" left
+  // after the document's name is taken out, missed the exact pass, and came back
+  // ambiguous between the two.
+  const regs = (): Regulation[] => [
+    reg("regulation://crr/article-3", "Article 3", "crr", "crr"),
+    reg("regulation://crr/section-p3", "Section Q9.XY.D2c.T3d-3", "crr", "crr"),
+    reg("regulation://crr/article-4", "Article 4", "crr", "crr"),
+    reg("regulation://gl-a/p3", "Paragraph 3", "acme-gl-a", "acme"),
+  ];
+
+  it("resolves to the article whichever way the document is named", () => {
+    for (const text of ["Article 3 CRR", "Article 3 of the CRR", "Article 3 of the Capital Requirements Regulation", "Article 3 of Regulation (EU) No 575/2013"]) {
+      const r = resolveCitationDetailed(regs(), text);
+      expect(r.match?.id, text).toBe("regulation://crr/article-3");
+      expect(r.ambiguous, text).toBe(false);
+    }
+  });
+
+  it("keeps the labels: exact where nothing was left over, segment where a connective was", () => {
+    expect(resolveCitationDetailed(regs(), "Article 3 CRR").confidence).toBe("exact");
+    expect(resolveCitationDetailed(regs(), "Article 3 of the CRR").confidence).toBe("segment");
+  });
+
+  it("does not drop a point or a kind word with the connectives", () => {
+    // (a) is a point and "paragraph" is not "article": neither is grammar.
+    const point = resolveCitationDetailed(regs(), "Article 3(a) of the CRR");
+    expect(point.match).toBeNull();
+    const kind = resolveCitationDetailed(regs(), "Paragraph 3 of the CRR");
+    expect(kind.match).toBeNull();
+  });
+
+  it("an ambiguity that is real stays one", () => {
+    const twins = [...regs(), reg("regulation://crr/annex-3", "Article 3", "crr", "crr")];
+    const r = resolveCitationDetailed(twins, "Article 3 of the CRR");
+    expect(r.match).toBeNull();
+    expect(r.ambiguous).toBe(true);
+  });
+});
+
+describe("a document named in words nothing here recognises", () => {
+  const holdings = [holding("crr", "crr", "Regulation (EU) No 575/2013 (CRR)", 3, true)];
+
+  it("is never answered out of a same-numbered provision of whichever document has one", () => {
+    // Paragraph 153 exists once in the whole corpus, in an unrelated guideline. The
+    // citation says the provision is in the Basel framework.
+    const r = resolveCitationDetailed(corpus(), "Paragraph 153 of the Basel framework", holdings);
+    declined(r);
+    expect(r.coverage_note).toContain('("basel")');
+    expect(r.coverage_note).toContain("a guess");
+    expect(r.coverage_note).toContain("crr, acme-gl-a, acme-gl-b");
+    // A document held only in part is named, so the absence is read as the corpus's.
+    expect(r.coverage_note).toContain("This corpus holds only part of Regulation (EU) No 575/2013 (CRR)");
+  });
+
+  for (const text of [
+    "Article 5(4) of Basel III",
+    "Paragraph 12 of IFRS 9",
+    "Paragraph 12 in the GDPR",
+    "Paragraph 5 under the Zeta methodology handbook",
+    "Paragraph 12 of the guidelines on beta estimation methods",
+    "Article 5 of MiFID II, as amended",
+  ]) {
+    it(`declines, with no candidates: ${text}`, () => {
+      const r = resolveCitationDetailed(corpus(), text);
+      declined(r);
+      expect(r.coverage_note).toContain("does not recognise as a document it holds");
+    });
+  }
+
+  it("leaves a citation alone whose tail is only structure, the kind of text and where in it", () => {
+    for (const [text, id] of [
+      ["Paragraph 153 of the guidelines", "regulation://gl-a/p153"],
+      ["Paragraph 153 of the Regulation", "regulation://gl-a/p153"],
+      ["Paragraph 153 of this Directive", "regulation://gl-a/p153"],
+      ["Paragraph 153 in that paragraph", "regulation://gl-a/p153"],
+      ["see Paragraph 153", "regulation://gl-a/p153"],
+      ["as required by Paragraph 153", "regulation://gl-a/p153"],
+      ["Paragraph 153 in the first sentence", "regulation://gl-a/p153"],
+      ["Paragraph 153 of the Regulation as amended", "regulation://gl-a/p153"],
+    ] as const) {
+      expect(resolveCitationDetailed(corpus(), text).match?.id, text).toBe(id);
+    }
+  });
+
+  it("leaves a citation alone that names a held document, however it goes on", () => {
+    expect(resolveCitationDetailed(corpus(), "Article 12 of CRR on the treatment of exposures").match?.id).toBe("regulation://crr/article-12");
+    expect(resolveCitationDetailed(corpus(), "Paragraph 4 of acme-gl-b in the consolidated version").match?.id).toBe("regulation://gl-b/p4");
+  });
+
+  it("only reads what follows the last of, in, under or from", () => {
+    // "point (a) of Paragraph 153" has "of" and no name after it.
+    expect(resolveCitationDetailed(corpus(), "point (a) of Paragraph 153").coverage_note ?? "").not.toContain("does not recognise");
+  });
+
+  it("does not stand in front of an exact match", () => {
+    const labelled = [...corpus(), reg("regulation://gl-a/p77", "Paragraph 77 of the Basel framework", "acme-gl-a", "acme")];
+    expect(resolveCitationDetailed(labelled, "Paragraph 77 of the Basel framework").match?.id).toBe("regulation://gl-a/p77");
+  });
+
+  it("does not say it does not recognise a regulation the citation names and the corpus holds", () => {
+    // The scope was withheld because of the words after the number, but the regulation
+    // is named by its number and is held: "does not recognise" would be untrue of it.
+    const r = resolveCitationDetailed(corpus(), "Article 160 of Regulation (EU) No 575/2013 on prudential requirements for credit institutions", holdings);
+    expect(r.match).toBeNull();
+    expect(r.coverage_note ?? "").not.toContain("does not recognise");
+  });
+});
+
+describe("a document named twice in one citation", () => {
+  // Its id beside its title, its short name beside its number: the longer name
+  // scopes the citation and every other name for the SAME document leaves with it,
+  // or the second name's year and serial are read as points of the provision (and
+  // the citation is declined as naming a document no held one answers to).
+  const regs = (): Regulation[] => [
+    reg("regulation://gl-2016-07/p3", "Paragraph 3", "eba-gl-2016-07", "eba"),
+    reg("regulation://gl-2016-07/p15", "Paragraph 15", "eba-gl-2016-07", "eba"),
+    reg("regulation://gl-2017-16/p3", "Paragraph 3", "eba-gl-2017-16", "eba"),
+    reg("regulation://crr/article-3", "Article 3", "crr", "crr"),
+    reg("regulation://crr/article-180", "Article 180", "crr", "crr"),
+  ];
+  const holdings = [
+    holding("eba-gl-2016-07", "eba", "Guidelines on the application of the definition of default under Article 178 of Regulation (EU) No 575/2013", 2),
+    holding("eba-gl-2017-16", "eba", "Guidelines on PD estimation, LGD estimation and the treatment of defaulted exposures", 1),
+    holding("crr", "crr", "Regulation (EU) No 575/2013 (CRR)", 2, true),
+  ];
+
+  for (const text of [
+    "EBA/GL/2016/07 Guidelines on the application of the definition of default Paragraph 15",
+    "Paragraph 15 of EBA/GL/2016/07 Guidelines on the application of the definition of default",
+    "Paragraph 15 (EBA/GL/2016/07 Guidelines on the application of the definition of default)",
+    "Guidelines on the application of the definition of default, EBA GL 2016/07, paragraph 15",
+  ]) {
+    it(`resolves: ${text}`, () => {
+      const r = resolveCitationDetailed(regs(), text, holdings);
+      expect(r.match?.id, text).toBe("regulation://gl-2016-07/p15");
+    });
+  }
+
+  it("a short name beside a number, both for the same instrument", () => {
+    for (const text of ["Article 180 CRR (Regulation (EU) No 575/2013)", "CRR, Regulation (EU) No 575/2013, Article 180", "Article 180 of the CRR, that is the Capital Requirements Regulation"]) {
+      expect(resolveCitationDetailed(regs(), text, holdings).match?.id, text).toBe("regulation://crr/article-180");
+    }
+  });
+
+  it("a framework that names several documents is not the same document named again", () => {
+    // "EBA" stays in the citation beside a title that names one of its documents.
+    const r = resolveCitationDetailed(regs(), "EBA Guidelines on PD estimation, LGD estimation and the treatment of defaulted exposures, paragraph 3", holdings);
+    expect(r.match?.id).toBe("regulation://gl-2017-16/p3");
   });
 });

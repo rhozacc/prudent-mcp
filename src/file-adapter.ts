@@ -124,6 +124,21 @@ const STRUCTURAL = new Set([
 ]);
 
 /**
+ * The grammar of a citation that says nothing about WHICH provision: "Article 3 of
+ * the CRR" and "Article 3" name the same article. Dropped from both sides in the
+ * pass that compares a citation with a record's own once the exact pass has found
+ * nothing (`coreHits`), so a connective left behind by the document's name ("of
+ * the") cannot make an exact citation look like a different one - which is how
+ * "Article 3 of the CRR" came back ambiguous, tied on the numeric spine with a
+ * record whose citation reduces to the same number, while "Article 3 CRR" was exact.
+ * Kind words ("article", "paragraph") stay: "paragraph 78" is not "article 78". So
+ * does every single letter, including "a": point (a) is a point, not the English
+ * article.
+ */
+const CONNECTIVES = new Set(["of", "the", "in", "on", "at", "and", "under", "from", "an", "to", "for", "with", "by"]);
+const withoutConnectives = (tokens: string[]): string[] => tokens.filter((t) => !CONNECTIVES.has(t));
+
+/**
  * The numeric spine of a citation: the article/paragraph/point numbers and
  * single-letter points, in order. "Chapter 5, paragraph 12" gives ["5","12"];
  * "Art. 178(1)(a)" gives ["178","1","a"].
@@ -330,6 +345,20 @@ function windowAt(tokens: string[], window: string[]): number {
   return -1;
 }
 
+/** A name for one or more documents, as the words a caller would write it. */
+interface AliasEntry {
+  tokens: string[];
+  docs: Set<string>;
+  /**
+   * Given by the registry (a title) or by the instrument the citation names (the
+   * "Capital Requirements Regulation", "Regulation (EU) No 575/2013"), not one of
+   * the ids the records carry. It scopes a citation only when the whole citation
+   * is accounted for (`accountedFor`).
+   */
+  derived?: boolean;
+}
+type AliasIndex = Map<string, AliasEntry>;
+
 /**
  * Document aliases mapped to the documents they name.
  *
@@ -338,18 +367,22 @@ function windowAt(tokens: string[], window: string[]): number {
  * own short id segment ("gl-2017-16", "egim"). All three are indexed, and an
  * alias naming several documents (a bare framework) narrows the pool to those
  * several rather than picking one.
+ *
+ * With the registry's holdings, a document's TITLE is a name too: "Article 12 of
+ * Guidelines on the application of the definition of default" names a document by
+ * what it is called, and without it that document was not named at all, so the
+ * bare article number was answered from whichever document had one.
  */
-function documentAliases(
-  regulations: Regulation[],
-): Map<string, { tokens: string[]; docs: Set<string> }> {
-  const index = new Map<string, { tokens: string[]; docs: Set<string> }>();
-  const add = (raw: string, docId: string): void => {
+function documentAliases(regulations: Regulation[], holdings?: DocumentHolding[]): AliasIndex {
+  const index: AliasIndex = new Map();
+  const add = (raw: string, docId: string, derived = false): void => {
     const tokens = citationTokens(raw);
     if (tokens.length === 0) return;
     const key = tokens.join(" ");
     const slot = index.get(key);
-    if (slot === undefined) index.set(key, { tokens, docs: new Set([docId]) });
-    else slot.docs.add(docId);
+    // An id keeps its entry as the ids made it: a derived name never loosens one.
+    if (slot === undefined) index.set(key, { tokens, docs: new Set([docId]), ...(derived ? { derived } : {}) });
+    else if (derived !== true || slot.derived === true) slot.docs.add(docId);
   };
   for (const r of regulations) {
     add(r.framework, r.document_id);
@@ -357,7 +390,31 @@ function documentAliases(
     add(idDocSegment(r.id), r.document_id);
     add(`${r.framework} ${r.document_id}`, r.document_id);
   }
+  for (const h of holdings ?? []) {
+    if (h.title === undefined) continue;
+    for (const variant of titleNames(h.title)) add(variant, h.document_id, true);
+  }
   return index;
+}
+
+/**
+ * The words a registry title can be quoted by: the whole title, without its
+ * parentheticals, the part before a subtitle, a dash or the clause that names its
+ * legal basis ("... on the application of X under Article 178 of Regulation ..."),
+ * which is how a guideline is usually called, and a parenthetical that is itself a
+ * name ("... ('Downturn LGD estimation')"). Exact windows like every other name,
+ * never a fuzzy match, and a variant must carry at least three words that are
+ * neither structure nor a bare number, so "Guidelines", "(CRR)" or "Regulation
+ * (EU) No 1" can never scope a citation on their own.
+ */
+function titleNames(title: string): string[] {
+  const unbracketed = (t: string): string => t.replace(/\([^)]*\)/g, " ");
+  const head =
+    title.split(/\s[\u2014\u2013-]\s|:\s|\s(?:under|pursuant\s+to|in\s+accordance\s+with)\s+Articles?\b/i)[0] ?? title;
+  const named = [...title.matchAll(/\(([^)]*)\)/g)].map((m) => (m[1] ?? "").replace(/["'\u2018\u2019\u201c\u201d]/g, " "));
+  const variants = [title, unbracketed(title), head, unbracketed(head), ...named];
+  const words = (t: string): number => citationTokens(t).filter((w) => !STRUCTURAL.has(w) && !/^\d+$/.test(w)).length;
+  return [...new Set(variants.map((v) => v.replace(/\s+/g, " ").trim()))].filter((v) => words(v) >= 3);
 }
 
 /**
@@ -368,33 +425,42 @@ function documentAliases(
  * to the document's name and not to the provision. Left in, they make the
  * spine ["2017","16","78"], which matches nothing — the resolver then falls
  * through to a looser rule, and looser rules are what fabricate.
+ *
+ * The same document named a second time in another form - its id beside its
+ * title, "CRR" beside its number - leaves the citation too. Otherwise the second
+ * name's words and numbers ("2016", "07") are read as the provision's. Only a name
+ * that denotes nothing but the documents already chosen goes: a bare framework
+ * that also names other documents stays, as it always did.
  */
 function scopeToDocument(
   tokens: string[],
-  index: Map<string, { tokens: string[]; docs: Set<string> }>,
-): { docs: Set<string> | null; rest: string[] } {
-  let bestTokens: string[] | null = null;
-  let bestDocs: Set<string> | null = null;
+  index: AliasIndex,
+): { docs: Set<string> | null; rest: string[]; derived: boolean } {
+  let best: AliasEntry | null = null;
   let bestAt = -1;
-  for (const { tokens: alias, docs } of index.values()) {
-    const at = windowAt(tokens, alias);
+  for (const entry of index.values()) {
+    const at = windowAt(tokens, entry.tokens);
     if (at === -1) continue;
-    // Longest alias wins; among equals, the one naming fewest documents.
+    // Longest alias wins; among equals, the one naming fewest documents, and then
+    // the first indexed (the ids, which come before any derived name).
     const better =
-      bestTokens === null ||
-      alias.length > bestTokens.length ||
-      (alias.length === bestTokens.length && docs.size < (bestDocs?.size ?? Number.POSITIVE_INFINITY));
+      best === null ||
+      entry.tokens.length > best.tokens.length ||
+      (entry.tokens.length === best.tokens.length && entry.docs.size < best.docs.size);
     if (better) {
-      bestTokens = alias;
-      bestDocs = docs;
+      best = entry;
       bestAt = at;
     }
   }
-  if (bestTokens === null || bestDocs === null) return { docs: null, rest: tokens };
-  return {
-    docs: bestDocs,
-    rest: [...tokens.slice(0, bestAt), ...tokens.slice(bestAt + bestTokens.length)],
-  };
+  if (best === null) return { docs: null, rest: tokens, derived: false };
+  let rest = [...tokens.slice(0, bestAt), ...tokens.slice(bestAt + best.tokens.length)];
+  for (const other of index.values()) {
+    if (other === best || [...other.docs].some((d) => !best.docs.has(d))) continue;
+    for (let at = windowAt(rest, other.tokens); at !== -1; at = windowAt(rest, other.tokens)) {
+      rest = [...rest.slice(0, at), ...rest.slice(at + other.tokens.length)];
+    }
+  }
+  return { docs: best.docs, rest, derived: best.derived === true };
 }
 
 /**
@@ -411,9 +477,13 @@ const DOCUMENT_IDENTIFIER = /\b((?:[A-Za-z]{1,10}[\s/-]+){1,3})((?:19|20)\d{2})\
 
 /**
  * Words that carry no document's name: the connectives and determiners of a
- * citation, and the generic nouns that say what KIND of text a document is. A
- * word of these in front of a number does not make it an identifier ("of the
- * Directive 2018/04").
+ * citation, the generic nouns that say what KIND of text a document is, the words
+ * that place a provision inside its own article ("first sentence", "preceding
+ * paragraph"), and the formula an EU act is cited with ("of the European Parliament
+ * and of the Council of 26 June 2013"). A word of these in front of a number does
+ * not make it an identifier ("of the Directive 2018/04"), and a citation whose
+ * words are all of these, structure and numbers has nothing in it that could be
+ * naming a document (`unexplainedWords`).
  */
 const NAME_FILLER = new Set([
   "a", "an", "this", "that", "these", "those", "such", "said", "same", "its", "their", "our", "any", "each",
@@ -422,7 +492,52 @@ const NAME_FILLER = new Set([
   "regulation", "regulations", "directive", "directives", "decision", "decisions", "act", "acts", "rule",
   "rules", "standard", "standards", "technical", "document", "documents", "text", "texts", "law", "framework",
   "provision", "provisions", "paragraphs", "item", "items", "clause", "clauses", "para", "art", "ibid", "id",
+  // How a provision is pointed at ("as required by", "laid down in").
+  "required", "requires", "specified", "set", "out", "laid", "down", "provided", "defined", "stated", "described",
+  // Where inside a provision.
+  "first", "second", "third", "fourth", "fifth", "last", "final", "preceding", "following", "previous", "next",
+  "sentence", "sentences", "indent", "indents", "subparagraphs", "subpoint", "subpoints", "limb", "limbs",
+  "introductory", "wording", "version", "applicable", "relevant", "current",
+  // How one act relates to another ("as amended by", "supplementing").
+  "amended", "supplemented", "implemented", "replaced", "corrected", "repealed", "amending", "supplementing",
+  "repealing", "replacing", "correcting",
+  // How an act is written: the kind, the institution and the formal formula.
+  "reg", "regs", "dir", "eu", "ec", "eec", "euratom", "european", "parliament", "council", "commission", "union",
+  "delegated", "implementing", "january", "february", "march", "april", "may", "june", "july", "august",
+  "september", "october", "november", "december",
 ]);
+
+/** Roman numerals of two or more letters: the points of a list, as in "Article 178(2)(a)(ii)". */
+const ROMAN_NUMERALS = new Set(["ii", "iii", "iv", "vi", "vii", "viii", "ix", "xi", "xii"]);
+
+/**
+ * The words of a citation that could be naming something: not structure, not filler,
+ * not a number or a point marker. A citation that has none is a provision and the
+ * names already taken out of it, nothing else.
+ */
+const unexplainedWords = (tokens: string[]): string[] =>
+  tokens.filter(
+    (t) => !STRUCTURAL.has(t) && !NAME_FILLER.has(t) && !ROMAN_NUMERALS.has(t) && !/^\d/.test(t) && t.length > 1,
+  );
+
+/** Words that introduce the document a provision belongs to. */
+const NAME_CONNECTORS = new Set(["of", "in", "under", "from"]);
+
+/**
+ * Content words after the last "of / in / under / from" when no held document was
+ * named: the citation says the provision is IN something, and the something is not
+ * a name this resolver can place. Null when the tail is only structure and filler.
+ * Only the tail is read - a citation with extra words before its provision ("see
+ * Article 153") is not saying it belongs to anything.
+ */
+function unrecognisedNameTail(tokens: string[]): string[] | null {
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    if (!NAME_CONNECTORS.has(tokens[i] ?? "")) continue;
+    const words = unexplainedWords(tokens.slice(i + 1));
+    return words.length > 0 ? words : null;
+  }
+  return null;
+}
 
 /**
  * The identifier-shaped document number still in the citation after the documents
@@ -477,6 +592,14 @@ const isYearNumber = (s: string): boolean => /^(?:19(?:5[89]|[6-9]\d)|20\d\d)$/.
 const ACT_TAG = String.raw`(?:eu|ec|eec|euratom)`;
 
 /**
+ * The formula an act is formally cited with, "of the European Parliament and of the
+ * Council of 26 June 2013": part of the act's name, and a date that is not part of
+ * any provision's number, so it has to leave the citation with the act.
+ */
+const ACT_FORMULA = String.raw`(?:\s+of\s+the\s+european\s+parliament\s+and\s+(?:of\s+)?(?:the\s+)?council` +
+  String.raw`(?:\s+of\s+\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4})?)?`;
+
+/**
  * How an EU act is numbered in prose. Defined ONCE, because the gate
  * (`namedInstruments`) and the mention scan (`instrumentMentions`) must agree on
  * what a numbered act is, or the refusal names an instrument the scan then cannot
@@ -484,8 +607,8 @@ const ACT_TAG = String.raw`(?:eu|ec|eec|euratom)`;
  *
  * Kind, then the institution in any of its places - "(EU)", a bare "EU", or the
  * "/EU" that closes "Directive 2014/65/EU" - then the number as serial/YEAR or
- * YEAR/serial. `guideline` is here because ECB guidelines are numbered the same
- * way ("Guideline (EU) 2017/697").
+ * YEAR/serial, then `ACT_FORMULA`. `guideline` is here because ECB guidelines are
+ * numbered the same way ("Guideline (EU) 2017/697").
  *
  * Capture groups: 1 kind, 2 the institution before the number, 3 and 4 the two
  * halves of the number, 5 the institution after it.
@@ -494,7 +617,8 @@ const NUMBERED_ACT = new RegExp(
   String.raw`\b(regulation|directive|decision|guideline)s?\s*` +
     String.raw`(\(${ACT_TAG}\)|${ACT_TAG}\b)?\s*(?:no\.?\s*)?` +
     String.raw`(\d{1,4})\s*\/\s*(\d{1,4})\b` +
-    String.raw`(\s*\/\s*${ACT_TAG}\b)?`,
+    String.raw`(\s*\/\s*${ACT_TAG}\b)?` +
+    ACT_FORMULA,
   "gi",
 );
 
@@ -586,27 +710,51 @@ interface NamedInstrument {
   key: string;
   /** The institution the citation wrote for a numbered act, so a refusal can quote it back rightly. */
   tag?: string;
+  /** The words of the citation that name it, so a mention inside a longer name can be told apart. */
+  span: string;
 }
 
 /**
- * EVERY instrument the citation names, once each, the instruments with a name of
- * their own first and the numbered acts after them. Not the first one found: a
- * citation that names a held instrument and, further on, an act the corpus does not
- * hold ("... referred to in the Capital Requirements Regulation") would otherwise be
- * judged by whichever came first, and the gate would wave through a provision of an
- * act it was written to refuse.
+ * Each place the citation names an instrument: the instruments with a name of their
+ * own first, then the numbered acts.
+ *
+ * A name lying inside the written form of an act of ANOTHER kind is not a mention of
+ * the instrument it looks like: "Directive (EC) 575/2013" carries the CRR's number
+ * and is not the CRR (no directive has that number), so reading the bare number out
+ * of it would hand a provision of one body of law to another.
  */
-function namedInstruments(text: string): NamedInstrument[] {
-  const named: NamedInstrument[] = [];
-  const add = (n: NamedInstrument): void => {
-    if (!named.some((o) => o.key === n.key)) named.push(n);
-  };
-  for (const { key, re } of INSTRUMENT_PATTERNS) if (re.test(text)) add({ key });
-  for (const act of numberedActs(text)) {
-    add({ key: canonicalInstrument(act.key), ...(act.tag === undefined ? {} : { tag: act.tag }) });
+function instrumentSpans(text: string): Array<NamedInstrument & { start: number; end: number }> {
+  const acts = numberedActs(text);
+  const spans: Array<NamedInstrument & { start: number; end: number }> = [];
+  for (const { key, re } of INSTRUMENT_PATTERNS) {
+    for (const m of text.matchAll(new RegExp(re.source, "gi"))) {
+      const start = m.index;
+      const end = start + m[0].length;
+      if (acts.some((a) => a.start <= start && end <= a.end && canonicalInstrument(a.key) !== key)) continue;
+      spans.push({ key, span: m[0], start, end });
+    }
   }
-  return named;
+  for (const act of acts) {
+    spans.push({
+      key: canonicalInstrument(act.key),
+      ...(act.tag === undefined ? {} : { tag: act.tag }),
+      span: text.slice(act.start, act.end),
+      start: act.start,
+      end: act.end,
+    });
+  }
+  return spans;
 }
+
+/**
+ * Words that make the instrument after them a mention rather than the home of the
+ * provision: "Article 178 of the CRR, as amended by Regulation (EU) 2024/1623" is
+ * about the CRR, not about the act that amends it. Only the phrases that say so on
+ * their own. "under" and "of" are how a caller attaches a provision to its
+ * instrument ("Article 14 under Regulation (EU) 2022/439"), so they are not here.
+ */
+const SUBORDINATING_CUE =
+  /\b(?:(?:as\s+)?(?:amended|supplemented|implemented|replaced|corrected|repealed)\s+by|referred\s+to\s+in|pursuant\s+to|in\s+accordance\s+with|(?:adopted|issued)\s+under|within\s+the\s+meaning\s+of|cited\s+in|mentioned\s+in|see\s+also)\s+(?:(?:the|a|an|commission|council|delegated|implementing)\s+)*$/i;
 
 /**
  * Instruments a citation can name by DESCRIPTION rather than by number, and how
@@ -943,6 +1091,75 @@ function heldInstrumentDocuments(regulations: Regulation[], instrument: string):
 const corpusHolds = (regulations: Regulation[], instrument: string): boolean =>
   heldInstrumentDocuments(regulations, instrument).size > 0;
 
+/**
+ * Names for the held instruments a citation mentions.
+ *
+ * "Article 153 of the Capital Requirements Regulation" and "Article 160 of
+ * Regulation (EU) No 575/2013" name a document the corpus holds, but not by any of
+ * the words its ids carry. Unrecognised, the instrument was dropped, its number was
+ * read as points of the provision, and the bare article number was answered from
+ * whichever document had one - for the first, a paragraph of an unrelated guideline.
+ * Each mention is added to the index as a name for the documents that carry the
+ * instrument, so the ordinary rule applies: the longest name wins, its words leave
+ * the citation, and the provision is looked for in those documents only. Added per
+ * call, from the text, so nothing is invented that the caller did not write; an
+ * instrument no held document carries is the gate's business.
+ */
+function withInstrumentNames(index: AliasIndex, regulations: Regulation[], text: string): AliasIndex {
+  const spans = instrumentSpans(text);
+  if (spans.length === 0) return index;
+  const named: AliasIndex = new Map(index);
+  for (const { key, span } of spans) {
+    const docs = heldInstrumentDocuments(regulations, key);
+    const tokens = citationTokens(span);
+    if (docs.size === 0 || tokens.length === 0) continue;
+    const id = tokens.join(" ");
+    const slot = named.get(id);
+    // A name the ids already give ("crr") stays as the ids made it.
+    if (slot === undefined) named.set(id, { tokens, docs, derived: true });
+    else if (slot.derived === true) named.set(id, { ...slot, docs: new Set([...slot.docs, ...docs]) });
+  }
+  return named;
+}
+
+/**
+ * May a name the registry or the instrument supplied scope this citation?
+ *
+ * Only when nothing else in it could be naming a different document. A name the
+ * ids carry ("crr", "egim") scopes whatever else the citation says, as it always
+ * did; a title or an instrument's number is longer and more exact, and so it WINS
+ * over the ids, which makes it the one that can be wrong. "Paragraph 181 of EBA
+ * guidelines on the identification of the group of connected clients referred to
+ * in Regulation (EU) No 575/2013" names the regulation in a clause that only says
+ * what the guidelines are issued under; scoped to the regulation, the bare 181
+ * would be answered from the wrong body of law. So the scope is taken only when,
+ * once the names of the chosen document(s) - and of a framework that contains
+ * them - are removed, what is left is structure, filler and numbers: no word that
+ * could name another document, and no other instrument still named (its number
+ * would read as points). Otherwise the citation is resolved exactly as it was
+ * before the derived names existed. An instrument named only as context for a held
+ * one (`isContext`) is not a second claim and does not stop the scope.
+ */
+function accountedFor(
+  text: string,
+  rest: string[],
+  chosen: Set<string>,
+  index: AliasIndex,
+  isContext: (n: { key: string; start: number }) => boolean,
+): boolean {
+  for (const n of instrumentSpans(text)) {
+    if (!isContext(n) && windowAt(rest, citationTokens(n.span)) !== -1) return false;
+  }
+  let remaining = rest;
+  for (const entry of index.values()) {
+    if (![...chosen].every((d) => entry.docs.has(d))) continue;
+    for (let at = windowAt(remaining, entry.tokens); at !== -1; at = windowAt(remaining, entry.tokens)) {
+      remaining = [...remaining.slice(0, at), ...remaining.slice(at + entry.tokens.length)];
+    }
+  }
+  return unexplainedWords(remaining).length === 0;
+}
+
 /** How many candidates a declined resolution is allowed to carry. */
 const MAX_CANDIDATES = 10;
 
@@ -1049,20 +1266,61 @@ export function resolveCitationDetailed(
   // is compared: a record's own citation may repeat it ("CRR Article 180"), a
   // query may omit it ("Art. 180"), and its numbers ("2017/16") are not the
   // provision's.
-  const index = documentAliases(regulations);
-  const { docs, rest } = scopeToDocument(queryTokens, index);
-  const pool = docs === null ? regulations : regulations.filter((r) => docs.has(r.document_id));
-  const bare = (tokens: string[]): string[] => scopeToDocument(tokens, index).rest;
+  //
+  // The names are the ids the records carry, the registry's titles, and the
+  // instruments the citation mentions (the "Capital Requirements Regulation",
+  // "Regulation (EU) No 575/2013"). The last two are DERIVED: they win over an id by
+  // being longer, so they only scope a citation that is accounted for - exactly a
+  // record's own citation once the name is gone, or nothing left in it that could
+  // name another document (`accountedFor`). Otherwise the ids alone decide, as
+  // they did before titles and instrument names were names.
+  // An instrument named as context for a held one ("... of the CRR, as amended by
+  // Regulation (EU) 2024/1623") is not a second claim about where the provision is.
+  const spans = instrumentSpans(text);
+  const subordinate = (n: { start: number }): boolean =>
+    SUBORDINATING_CUE.test(text.slice(0, n.start)) && spans.some((o) => o.start < n.start && corpusHolds(regulations, o.key));
+  const attempt = (index: AliasIndex) => {
+    const scope = scopeToDocument(queryTokens, index);
+    const pool = scope.docs === null ? regulations : regulations.filter((r) => scope.docs?.has(r.document_id) === true);
+    const bare = (tokens: string[]): string[] => scopeToDocument(tokens, index).rest;
+    // (i) Exact equality of the whole citation, structural words included — so
+    // "paragraph 78" does not match a record that says "Article 78".
+    // Joined with a SEPARATOR, not concatenated. "Article 4(1)" and "Article 41"
+    // tokenise to ["article","4","1"] and ["article","41"]; run together they are
+    // both "article41", so a bracketed point silently became a different article
+    // number — and on this corpus that offered EBA "Paragraph 41" as the answer
+    // to a question about Article 4(1). Matching only ever gets stricter here.
+    const nq = scope.rest.join(" ");
+    const exactHits = pool.filter((r) => bare(citationTokens(r.citation)).join(" ") === nq);
+    // (i-alias) The same equality against a record's declared aliases. Looked for
+    // here too, because a derived scope is accepted on either.
+    const aliasHits =
+      exactHits.length > 0
+        ? []
+        : pool.filter((r) => (r.citation_aliases ?? []).some((a) => bare(citationTokens(a)).join(" ") === nq));
+    // (i-core) The same equality with the connectives left out of both sides, for a
+    // citation that has some ("Article 3 of the") and found no exact record.
+    const core = (tokens: string[]): string => withoutConnectives(bare(tokens)).join(" ");
+    const nqCore = withoutConnectives(scope.rest).join(" ");
+    const coreHits =
+      exactHits.length > 0 || aliasHits.length > 0 || nqCore === nq
+        ? []
+        : pool.filter((r) => core(citationTokens(r.citation)) === nqCore);
+    return { index, ...scope, pool, bare, nq, exactHits, aliasHits, coreHits };
+  };
+  let scoped = attempt(withInstrumentNames(documentAliases(regulations, holdings), regulations, text));
+  if (
+    scoped.derived &&
+    scoped.docs !== null &&
+    scoped.exactHits.length === 0 &&
+    scoped.aliasHits.length === 0 &&
+    scoped.coreHits.length === 0 &&
+    !accountedFor(text, scoped.rest, scoped.docs, scoped.index, (n) => !corpusHolds(regulations, n.key) && subordinate(n))
+  ) {
+    scoped = attempt(documentAliases(regulations));
+  }
+  const { index, docs, rest, pool, bare, exactHits, aliasHits, coreHits } = scoped;
 
-  // (i) Exact equality of the whole citation, structural words included — so
-  // "paragraph 78" does not match a record that says "Article 78".
-  // Joined with a SEPARATOR, not concatenated. "Article 4(1)" and "Article 41"
-  // tokenise to ["article","4","1"] and ["article","41"]; run together they are
-  // both "article41", so a bracketed point silently became a different article
-  // number — and on this corpus that offered EBA "Paragraph 41" as the answer
-  // to a question about Article 4(1). Matching only ever gets stricter here.
-  const nq = rest.join(" ");
-  const exactHits = pool.filter((r) => bare(citationTokens(r.citation)).join(" ") === nq);
   if (exactHits.length === 1) {
     return { ...none(), match: exactHits[0] ?? null, confidence: "exact" };
   }
@@ -1075,9 +1333,6 @@ export function resolveCitationDetailed(
   // guidelines number PARAGRAPHS, so "Article 178" is a common way to cite one
   // and also a real CRR article — the alias makes the loose spelling resolvable
   // without letting it be reported as the record's citation.
-  const aliasHits = pool.filter((r) =>
-    (r.citation_aliases ?? []).some((a) => bare(citationTokens(a)).join(" ") === nq),
-  );
   if (aliasHits.length === 1) {
     const hit = aliasHits[0];
     return {
@@ -1093,20 +1348,36 @@ export function resolveCitationDetailed(
   }
   if (aliasHits.length > 1) return ambiguousResolution(text, aliasHits);
 
+  // (i-core) A citation that is a record's own once the connectives are set aside.
+  // Before this, a citation the document's name had left a dangling "of the" on was
+  // compared by its numbers alone, where a record with the same number and a
+  // different kind of citation (a section whose label reduces to "3") tied with the
+  // article that was asked for. Kind words and numbers are all equal here, so the
+  // tie is broken by the record that says what was asked, and the confidence stays
+  // "segment": it is the spine pass's answer, made unambiguous.
+  if (coreHits.length === 1) return { ...none(), match: coreHits[0] ?? null, confidence: "segment" };
+  if (coreHits.length > 1) return ambiguousResolution(text, coreHits);
+
   // (0) The instrument gate. A wrong instrument is not a near miss, it is a
   // different body of law - but it comes AFTER the two equality passes above. A
   // record's own citation (or a label it declares) is the strongest evidence a
   // citation can have, and a gate that reads words inside it ("RTS Article 5",
   // "Regulation (EU) 2022/439, Article 14") as a second instrument would refuse
   // the very record the caller quoted.
-  // Judged by the first named instrument the corpus does not hold; when it holds
-  // every one, by the first. A held instrument named beside an unheld act does not
-  // vouch for it.
-  const named = namedInstruments(text);
-  const mention = named.find((n) => !corpusHolds(regulations, n.key)) ?? named[0] ?? null;
-  const instrument = mention?.key ?? null;
-  const instrumentName = mention === null ? null : instrumentLabel(mention.key, mention.tag);
-  if (instrument !== null && !corpusHolds(regulations, instrument)) {
+  //
+  // Judged by the first named instrument the corpus does not hold. A held
+  // instrument named beside an unheld act does not vouch for it, with two
+  // exceptions that are not claims about the act at all. A mention inside the longer
+  // name of a document that WAS recognised (a guideline's title quotes the
+  // regulation it is issued under) is part of that name. And an act that follows a
+  // subordinating phrase after a held instrument ("... of the CRR, as amended by
+  // Regulation (EU) 2024/1623") is context for the held instrument, which stays the
+  // home of the provision: refusing the citation for the amending act would be the
+  // one refusal that is untrue of what was asked.
+  const insideName = (n: NamedInstrument): boolean => docs !== null && windowAt(rest, citationTokens(n.span)) === -1;
+  const unheldMention = spans.find((n) => !corpusHolds(regulations, n.key) && !insideName(n) && !subordinate(n));
+  if (unheldMention !== undefined) {
+    const gated = unheldMention.key;
     // A dead end that names the way out. Two ways out, in fact, and which one
     // is available decides whether the caller goes looking or guesses.
     //
@@ -1117,20 +1388,20 @@ export function resolveCitationDetailed(
     // (b) Which served records NAME it. Scanned from the text rather than read
     //     off `cites[].framework`, which holds only `crr`/`crd` and so could
     //     never fire for a numbered act.
-    const what = EMPOWERMENTS[instrument];
+    const what = EMPOWERMENTS[gated];
     // Both sources, unioned. `cites[].framework` is the only one that reaches a
     // named framework like `crr`; the text scan is the only one that reaches a
     // numbered act. Each is blind where the other sees.
     const byCite = regulations
-      .filter((r) => (r.cites ?? []).some((c) => citationTokens(c.framework).join("") === instrument))
+      .filter((r) => (r.cites ?? []).some((c) => citationTokens(c.framework).join("") === gated))
       .map((r) => r.id);
     const mentions = [
-      ...new Set([...byCite, ...(instrumentMentions(regulations).get(instrument) ?? [])]),
+      ...new Set([...byCite, ...(instrumentMentions(regulations).get(gated) ?? [])]),
     ];
     const shown = mentions.slice(0, 3);
     return none({
       coverage_note:
-        `This corpus holds no ${instrumentName}. Nothing was matched, rather than ` +
+        `This corpus holds no ${instrumentLabel(gated, unheldMention.tag)}. Nothing was matched, rather than ` +
         "sourcing a same-numbered provision from another document. " +
         (what === undefined
           ? ""
@@ -1147,6 +1418,12 @@ export function resolveCitationDetailed(
           : "Use get_corpus_info for the documents actually loaded."),
     });
   }
+
+  // The held instrument the citation names, if any: for the descriptive gate, which
+  // has to say when a citation names a held instrument AND a described one.
+  const heldMention = spans.find((n) => corpusHolds(regulations, n.key));
+  const instrument = heldMention?.key ?? null;
+  const instrumentName = heldMention === undefined ? null : instrumentLabel(heldMention.key, heldMention.tag);
 
   // (0b) The descriptive gate. The same defence for an instrument named by what
   // it IS rather than by number: "Article 49(3) of the RTS on the IRB assessment
@@ -1231,6 +1508,30 @@ export function resolveCitationDetailed(
         "answers to it, so the number was not read as part of a provision's. Nothing was matched, " +
         "rather than sourcing a same-numbered provision from another document. Use get_corpus_info " +
         "for the documents actually loaded, or search_regulation with the document's name.",
+    });
+  }
+
+  // (0d) A document named in words nothing here answers to. Past "of", "in" or
+  // "under", content words the registry does not recognise name a document the
+  // citation is about; with no held document named, the bare provision number
+  // would be looked for in every document at once, and a unique hit in one of them
+  // is a guess dressed as a match ("Article 5 of Basel III" answered with paragraph
+  // 5 of whichever guideline had one). Nothing is returned: a candidate would be
+  // the same guess, listed. Not when the citation names a held instrument and its
+  // scope was withheld (`accountedFor`): the words may be that instrument's own
+  // title, and "does not recognise" would be untrue of it.
+  const unrecognised = docs === null && heldMention === undefined ? unrecognisedNameTail(queryTokens) : null;
+  if (unrecognised !== null) {
+    const held = [...new Set(regulations.map((r) => r.document_id))];
+    const partialNote = citationPartialClause(holdings, null);
+    return none({
+      coverage_note:
+        `"${text}" is about something this corpus does not recognise as a document it holds ` +
+        `("${unrecognised.join(" ")}"), so a provision with that number in a held document would be a ` +
+        "guess. Nothing was matched. Name the document by an id or title get_corpus_info shows" +
+        `${held.length === 0 ? "" : ` (${held.slice(0, 6).join(", ")}${held.length > 6 ? ", …" : ""})`}, ` +
+        "or drop the words that are not part of its name." +
+        `${partialNote === null ? "" : ` ${partialNote}`}`,
     });
   }
 

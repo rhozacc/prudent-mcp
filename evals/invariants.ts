@@ -577,7 +577,106 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
     }
   }
 
+  // One instrument, however it is named, gets one answer. The CRR is "CRR", "the
+  // Capital Requirements Regulation" and "Regulation (EU) No 575/2013"; a resolver
+  // that scopes only the first lets the others fall into whichever document has a
+  // provision with that number. Asked three ways for numbers the corpus has and one
+  // it cannot, the three must agree on the record (or on none) - whether or not the
+  // corpus holds the CRR, which is not assumed.
+  const sameness: number[] = [...seen].slice(0, 6);
+  sameness.push(absent);
+  for (const n of sameness) {
+    const answers = new Map<string, string | null>();
+    for (const text of [
+      `Article ${n} CRR`,
+      `Article ${n} of the Capital Requirements Regulation`,
+      `Article ${n} of Regulation (EU) No 575/2013`,
+    ]) {
+      const r = await s.call("resolve_citation", { text });
+      answers.set(text, ((r.json as { match?: { id?: string } | null } | null)?.match?.id) ?? null);
+    }
+    if (new Set(answers.values()).size > 1) {
+      findings.push({
+        id: "I3/same-instrument-same-answer",
+        severity: "fatal",
+        summary:
+          "resolve_citation answers differently for the same provision of the same instrument depending on how the instrument is named - at least one spelling is being resolved into a different document.",
+        evidence: [...answers].map(([text, id]) => `resolve_citation("${text}") -> ${id ?? "null"}`),
+      });
+    }
+  }
+
+  const titled = await titledCitationsResolve(s);
+  findings.push(...titled.findings);
+
   return { id: "I3", title: "Citation resolution is honest", applicable: true, findings };
+}
+
+/**
+ * A document named by its registry title must be found in that document and in no
+ * other. The title is a name the records do not carry, so it is exactly the kind of
+ * name a resolver can fail to recognise - and then the bare provision number goes
+ * looking in every document and is answered out of whichever has one.
+ *
+ * Corpus-agnostic: the documents and titles are the ones `get_corpus_info` lists,
+ * the records the ones the server serves in search rows. Declining is honest (a
+ * title with an odd word in it may not be an exact name); a different record is not.
+ */
+export async function titledCitationsResolve(s: Session): Promise<{ applicable: boolean; findings: Finding[] }> {
+  const findings: Finding[] = [];
+  const info = await s.call("get_corpus_info", {});
+  const holdings = ((info.json as { holdings?: Array<{ document_id?: unknown; title?: unknown }> } | null)?.holdings ?? []);
+  const titles = new Map<string, string>();
+  for (const h of holdings) {
+    if (typeof h.document_id === "string" && typeof h.title === "string" && h.title.trim() !== "") titles.set(h.document_id, h.title);
+  }
+  if (titles.size === 0) return { applicable: false, findings };
+  const byDocument = new Map<string, Array<{ id: string; citation: string }>>();
+  for (const q of ["default", "estimation", "downturn", "validation", "model", "risk", "regulation"]) {
+    const t = await s.call("search_regulation", { query: q, limit: 20 });
+    const rows = ((t.json as { results?: Array<{ id?: unknown; citation?: unknown; document_id?: unknown }> } | null)?.results ?? []);
+    for (const row of rows) {
+      if (typeof row.id !== "string" || typeof row.citation !== "string" || typeof row.document_id !== "string") continue;
+      if (!titles.has(row.document_id) || row.citation.trim() === "") continue;
+      const list = byDocument.get(row.document_id) ?? [];
+      if (list.length < 2 && !list.some((r) => r.id === row.id)) list.push({ id: row.id, citation: row.citation });
+      byDocument.set(row.document_id, list);
+    }
+  }
+  let asked = 0;
+  for (const [documentId, records] of byDocument) {
+    const title = titles.get(documentId) ?? "";
+    for (const { id, citation } of records) {
+      for (const text of [`${citation} of ${title}`, `${title}, ${citation}`]) {
+        const r = await s.call("resolve_citation", { text });
+        if (r.isError) continue;
+        asked++;
+        const matched = ((r.json as { match?: { id?: unknown } | null } | null)?.match?.id);
+        if (typeof matched === "string" && matched !== id) {
+          findings.push({
+            id: "I3/titled-citation",
+            severity: "fatal",
+            summary:
+              "resolve_citation answers a citation that names a document by its registry title with a record other than the one it was given - the title was not read as a name, and the bare provision number was answered from another document.",
+            evidence: [
+              `search_regulation serves ${id} (document ${documentId}) with the citation "${citation}"`,
+              `resolve_citation("${text}") -> ${matched}`,
+              "a caller who named a document by its title is handed a provision of a different one",
+            ],
+          });
+        }
+      }
+    }
+  }
+  if (asked === 0) {
+    findings.push({
+      id: "I3/titled-citation-na",
+      severity: "info",
+      summary: "No record of a document with a registry title was observed through search_regulation, so naming a document by its title could not be tested.",
+      evidence: [`${titles.size} document title(s) listed by get_corpus_info`],
+    });
+  }
+  return { applicable: asked > 0, findings };
 }
 
 // ============================================================================
