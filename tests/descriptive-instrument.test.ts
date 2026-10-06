@@ -55,8 +55,9 @@ describe("descriptive instrument gate: declines", () => {
     expect(note).toContain("holds no document identified as such");
     expect(note).toContain("rather than sourcing a same-numbered provision from another document");
     expect(note).toContain("by number");
-    expect(note).toContain("search_regulation");
-    expect(note).toContain("get_corpus_info");
+    // A way out, in the library's words: search for the name, or see what is held.
+    expect(note).toMatch(/search for its name/i);
+    expect(note).toMatch(/overview for what it holds/i);
   });
 
   it("the same citation without the gate would have found paragraph 49 (the fixture binds)", () => {
@@ -223,7 +224,7 @@ describe("descriptive instrument gate: an issuer's descriptor beside a held docu
   it("goes on as it would without the descriptor: a provision the document lacks is its own miss", () => {
     const r = resolveCitationDetailed(ecb(), "ECB Guidelines (egim) Chapter 9, paragraph 9");
     declined(r);
-    expect(r.coverage_note).toContain("Nothing in this corpus is numbered 9.9 in the document named");
+    expect(r.coverage_note).toContain("Nothing in this library is numbered 9.9 in the document named");
     expect(r.coverage_note).not.toContain("by description");
   });
 
@@ -250,7 +251,7 @@ describe("descriptive instrument gate: an issuer's descriptor beside a held docu
   it("is one specific instrument, not a kind of text, when it carries a number or an identifier", () => {
     for (const [text, expected] of [
       ["ECB Guideline (EU) 2017/697 egim Chapter 3, paragraph 5", "holds no Guideline (EU) 2017/697"],
-      ["ECB Guideline ECB/2014/60 egim Chapter 3, paragraph 5", "names a document this corpus holds"],
+      ["ECB Guideline ECB/2014/60 egim Chapter 3, paragraph 5", "names a document this library holds"],
       ["ECB Regulation 468/2014 (egim) Chapter 3, paragraph 5", "holds no Regulation No 468/2014"],
     ] as const) {
       const r = resolveCitationDetailed(ecb(), text);

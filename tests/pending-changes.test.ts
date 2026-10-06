@@ -150,11 +150,11 @@ describe("pendingChangesNote", () => {
     expect(noteFor([change({ ingested: true })])).toBeUndefined();
   });
 
-  it("an upcoming adopted change: the date, the distance, and that the text served is the version before it", () => {
+  it("an upcoming adopted change: the date, the distance, and that the text below is the version before it", () => {
     const note = noteFor([change({ title: "Amending act A", effective_from: iso(17) })]) ?? "";
     expect(note).toContain("Pending change to this document");
     expect(note).toContain(`applies from ${iso(17)} (in 17 days)`);
-    expect(note).toContain("not ingested here");
+    expect(note).toContain("the text below is the version before it");
     expect(note).toContain("the version before it");
     expect(note).not.toContain("out of date");
   });
@@ -186,7 +186,7 @@ describe("pendingChangesNote", () => {
 
   it("quotes the registry's affects hint (capped) and never parses it", () => {
     const note = noteFor([change({ affects: ["para 23(d)", "paras 31-32", "x", "y", "z"] })]) ?? "";
-    expect(note).toContain("Registry: concerns para 23(d); paras 31-32; x; y; ....");
+    expect(note).toContain("Said to concern para 23(d); paras 31-32; x; y; ....");
   });
 
   it("does not repeat a reference the title already carries, and adds one it lacks", () => {
@@ -200,7 +200,7 @@ describe("pendingChangesNote", () => {
     expect(note).toContain("Change 1");
     expect(note).toContain("Change 3");
     expect(note).not.toContain("Change 4");
-    expect(note).toContain("(2 more in get_source.)");
+    expect(note).toContain("(2 more.)");
   });
 });
 
@@ -212,10 +212,10 @@ describe("pendingSearchNotice", () => {
     expect(pendingSearchNotice([{ title: "Quiet", open: [] }])).toBeUndefined();
   });
 
-  it("names the document and the change once, and says the text served is the version before it", () => {
+  it("names the document and the change once, and says the text shown is the version before it", () => {
     const n = pendingSearchNotice([{ title: "Acme Regulation", open: open(change({ title: "Amending act", effective_from: iso(9) })) }]) ?? "";
     expect(n).toContain("Acme Regulation (Amending act, from " + iso(9) + ")");
-    expect(n).toContain("not ingested");
+    expect(n).toContain("does not yet include");
     expect(n).toContain("version before it");
   });
 
@@ -382,7 +382,7 @@ describe("the pending-change signal on the tools", () => {
     it("adds one sentence to the notice when the page holds rows of such a document", async () => {
       const r = await call("search_regulation", { query: "default risk" });
       const notice = String(r.body["notice"]);
-      expect(notice).toContain("a change this corpus has not ingested");
+      expect(notice).toContain("a change its text does not yet include");
       expect(notice).toContain("Acme Regulation");
       expect(notice.match(/Acme Regulation/g)?.length).toBe(1);
     });
@@ -391,12 +391,12 @@ describe("the pending-change signal on the tools", () => {
       const r = await call("search_regulation", { query: "default risk", limit: 1 });
       const notice = String(r.body["notice"]);
       expect(notice.startsWith("Showing 1 of ")).toBe(true);
-      expect(notice).toContain("not ingested");
+      expect(notice).toContain("does not yet include");
     });
 
     it("is about the rows on the page: a page of quiet rows says nothing", async () => {
       const r = await call("search_regulation", { query: "Quiet document" });
-      expect(String(r.body["notice"] ?? "")).not.toContain("not ingested");
+      expect(String(r.body["notice"] ?? "")).not.toContain("does not yet include");
     });
   });
 

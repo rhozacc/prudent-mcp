@@ -77,7 +77,7 @@ export function computeHoldings(regulations: Regulation[], sources: Source[]): D
 }
 
 const nameOf = (h: DocumentHolding): string => h.title ?? h.document_id;
-const recordsOf = (n: number): string => `${n} record${n === 1 ? "" : "s"}`;
+const provisionsOf = (n: number): string => `${n} provision${n === 1 ? "" : "s"}`;
 
 /**
  * The clause every partial-document decline shares. One sentence, so a miss and
@@ -86,8 +86,8 @@ const recordsOf = (n: number): string => `${n} record${n === 1 ? "" : "s"}`;
  */
 export function partialClause(h: DocumentHolding): string {
   return (
-    `This corpus holds only part of ${nameOf(h)} (${recordsOf(h.records)}), so a provision ` +
-    "missing here is absent from the corpus, not necessarily from the law."
+    `This library holds only part of ${nameOf(h)} (${provisionsOf(h.records)}), so a provision ` +
+    "not found here is not among the parts held, and may still be in the law."
   );
 }
 
@@ -99,8 +99,8 @@ export function partialDocumentsClause(holdings: DocumentHolding[]): string | nu
   const partial = holdings.filter((h) => h.partial === true);
   if (partial.length === 0) return null;
   return (
-    `This corpus holds only part of ${partial.map(nameOf).join("; ")}, so if the citation is to ` +
-    "one of those, a provision missing here is absent from the corpus, not necessarily from the law."
+    `This library holds only part of ${partial.map(nameOf).join("; ")}, so if the citation is to ` +
+    "one of those, a provision not found here is not among the parts held, and may still be in the law."
   );
 }
 
@@ -162,19 +162,19 @@ export function missingRecordClause(
   const h = holdingForId(regulations, holdings, id);
   if (h === null) {
     return (
-      `No document with the id prefix "${idDocSegment(id)}" is loaded; ` +
-      "get_corpus_info lists the documents this corpus holds."
+      `No document with the id prefix "${idDocSegment(id)}" is in this library; ` +
+      "get_corpus_info lists the documents it holds."
     );
   }
   if (h.partial === true) return partialClause(h);
   if (h.partial === undefined) {
     return (
-      `This corpus holds ${recordsOf(h.records)} of ${nameOf(h)} and does not declare that as the ` +
-      "whole, so absence here does not show the provision does not exist."
+      `This library holds ${provisionsOf(h.records)} of ${nameOf(h)} and does not declare that as the ` +
+      "whole, so not finding a provision here does not show it does not exist."
     );
   }
   return (
-    `This corpus declares ${nameOf(h)} held in full (${recordsOf(h.records)}), so the id is ` +
+    `This library declares ${nameOf(h)} held in full (${provisionsOf(h.records)}), so the id is ` +
     "probably mistyped."
   );
 }

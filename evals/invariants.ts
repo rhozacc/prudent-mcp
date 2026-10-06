@@ -18,7 +18,8 @@
 import { readFileSync } from "node:fs";
 
 import { describedKindWindows, holdsKind, loadCorpusFile, textCarriesPoint } from "../src/file-adapter.ts";
-import { estimateTokens, type Finding, type InvariantResult, type Session } from "./harness.ts";
+import { bannedTermsIn, identifiersIn } from "../src/language.ts";
+import { estimateTokens, type CallTrace, type Finding, type InvariantResult, type Session } from "./harness.ts";
 
 const SCHEMES = ["regulation", "check", "test", "playbook", "source"] as const;
 type Scheme = (typeof SCHEMES)[number];
@@ -952,9 +953,16 @@ export interface Budget {
  *          rule a caller cannot do without - whether the text in front of it is
  *          about to be, or already is, out of date - so it is recorded here
  *          rather than squeezed out of a card that has no slack left.
+ *   5,500  lowered, 2026-10-06: 6,195 -> 5,412 (measured) by the language pass.
+ *          The instructions went from ~1,290 tokens to ~500 — the rules about the
+ *          edge of the library stayed, in fewer and plainer words, and the
+ *          envelope fields moved to the one tool card that returns them — and
+ *          the cards lost the plumbing words ("corpus", "record", "registry").
+ *          The ratchet follows the measurement down so the saving cannot be
+ *          spent again unnoticed.
  */
 export const DEFAULT_BUDGET: Budget = {
-  surface: 6200,
+  surface: 5500,
   call: 6000,
   bundle: 9000,
   entryPath: 8000,
@@ -1229,11 +1237,39 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
   let pathTokens = 0;
   let unusableExcerpts = 0;
 
+  // Fetch the sample first, so a word can be judged against the others.
+  const sample: Array<{ id: string; rec: CallTrace; words: string[] }> = [];
   for (const id of ids.slice(0, PROBE_TARGET)) {
     const rec = await s.call("get_regulation", { id });
     if (rec.isError) continue;
     const text = /"text"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(rec.text)?.[1] ?? "";
-    const words = [...new Set(text.toLowerCase().match(/[a-z]{4,}/g) ?? [])].filter((w) => !STOP.has(w));
+    sample.push({ id, rec, words: [...new Set(text.toLowerCase().match(/[a-z]{4,}/g) ?? [])].filter((w) => !STOP.has(w)) });
+  }
+  // A word in more than one record in twenty is boilerplate ("article", "regulation",
+  // "apply", "competent authorities"), not something a person describes a provision
+  // by. A query made of them has no right answer to be found, and no ranker should
+  // be asked to find one: the first version drew five words from the middle of each
+  // record's vocabulary and, on a real corpus, built queries entirely of such words.
+  //
+  // Frequency is the whole corpus's when the session has the corpus file (read for a
+  // fact no reply states, as I11 and I12 do), and the sample's own otherwise.
+  const docFrequency = new Map<string, number>();
+  let population = sample.length;
+  const countWords = (words: Iterable<string>): void => {
+    for (const w of new Set(words)) docFrequency.set(w, (docFrequency.get(w) ?? 0) + 1);
+  };
+  if (s.corpusFile !== undefined) {
+    const all = loadCorpusFile(s.corpusFile).regulation;
+    population = all.length;
+    for (const r of all) countWords((r.text.toLowerCase().match(/[a-z]{4,}/g) ?? []).filter((w) => !STOP.has(w)));
+  } else {
+    for (const { words } of sample) countWords(words);
+  }
+  const boilerplate = (w: string): boolean => (docFrequency.get(w) ?? 0) > Math.max(1, Math.floor(population / 20));
+
+  for (const { id, rec, words: allWords } of sample) {
+    const rare = allWords.filter((w) => !boilerplate(w));
+    const words = rare.length >= 4 ? rare : allWords;
     if (words.length < 4) continue;
     // Mid-frequency words: distinctive to this record without being one-offs.
     const query = words.slice(Math.floor(words.length / 3), Math.floor(words.length / 3) + 5).join(" ");
@@ -1658,7 +1694,14 @@ export async function asOfIsNeverSilentlySubstituted(s: Session): Promise<Invari
 
   let bound = 0;
   let crossChecked = 0;
-  for (const id of ids.slice(0, 8)) {
+  // Probe until 8 usable records have been tested, not the first 8 candidates:
+  // a record of a document that did not yet exist at an early probe date is
+  // answered by a miss, so it is skipped below as having history, and which
+  // records head a search is the ranking's business. Taking the first 8 let a
+  // change of ranking decide whether this invariant bound at all.
+  let probed = 0;
+  for (const id of ids) {
+    if (probed >= 8) break;
     if (withHistory.has(id)) continue; // the corpus records a version of it; see the docstring
     const current = await s.call("get_regulation", { id });
     const cur = asRecord(current.json);
@@ -1676,6 +1719,7 @@ export async function asOfIsNeverSilentlySubstituted(s: Session): Promise<Invari
       served.push({ asOf, body });
     }
     if (hasHistory) continue;
+    probed++;
 
     const silent: string[] = [];
     for (const { asOf, body } of served) {
@@ -1905,7 +1949,7 @@ export async function declineOnPartialDocumentSaysSo(s: Session): Promise<Invari
     const cite = await s.call("resolve_citation", { text: `${h.document_id} 99999` });
     const body = cite.json as { match?: unknown; coverage_note?: unknown } | null;
     const note = typeof body?.coverage_note === "string" ? body.coverage_note : "";
-    if (body !== null && body.match === null && /Nothing in this corpus is numbered/.test(note)) {
+    if (body !== null && body.match === null && /Nothing in this library is numbered/.test(note)) {
       bound++;
       if (!SAYS_PARTIAL.test(note)) {
         findings.push({
@@ -1984,8 +2028,10 @@ export async function weakBestMatchIsDeclared(s: Session): Promise<InvariantResu
     if (overstated.length > 0) problems.push(`${overstated.length} row(s) claim a coverage above 1`);
     if (rows.length > 0 && rows.every((r) => !("coverage" in r))) problems.push("rows carry no coverage");
     const notice = typeof b.notice === "string" ? b.notice : "";
-    if (!/may not be in this corpus/i.test(notice) || !/not about the law/i.test(notice)) {
-      problems.push("the notice does not say the topic may not be in this corpus, and that absence is not absence from the law");
+    // The meaning, not the sentence: the topic may not be held, and that is a
+    // statement about what is held, not about the law.
+    if (!/may not be (?:in|held)/i.test(notice) || !/not about the law/i.test(notice)) {
+      problems.push("the notice does not say the topic may not be held here, and that not finding it is not a statement about the law");
     }
     // A single-term query has no "some of the terms" to be short of: a whole word
     // and a stem (placed only on partial-word matches, coverage 0) alike must not
@@ -2234,7 +2280,8 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
     const rid = found.row.id as string;
     bound++;
 
-    if (found.notice === undefined || !/not ingested/i.test(found.notice)) {
+    // The meaning, not the sentence: a change exists, and the text shown is the version before it.
+    if (found.notice === undefined || !/\bchange\b/i.test(found.notice) || !/version before it/i.test(found.notice)) {
       findings.push({
         id: "I15/search",
         severity: "fatal",
@@ -2331,6 +2378,94 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
   return { id, title, applicable: bound > 0, findings };
 }
 
+// ============================================================================
+// I17 — the server's own words are domain words
+// ============================================================================
+
+/**
+ * A model repeats what the server says to the person it is answering. Text that
+ * talks about the server's plumbing ("the corpus has this", "not ingested here",
+ * "no record for") turns an answer about credit-risk regulation into a
+ * description of a tool. `src/language.ts` is the one list of terms; this scans
+ * every string the server writes, in two registers:
+ *
+ * - model-facing — the instructions, every tool and field description, and the
+ *   miss that says what to call next. Tool and field names are allowed there
+ *   (they have to be named) but are not scanned as prose.
+ * - answer-bearing — every `notice` and `*_note` in a reply. These are written
+ *   to be repeated to a user, so no identifier may appear in them either.
+ *
+ * Record text is data and is never scanned. Run across every call the earlier
+ * invariants made, so it sees the notes the real probes provoke.
+ */
+export async function serverLanguageIsClean(s: Session): Promise<InvariantResult> {
+  const findings: Finding[] = [];
+  let bound = 0;
+  const seen = new Set<string>();
+
+  const scan = (where: string, text: string, answerBearing: boolean): void => {
+    if (text.length === 0) return;
+    bound++;
+    const terms = [...new Set(bannedTermsIn(text).map((t) => t.toLowerCase()))];
+    const idents = answerBearing ? [...new Set(identifiersIn(text))] : [];
+    if (terms.length === 0 && idents.length === 0) return;
+    const key = `${where}|${terms.join(",")}|${idents.join(",")}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    findings.push({
+      id: `I17/${where}`,
+      severity: "fatal",
+      summary:
+        `${where} says ${[...terms.map((t) => `"${t}"`), ...idents.map((i) => `the identifier ${i}`)].join(", ")}` +
+        (answerBearing ? " in text a model repeats to a user." : " in text a model reads."),
+      evidence: [text.length > 220 ? `${text.slice(0, 220)}…` : text],
+    });
+  };
+
+  scan("instructions", s.instructions, false);
+  for (const t of s.tools) {
+    scan(`${t.name} description`, t.description, false);
+    for (const d of descriptionsIn(safeParse(t.schemaText))) scan(`${t.name} input field`, d, false);
+    for (const d of descriptionsIn(t.outputSchema)) scan(`${t.name} output field`, d, false);
+  }
+  for (const trace of s.traces) {
+    if (trace.isError) {
+      // A protocol-level rejection is the SDK's wording, not this server's.
+      if (!trace.text.startsWith("MCP error")) scan(`${trace.tool} miss`, trace.text, false);
+      continue;
+    }
+    for (const note of answerBearingStrings(trace.json)) scan(`${trace.tool} ${note.key}`, note.text, true);
+  }
+
+  return { id: "I17", title: "The server's own words are domain words", applicable: bound > 0, findings };
+}
+
+const safeParse = (text: string): unknown => {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
+};
+
+/** Every `description` string in a JSON schema. */
+function descriptionsIn(node: unknown): string[] {
+  if (Array.isArray(node)) return node.flatMap(descriptionsIn);
+  if (node === null || typeof node !== "object") return [];
+  return Object.entries(node as Record<string, unknown>).flatMap(([k, v]) =>
+    k === "description" && typeof v === "string" ? [v] : descriptionsIn(v),
+  );
+}
+
+/** The `notice` and `*_note` strings of a reply, wherever they sit. */
+function answerBearingStrings(node: unknown): Array<{ key: string; text: string }> {
+  if (Array.isArray(node)) return node.flatMap(answerBearingStrings);
+  if (node === null || typeof node !== "object") return [];
+  return Object.entries(node as Record<string, unknown>).flatMap(([k, v]) =>
+    typeof v === "string" && (k === "notice" || k.endsWith("_note")) ? [{ key: k, text: v }] : answerBearingStrings(v),
+  );
+}
+
 export const ALL = [
   envelopeIsJson,
   describedIdsResolve,
@@ -2348,4 +2483,5 @@ export const ALL = [
   weakBestMatchIsDeclared,
   placeholdersAreMarked,
   pendingChangesAreNeverSilent,
+  serverLanguageIsClean,
 ] as const;

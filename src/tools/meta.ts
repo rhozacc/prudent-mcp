@@ -367,22 +367,22 @@ const detailSchema = z
   .describe(
     "concise (default): resolved references become { type, id, label } stubs " +
       "(label = citation for regulation, name otherwise; null when unresolved); " +
-      "full: complete records embedded.",
+      "full: complete entries embedded.",
   );
 
 export function registerMetaTools(server: McpServer): void {
   server.registerTool(
     "get_corpus_info",
     {
-      title: "Corpus info",
+      title: "Library info",
       description:
-        "What's loaded right now — the entry point before anything else. " +
+        "What this library holds right now — the entry point before anything else. " +
         "Returns { last_updated, counts: {regulation, test, check, playbook, source}, " +
-        "coverage: [...], holdings: [...], stale_sources: [...], pending_changes: [...] } — coverage only names documents; " +
-        "holdings gives each one's { document_id, framework, title, records, partial }, partial being " +
-        "what the source registry declares (key absent = undeclared, not full). stale_sources lists " +
-        "current sources verified more than 30 days ago; pending_changes lists registry-recorded changes not yet " +
-        "ingested (key absent = none declared).",
+        "coverage: [...], `holdings`: [...], stale_sources: [...], pending_changes: [...] } — coverage only names documents; " +
+        "`holdings` gives each one's { document_id, framework, title, `records`, partial }, partial being " +
+        "what the source list declares (key absent = undeclared, not whole). stale_sources lists " +
+        "current sources verified more than 30 days ago; pending_changes lists changes recorded for a document " +
+        "that its text does not yet include (key absent = none declared).",
       inputSchema: {},
       outputSchema: CorpusInfoSchema.passthrough(),
       annotations: READ_ONLY_HINTS,
@@ -416,13 +416,13 @@ export function registerMetaTools(server: McpServer): void {
       if (!anyIdSchema.safeParse(cleaned).success) {
         if (cleaned.startsWith("source://")) {
           return miss(
-            `${cleaned} is a source-registry id. Sources sit outside the reference graph — ` +
-              "they join regulation records via framework + document_id, never by URI — so " +
+            `${cleaned} is a source id. Sources sit outside the reference graph — ` +
+              "they join to provisions by framework and document, never by id — so " +
               "nothing refers to them by id. Use get_source or list_sources instead.",
           );
         }
         return miss(
-          `'${id}' is not a corpus URI. Pass a regulation://, test://, check://, or ` +
+          `'${id}' is not an id this library uses. Pass a regulation://, test://, check://, or ` +
             "playbook:// id — find one with the search_* tools or list_review_areas.",
         );
       }
@@ -436,16 +436,16 @@ export function registerMetaTools(server: McpServer): void {
       title: "Resolve citation",
       description:
         "Loose citation string in prose (\"Art. 178(1)(a)\", \"Chapter 5, paragraph 12\", " +
-        "\"EBA GL 2017/16 para 78\") → the Regulation record it names, or an honest refusal.\n" +
-        "Matching is EXACT, in this order: the record's own citation, then its numeric spine " +
+        "\"EBA GL 2017/16 para 78\") → the provision it names, or an honest refusal.\n" +
+        "Matching is EXACT, in this order: the provision's own citation, then its numeric spine " +
         "(article/paragraph/point numbers) scoped to the document the citation names. There is " +
-        "no fuzzy fallback — 1218 is not 121, and an instrument this corpus does not hold, named " +
+        "no fuzzy fallback — 1218 is not 121, and an instrument this library does not hold, named " +
         "by number or description (\"the RTS on …\"), resolves to null with no candidates rather " +
         "than to a same-numbered provision elsewhere.\n" +
         "Returns { match, confidence, candidates, ambiguous, unmatched_segments, coverage_note }:\n" +
-        "  match null + candidates → several records fit (ambiguous: true) or only narrower or " +
+        "  match null + candidates → several provisions fit (ambiguous: true) or only narrower or " +
         "containing provisions are held; open a candidate by id.\n" +
-        "  match null + coverage_note → why, in terms of what this corpus covers (and whether the " +
+        "  match null + coverage_note → why, in terms of what this library covers (and whether the " +
         "document is held only in part).\n" +
         "  confidence 'exact' | 'alias' | 'segment' says which rule matched; a match carries pending_changes_note.\n" +
         "A null match is not a citation: fall back to search_regulation on the citation's key words.",
@@ -479,8 +479,8 @@ export function registerMetaTools(server: McpServer): void {
         "The taxonomy of review areas — the entry point when the task is a WHOLE AREA and you want its " +
         "playbooks, checks and regulation in one bundle: take an area id from here to get_area_overview. " +
         "For a specific question, search the surfaces directly instead; an area is derived from the " +
-        "playbooks a backend authored, so it reflects how the corpus was written up rather than everything " +
-        "the corpus holds on a subject, and it may draw on fewer documents than the corpus covers. " +
+        "playbooks a backend authored, so it reflects how the library was written up rather than everything " +
+        "it holds on a subject, and it may draw on fewer documents than the library covers. " +
         "Returns { areas: [{ id, name, parent, children }] }; ids are dotted slugs and a " +
         "child id is prefixed by its parent's.",
       inputSchema: {},
@@ -497,8 +497,8 @@ export function registerMetaTools(server: McpServer): void {
       description:
         "Fetch a playbook with all Phase.references resolved inline — avoids N+1 fetches. " +
         "concise (default): each reference becomes a { type, id, label } stub; detail: 'full' " +
-        "embeds the complete Regulation | Test | Check | Playbook record per reference " +
-        "(record null if unresolved). Unknown ids return isError with a pointer — verify " +
+        "embeds the complete Regulation | Test | Check | Playbook entry per reference " +
+        "(`record` null if unresolved). Unknown ids return isError with a pointer — verify " +
         "with search_playbooks or list_review_areas.\n" +
         "Use this when you intend to FOLLOW the references. If the question is only what the " +
         "steps are, get_playbook with detail: 'steps' answers it for roughly a fifth of the " +
@@ -530,7 +530,7 @@ export function registerMetaTools(server: McpServer): void {
         "By default each playbook is a walkthrough SUMMARY: phase names, descriptions and " +
         "per-phase reference counts. References arrive de-duplicated in the flat id lists, so " +
         "nothing is missing; expand_playbook gives the per-phase breakdown when it matters. " +
-        "detail: 'full' embeds every referenced record inline and is large; use it only when " +
+        "detail: 'full' embeds every referenced entry inline and is large; use it only when " +
         "the whole area is being read.\n" +
         "playbook_ids are playbooks referenced but not already listed, which is how a " +
         "lifecycle playbook names the per-parameter ones. Asking for a top-level area " +
@@ -600,9 +600,8 @@ export function registerMetaTools(server: McpServer): void {
           () => ({ ...rest, playbooks: expanded.map(toPlaybookWalkthrough) } satisfies AreaOverview),
           (tokens) =>
             `detail: 'full' for this area is ~${tokens} tokens, over the per-response ceiling, ` +
-            "so the walkthrough summary is served instead. The complete records are reachable " +
-            "per id: expand_playbook for one playbook's references, or get_regulation / " +
-            "get_check / get_test for the ids listed here.",
+            "so the walkthrough summary is returned instead. The complete entries can be fetched " +
+            "one id at a time, or one playbook's references expanded.",
         ),
       );
     },
@@ -616,8 +615,8 @@ export function registerMetaTools(server: McpServer): void {
         "Fetch a regulation with its children resolved inline — sub-regulations plus the " +
         "checks/tests that operationalize it; the reverse-direction companion to " +
         "expand_playbook. Returns the regulation fields plus children as { type, id, label } " +
-        "stubs (default) or complete records (detail: 'full'). as_of, the placeholder flag and pending_changes_note " +
-        "work as in get_regulation; an as_of_note also covers children served from current text. " +
+        "stubs (default) or complete entries (detail: 'full'). as_of, the placeholder flag and pending_changes_note " +
+        "work as in get_regulation; an as_of_note also covers children shown from current text. " +
         "Unknown ids are isError misses. Use " +
         "get_regulation_tree to walk the whole sub-tree.",
       inputSchema: {
@@ -634,8 +633,8 @@ export function registerMetaTools(server: McpServer): void {
       if (raw === null) {
         if (as_of !== undefined && (await adapters.regulation.get(id)) !== null) {
           return miss(
-            `No version of ${id} was in force on ${as_of} according to this corpus's history — ` +
-              `an as_of predating every recorded version returns nothing. ${AS_OF_MISS_CONTEXT} ` +
+            `This library has no version of ${id} in force on ${as_of} — ` +
+              `an as_of before every version it holds returns nothing. ${AS_OF_MISS_CONTEXT} ` +
               "Retry without as_of for the current text.",
           );
         }
@@ -678,9 +677,9 @@ export function registerMetaTools(server: McpServer): void {
         "(section → paragraphs) with the checks/tests that operationalize each node attached " +
         "as leaves. Returns a tree of { type, id, citation, children } nodes — concise " +
         "(default) keeps citations and leaf labels only; detail: 'full' embeds each node's " +
-        "complete record. depth defaults to 5 and the walk is capped at 200 total nodes; " +
+        "complete entry. depth defaults to 5 and the walk is capped at 200 total nodes; " +
         "nodes cut off by depth, a cycle, or the cap carry truncated: true. With as_of, an " +
-        "as_of_note on the root counts nodes served from current text; pending_changes_note covers the root's document. Unknown roots are isError misses — " +
+        "as_of_note on the root counts nodes shown from current text; pending_changes_note covers the root's document. Unknown roots are isError misses — " +
         "verify with search_regulation.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(
@@ -699,7 +698,7 @@ export function registerMetaTools(server: McpServer): void {
       if (node.record === null) {
         if (as_of !== undefined && (await adapters.regulation.get(id)) !== null) {
           return miss(
-            `No version of ${id} was in force on ${as_of} according to this corpus's history. ` +
+            `This library has no version of ${id} in force on ${as_of}. ` +
               `${AS_OF_MISS_CONTEXT} Retry without as_of for the current tree.`,
           );
         }
@@ -727,7 +726,7 @@ export function registerMetaTools(server: McpServer): void {
     {
       title: "Coverage gaps",
       description:
-        "Audit the corpus for regulatory requirements with no validation coverage: regulations " +
+        "Audit this library for regulatory requirements with no validation coverage: regulations " +
         "that no check (derived_from) or test (regulatory_basis) points at. Returns " +
         "{ total_regulations, covered, uncovered: [{ id, citation, is_leaf }] }. is_leaf flags " +
         "whether the gap is a leaf paragraph (a real gap) versus a section that may inherit " +

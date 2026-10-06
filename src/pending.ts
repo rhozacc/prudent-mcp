@@ -149,7 +149,7 @@ const labelOf = (c: PendingChange): string =>
 const affectsOf = (c: PendingChange): string =>
   c.affects === undefined || c.affects.length === 0
     ? ""
-    : ` Registry: concerns ${c.affects.slice(0, MAX_AFFECTS).join("; ")}${c.affects.length > MAX_AFFECTS ? "; ..." : ""}.`;
+    : ` Said to concern ${c.affects.slice(0, MAX_AFFECTS).join("; ")}${c.affects.length > MAX_AFFECTS ? "; ..." : ""}.`;
 
 /** What one open change says about the text being served. */
 function sentenceFor(o: OpenPendingChange, today: string): string {
@@ -160,17 +160,17 @@ function sentenceFor(o: OpenPendingChange, today: string): string {
   if (state === "in_force_not_ingested") {
     const date = c.effective_from ?? "";
     return announced
-      ? `${label} was expected to apply from ${date} and is not ingested here, so the text served may be out of date.${tail}`
-      : `${label} has applied since ${date} and is not ingested here, so the text served may no longer be the text in force.${tail}`;
+      ? `${label} was expected to apply from ${date}; the text below may be out of date.${tail}`
+      : `${label} has applied since ${date}; the text below may no longer be the text in force.${tail}`;
   }
   if (state === "upcoming") {
     const date = c.effective_from ?? "";
     return (
-      `${label} ${announced ? "is expected to apply" : "applies"} from ${date}${whenPhrase(today, date)} and is not ` +
-      `ingested here, so the text served is the version before it.${tail}`
+      `${label} ${announced ? "is expected to apply" : "applies"} from ${date}${whenPhrase(today, date)}; ` +
+      `the text below is the version before it.${tail}`
     );
   }
-  return `${label} is ${announced ? "announced" : "adopted"} with no application date recorded and is not ingested here.${tail}`;
+  return `${label} is ${announced ? "announced" : "adopted"} with no application date recorded; the text below does not reflect it.${tail}`;
 }
 
 /**
@@ -192,8 +192,7 @@ export function pendingChangesNote(open: OpenPendingChange[], today: string): st
   return (
     lead +
     named.map((o) => sentenceFor(o, today)).join(" ") +
-    (rest > 0 ? ` (${rest} more in get_source.)` : "") +
-    " See get_source for the registry entry."
+    (rest > 0 ? ` (${rest} more.)` : "")
   );
 }
 
@@ -218,9 +217,8 @@ export function pendingSearchNotice(docs: { title: string; open: OpenPendingChan
   });
   const rest = withOpen.length - items.length;
   return (
-    "Some results come from a document with a change this corpus has not ingested: " +
-    `${items.join("; ")}${rest > 0 ? `; and ${rest} more` : ""}. The text served is the version before it; ` +
-    "open a record or get_source for the details."
+    "Some results come from a document with a change its text does not yet include: " +
+    `${items.join("; ")}${rest > 0 ? `; and ${rest} more` : ""}. The text shown is the version before it.`
   );
 }
 

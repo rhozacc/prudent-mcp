@@ -85,7 +85,7 @@ export function placeholderNotice(found: PreAdoptionPlaceholders): string {
       : "";
   return (
     "This text refers to an instrument by a pre-adoption placeholder; the placeholder is not a citation. " +
-    "The instrument may be identified elsewhere in the corpus or not at all. " +
+    "The instrument may be identified elsewhere in this library or not at all. " +
     "Do not present it as the current state of the law." +
     cut
   );

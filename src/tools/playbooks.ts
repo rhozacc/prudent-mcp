@@ -75,8 +75,8 @@ export function registerPlaybookTools(server: McpServer): void {
         "Ranked, field-scoped search over validation playbooks: area, subarea, phase names, " +
         "and phase descriptions. Returns { results, total_matches, offset, truncated }; " +
         "concise results (default) are { id, area, subarea, phase_count } — pass detail: 'full' " +
-        "for complete records. Follow up with expand_playbook (references resolved inline) or " +
-        "get_playbook for the raw record.",
+        "for complete entries. Follow up with expand_playbook (references resolved inline) or " +
+        "get_playbook for the raw entry.",
       inputSchema: searchInputShape("area, subarea, and phase names/descriptions"),
       outputSchema: searchOutputShape(z.union([ConcisePlaybookHit, PlaybookSchema])),
       annotations: READ_ONLY_HINTS,
@@ -108,7 +108,7 @@ export function registerPlaybookTools(server: McpServer): void {
       title: "Get playbook",
       description:
         "Fetch one playbook by ID (area or area/subarea).\n" +
-        "  full (default): the whole record — ordered phases, each with a description and a " +
+        "  full (default): the whole entry — ordered phases, each with a description and a " +
         "references array of mixed regulation://, test://, check:// IDs, plus gates and " +
         "regulatory_scope.\n" +
         "  detail: 'steps': the same phases and gates, with each references array replaced by " +
@@ -137,7 +137,7 @@ export function registerPlaybookTools(server: McpServer): void {
     },
     async ({ id, detail }) => {
       const record = await adapters.playbook.get(id);
-      if (record === null) return miss(`No record for ${id}. Verify the id with search_playbooks or list_review_areas.`);
+      if (record === null) return miss(`No playbook has the id ${id}. Verify the id with search_playbooks or list_review_areas.`);
       return ok(detail === "full" ? record : stepsOnly(record));
     },
   );

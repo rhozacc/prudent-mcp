@@ -121,7 +121,7 @@ function leaky(leaks: { numberedShape?: RegExp; identifier?: boolean; englishNam
               ambiguous: true,
               candidates: [`regulation://crr/article-${plain}`, `regulation://gl-a/article-${plain}`].map((id) => ({ id, citation: `Article ${plain}`, document_id: id.split("/")[2] })),
             })
-          : trace(tool, args, declined(`Nothing in this corpus is numbered ${plain}`));
+          : trace(tool, args, declined(`Nothing in this library is numbered ${plain}`));
       }
       // A held number with the word of another kind of act names another act: no directive
       // or decision is numbered 575/2013, so the regulation that carries it is not the answer.
@@ -129,7 +129,7 @@ function leaky(leaks: { numberedShape?: RegExp; identifier?: boolean; englishNam
         const n = /Article (\d+)/.exec(text)?.[1];
         return leaks.kindMismatch === true && n !== undefined && Number(n) <= 12
           ? trace(tool, args, { match: { id: `regulation://crr/article-${n}` }, candidates: [] })
-          : trace(tool, args, declined("This corpus holds no Directive 2013/575"));
+          : trace(tool, args, declined("This library holds no Directive 2013/575"));
       }
       // The CRR is held: its own articles resolve in every spelling, unless leaking.
       if (/\bCRR\b|Capital Requirements Regulation|575\/2013/.test(text)) {
@@ -139,7 +139,7 @@ function leaky(leaks: { numberedShape?: RegExp; identifier?: boolean; englishNam
         }
         return n !== undefined && Number(n) <= 12
           ? trace(tool, args, { match: { id: `regulation://crr/article-${n}` }, candidates: [] })
-          : trace(tool, args, declined("Nothing in this corpus is numbered " + n));
+          : trace(tool, args, declined("Nothing in this library is numbered " + n));
       }
       if (/EBA\/GL\/|ESMA\//.test(text)) {
         return leaks.identifier === true
@@ -147,7 +147,7 @@ function leaky(leaks: { numberedShape?: RegExp; identifier?: boolean; englishNam
           : trace(tool, args, declined("names a document by the number"));
       }
       if (leaks.numberedShape?.test(text) === true) return trace(tool, args, { match: { id: "regulation://gl-a/article-1" }, candidates: [] });
-      return trace(tool, args, declined(`This corpus holds no ${text}; by description`));
+      return trace(tool, args, declined(`This library holds no ${text}; by description`));
     },
   };
 }

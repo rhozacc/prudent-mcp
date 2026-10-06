@@ -218,10 +218,10 @@ describe("an unknown regulation id", () => {
   const TOOLS = ["get_regulation", "expand_regulation", "get_regulation_tree"] as const;
 
   const variants: Array<[string, string, RegExp, RegExp]> = [
-    ["partial", "regulation://alpha/art-99", /holds only part of Title of alpha-doc \(4 records\).*absent from the corpus, not necessarily from the law/s, /probably mistyped/],
-    ["undeclared", "regulation://gam-seg/art-99", /holds 2 records of Title of gamma-doc and does not declare that as the whole.*absence here does not show the provision does not exist/s, /holds only part|probably mistyped/],
-    ["declared full", "regulation://beta/art-99", /declares Title of beta-doc held in full \(1 record\).*probably mistyped/s, /holds only part|does not declare/],
-    ["not held", "regulation://nowhere/art-1", /No document with the id prefix "nowhere" is loaded.*get_corpus_info/s, /holds only part|probably mistyped|does not declare/],
+    ["partial", "regulation://alpha/art-99", /holds only part of Title of alpha-doc \(4 provisions\).*not among the parts held, and may still be in the law/s, /probably mistyped/],
+    ["undeclared", "regulation://gam-seg/art-99", /holds 2 provisions of Title of gamma-doc and does not declare that as the whole.*not finding a provision here does not show it does not exist/s, /holds only part|probably mistyped/],
+    ["declared full", "regulation://beta/art-99", /declares Title of beta-doc held in full \(1 provision\).*probably mistyped/s, /holds only part|does not declare/],
+    ["not held", "regulation://nowhere/art-1", /No document with the id prefix "nowhere" is in this library.*get_corpus_info/s, /holds only part|probably mistyped|does not declare/],
   ];
 
   for (const tool of TOOLS) {
@@ -230,7 +230,7 @@ describe("an unknown regulation id", () => {
         const r = await client.callTool({ name: tool, arguments: { id } });
         expect(r.isError).toBe(true);
         const t = text(r);
-        expect(t).toContain(`No record for ${id}.`);
+        expect(t).toContain(`No provision has the id ${id}.`);
         expect(t).toMatch(wants);
         expect(t).not.toMatch(unwanted);
         // The pre-existing pointer survives every variant.
@@ -266,8 +266,8 @@ describe("resolveCitationDetailed notes", () => {
     const r = resolve("Alpha Article 99");
     expect(r.match).toBeNull();
     expect(r.confidence).toBe("none");
-    expect(r.coverage_note).toContain("Nothing in this corpus is numbered 99 in the document named.");
-    expect(r.coverage_note).toMatch(/holds only part of Title of alpha-doc \(4 records\).*not necessarily from the law/s);
+    expect(r.coverage_note).toContain("Nothing in this library is numbered 99 in the document named.");
+    expect(r.coverage_note).toMatch(/holds only part of Title of alpha-doc \(4 provisions\).*may still be in the law/s);
   });
 
   it("nothing numbered, document named and declared full or undeclared: no partial clause", () => {
@@ -277,7 +277,7 @@ describe("resolveCitationDetailed notes", () => {
 
   it("nothing numbered, no document named: names every partial document held", () => {
     const note = resolve("Article 99").coverage_note ?? "";
-    expect(note).toContain("Nothing in this corpus is numbered 99.");
+    expect(note).toContain("Nothing in this library is numbered 99.");
     expect(note).toMatch(/holds only part of Title of alpha-doc; Title of delta-doc, so if the citation is to one of those/);
     expect(note).not.toContain("beta-doc");
   });
@@ -310,7 +310,7 @@ describe("resolveCitationDetailed notes", () => {
 
   it("without the third parameter the notes are exactly what they were", () => {
     expect(resolve("Alpha Article 99", false).coverage_note).toBe(
-      'Nothing in this corpus is numbered 99 in the document named. Try search_regulation with the citation\'s key words.',
+      'Nothing in this library is numbered 99 in the document named. Try a search on the citation\'s key words.',
     );
     expect(resolve("Alpha Article 3", false).coverage_note).not.toMatch(/only part/);
   });
@@ -406,9 +406,9 @@ describe("eval I12", () => {
         if (tool === "get_corpus_info") return trace("{}", false, { holdings: [{ document_id: "d", title: "Doc", partial: true }] });
         if (tool === "search_regulation") return trace("{}", false, { results: [{ id: "regulation://d/a-1", document_id: "d" }] });
         if (tool === "resolve_citation") {
-          return trace("{}", false, { match: null, coverage_note: "Nothing in this corpus is numbered 99999 in the document named." });
+          return trace("{}", false, { match: null, coverage_note: "Nothing in this library is numbered 99999 in the document named." });
         }
-        return trace("No record for the id. Verify the id with search_regulation.", true);
+        return trace("No provision has that id. Verify the id with search_regulation.", true);
       },
     } as unknown as Parameters<typeof declineOnPartialDocumentSaysSo>[0];
     const r = await declineOnPartialDocumentSaysSo(stub);

@@ -77,7 +77,7 @@ export function registerPrompts(server: McpServer): void {
               `Review the calibration of the ${component} model.\n\n` +
               `1. Fetch playbook://calibration/${component.toLowerCase()} (fall back to playbook://calibration if absent).\n` +
               `2. For each phase, retrieve the referenced regulation, tests, and checks.\n` +
-              `3. Identify which calibration tests the bank ran and check family-equivalence against the corpus.\n` +
+              `3. Identify which calibration tests the bank ran and check family-equivalence against this library.\n` +
               `4. Verify long-run-average derivation, segment-level testing, and documented deviations.\n` +
               `5. Report findings citing regulation and check IDs.`,
           },
@@ -106,12 +106,12 @@ export function registerPrompts(server: McpServer): void {
           content: {
             type: "text",
             text:
-              `Assess the ${severity ?? "outstanding"} findings against the corpus.\n\n` +
+              `Assess the ${severity ?? "outstanding"} findings against this library.\n\n` +
               `For each finding:\n` +
               `1. Identify the relevant regulation (resolve_citation if the finding references one in prose).\n` +
               `2. Identify the related check (search_checks by topic).\n` +
               `3. Confirm the finding is supported by the regulation/check pair, or flag if the link is missing.\n` +
-              `4. Use get_referrers to surface anything else in the corpus that bears on the same regulation.\n` +
+              `4. Use get_referrers to surface anything else in this library that bears on the same regulation.\n` +
               `5. Report each finding with its regulation and check IDs.`,
           },
         },

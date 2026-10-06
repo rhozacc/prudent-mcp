@@ -83,7 +83,7 @@ export function miss(message: string): CallToolResult {
 export async function unknownRegulationMiss(id: string): Promise<CallToolResult> {
   const [regulations, sources] = await Promise.all([adapters.regulation.list(), adapters.source.list()]);
   const why = missingRecordClause(regulations, computeHoldings(regulations, sources), id);
-  return miss(`No record for ${id}. ${why} Verify the id with search_regulation or list_review_areas.`);
+  return miss(`No provision has the id ${id}. ${why} Verify the id with search_regulation or list_review_areas.`);
 }
 
 // --- Search envelope ---------------------------------------------------------
@@ -205,13 +205,13 @@ export function weakMatchNotice(best: number, queryTokens: number): string {
     // none of the terms" - say what was actually found.
     return (
       `No result contains any of the query's ${queryTokens} meaningful terms as a whole word; the matches are ` +
-      "partial-word matches only, so they may not be about the topic. Absence of a strong match is a " +
-      "statement about the corpus, not about the law."
+      "partial-word matches only, so they may not be about the topic. Not finding a strong match is a " +
+      "statement about what this library holds, not about the law."
     );
   }
   return (
     `The best result matches only ${best} of the query's ${queryTokens} meaningful terms, so the topic ` +
-    "may not be in this corpus. Absence of a strong match is a statement about the corpus, not about the law."
+    "may not be in this library. Not finding a strong match is a statement about what this library holds, not about the law."
   );
 }
 
@@ -355,7 +355,7 @@ export function searchInputShape(fieldsDoc: string) {
     detail: z
       .enum(["concise", "full"])
       .default("concise")
-      .describe("concise (default): per-surface projection; full: complete records."),
+      .describe("concise (default): per-surface projection; full: complete entries."),
   };
 }
 
@@ -477,9 +477,9 @@ const versionOf = (r: Regulation): string => (r.document_version.trim() === "" ?
  */
 export function asOfNote(record: Regulation, asOf: string): string {
   return (
-    `This corpus records no version of this provision for the requested as_of date (${asOf}). ` +
-    `The text served is the version named in document_version (${versionOf(record)}), which may differ from ` +
-    "the text in force on that date. Do not present it as the historical text."
+    `This library has no version of this provision for the requested date (${asOf}). ` +
+    `The text below is the version dated ${versionOf(record)}, which may differ from ` +
+    "the text in force on that date. Do not present it as the text of that date."
   );
 }
 
@@ -527,7 +527,7 @@ function currentTextPart(
 ): string | undefined {
   if (!root.fromCurrent && n === 0) return undefined;
   if (n === 0) return asOfNote(root.record, asOf);
-  const detail = "(detail: 'full' shows each one's document_version)";
+  const detail = "(the full form shows each one's version date)";
   const tree = group === "tree";
   // "2 other provisions in this tree" / "2 of its children": the same count, said
   // in the words that fit what the group is.
@@ -535,15 +535,15 @@ function currentTextPart(
   if (root.fromCurrent) {
     return (
       `${asOfNote(root.record, asOf)} The same holds for ${others}${tree ? " in this tree" : ""}: ` +
-      `${n === 1 ? "it was" : "each was"} served from its current text, which may differ from the text in force on that date ${detail}.`
+      `${n === 1 ? "it was" : "each was"} shown from its current text, which may differ from the text in force on that date ${detail}.`
     );
   }
   const subject = tree
     ? `${n === 1 ? "1 provision" : `${n} provisions`} in this tree other than the root`
     : `${n === 1 ? "1 child" : `${n} children`} of this provision`;
   return (
-    `${subject} ${n === 1 ? "was" : "were"} served from current text, because this corpus records no version of ` +
-    `${n === 1 ? "it" : "them"} for the requested as_of date (${asOf}). ` +
+    `${subject} ${n === 1 ? "was" : "were"} shown from current text, because this library has no version of ` +
+    `${n === 1 ? "it" : "them"} for the requested date (${asOf}). ` +
     `${n === 1 ? "It" : "Each"} may differ from the text in force on that date; do not present ` +
     `${n === 1 ? "it" : "them"} as the historical text ${detail}.`
   );
@@ -567,8 +567,8 @@ function noVersionPart(asOf: string, m: number, group: AsOfGroup): string | unde
       ? `${one ? "it appears" : "they appear"} by id only, with no label or text, and the walk goes no further there`
       : `${one ? "it is" : "they are"} listed by id only, with no label or text`;
   return (
-    `${subject} ${one ? "has" : "have"} no recorded version for the requested as_of date (${asOf}), so ${shown}. ` +
-    `That is a gap in what this corpus records, not evidence that ${one ? "it" : "they"} did not exist or did not apply on that date.`
+    `${subject} ${one ? "has" : "have"} no version held for the requested date (${asOf}), so ${shown}. ` +
+    `That is a gap in what this library holds, not evidence that ${one ? "it" : "they"} did not exist or did not apply on that date.`
   );
 }
 
@@ -580,8 +580,8 @@ function noVersionPart(asOf: string, m: number, group: AsOfGroup): string | unde
  * date, which loses the note too.
  */
 export const AS_OF_MISS_CONTEXT =
-  "Where the corpus records no version for a date but the document already existed, the current text is " +
-  "served together with an as_of_note; this date is earlier than anything the corpus records for it.";
+  "Where this library has no version for a date but the document already existed, the current text is " +
+  "returned together with an as_of_note; this date is earlier than any version the library holds.";
 
 /**
  * Attach `as_of_note` to a response body, leading it so the caveat is read

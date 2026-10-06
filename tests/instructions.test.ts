@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
+import { bannedTermsIn } from "../src/language.ts";
 import { createServer } from "../src/server.ts";
 
 /**
@@ -36,11 +37,27 @@ describe("server instructions", () => {
     }
   });
 
-  test("describe the search envelope the tools actually return", async () => {
+  test("name the search envelope fields a caller pages and judges by, and the search tools carry the envelope", async () => {
     const text = await instructions();
-    expect(text).toContain(
-      "{ results, returned, total_matches, offset, truncated, next_offset, query_tokens, best_coverage, notice }",
-    );
+    for (const key of ["total_matches", "next_offset", "best_coverage", "query_tokens"]) expect(text).toContain(key);
+    const server = createServer();
+    const client = new Client({ name: "instructions-test", version: "0" });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(a), client.connect(b)]);
+    const { tools } = await client.listTools();
+    await client.close();
+    // The exact envelope lives on the tool that returns it, once, not in the instructions.
+    const search = tools.find((t) => t.name === "search_regulation");
+    expect(search?.description ?? "").toContain("{ results, returned, total_matches, offset, truncated, next_offset, notice }");
+  });
+
+  test("stay within the interim budget of 500 tokens", async () => {
+    // estimateTokens is chars / 4. The 1.0 target is 350; 0.10 was about 1,300.
+    expect(Math.round((await instructions()).length / 4)).toBeLessThanOrEqual(500);
+  });
+
+  test("keep to the library's own words (the language rule)", async () => {
+    expect(bannedTermsIn(await instructions())).toEqual([]);
   });
 
   test("state each rule once: no tool card repeats the search-coverage sentence", async () => {

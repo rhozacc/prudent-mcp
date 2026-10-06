@@ -99,7 +99,7 @@ function stub(handlers: Record<string, (args: Record<string, unknown>) => Reply>
 }
 
 const NOTE =
-  "Pending change to this document: Amending act applies from " + iso(20) + " and is not ingested here, so the text served is the version before it.";
+  "Pending change to this document: Amending act applies from " + iso(20) + "; the text below is the version before it.";
 
 /** What a correct server answers for the synthetic registry above. */
 function good(overrides: Record<string, (args: Record<string, unknown>) => Reply> = {}): Session {
@@ -114,7 +114,7 @@ function good(overrides: Record<string, (args: Record<string, unknown>) => Reply
     get_corpus_info: () => ({ json: { pending_changes: [{ source: acme.id, document_id: "acme-reg", title: "Amending act", state: "upcoming" }] } }),
     search_regulation: () => ({
       // The stand-in holds both documents on every page; the notice names the open one.
-      json: { ...{ results: [...rowsFor("acme-reg").results, ...rowsFor("quiet-doc").results] }, notice: "Some results come from a change this corpus has not ingested." },
+      json: { ...{ results: [...rowsFor("acme-reg").results, ...rowsFor("quiet-doc").results] }, notice: "Some results come from a document with a change its text does not yet include. The text shown is the version before it." },
     }),
     get_regulation: (a) => ({ json: a["id"] === "regulation://acme/a" && a["as_of"] === undefined ? { pending_changes_note: NOTE, id: a["id"] } : { id: a["id"] } }),
     expand_regulation: (a) => ({ json: a["id"] === "regulation://acme/a" ? { pending_changes_note: NOTE, id: a["id"] } : { id: a["id"] } }),

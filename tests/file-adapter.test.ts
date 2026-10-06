@@ -552,7 +552,7 @@ describe("resolveCitationDetailed", () => {
     const r = resolveCitationDetailed(withPreamble, "CRR Article 999(1)");
     expect(r.match).toBeNull();
     expect(r.candidates).toEqual([]);
-    expect(r.coverage_note).toContain("Nothing in this corpus is numbered");
+    expect(r.coverage_note).toContain("Nothing in this library is numbered");
   });
 
   it("reports ambiguity across documents rather than picking one", () => {
@@ -628,7 +628,7 @@ describe("resolveCitationDetailed", () => {
     expect(r.match).toBeNull();
     // The refusal NAMES the records rather than counting them: a count tells
     // the caller something exists, an id lets them open it.
-    expect(r.coverage_note).toContain("1 served record(s) name it");
+    expect(r.coverage_note).toContain("1 held provision(s) name it");
     expect(r.coverage_note).toContain("regulation://gl-2017-16/article-78");
   });
 
@@ -659,7 +659,7 @@ describe("resolveCitationDetailed", () => {
     // strictly less than an instrument the corpus does NOT hold received.
     const held = resolveCitationDetailed(regs, "eba-gl-2017-16");
     expect(held.match).toBeNull();
-    expect(held.coverage_note).toContain("names a document this corpus holds");
+    expect(held.coverage_note).toContain("names a document this library holds");
 
     const unknown = resolveCitationDetailed(regs, "the RTS on economic downturn");
     expect(unknown.match).toBeNull();

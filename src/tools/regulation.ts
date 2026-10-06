@@ -79,11 +79,11 @@ export function registerRegulationTools(server: McpServer): void {
       title: "Search regulation",
       description:
         "Ranked, field-scoped search over regulation heading path, citation, text, and commentary " +
-        "(record ids join in only for URI-like queries). Returns { results, returned, " +
+        "(entry ids join in only for URI-like queries). Returns { results, returned, " +
         "total_matches, offset, truncated, next_offset, notice }; total_matches is the whole " +
         "match set, not this page. Concise results (default) are { id, citation, " +
         "matched_excerpt, document_id, parent }, the excerpt being whole sentences around the " +
-        "match — quotable as it stands. detail: 'full' gives complete records with commentary " +
+        "match — quotable as it stands. detail: 'full' gives complete entries with commentary " +
         "capped (commentary_omitted says how many were left out; get_regulation serves them " +
         "all). Latest versions only. Follow up with get_regulation (as_of for history) or " +
         "get_referrers on any id.",
@@ -146,13 +146,13 @@ export function registerRegulationTools(server: McpServer): void {
     {
       title: "Get regulation",
       description:
-        "Fetch one regulation paragraph by URI. Returns the full record: citation, verbatim " +
+        "Fetch one regulation paragraph by URI. Returns the full entry: citation, verbatim " +
         "text, and attached commentary (supervisor Q&A, interpretive letters). Latest version " +
         "by default; pass as_of (ISO date) for the text in force on that date, or the current text " +
-        "with an as_of_note where no version is recorded for it. A registry-recorded change not yet ingested is " +
+        "with an as_of_note where no version is held for it. A change recorded for the document that its text does not yet include is " +
         "flagged: pending_changes_note. A pre-adoption placeholder act " +
-        "number is flagged: pre_adoption_placeholders + notice. An as_of predating every recorded " +
-        "version, or an unknown id, is an isError miss. get_referrers finds operationalising checks/playbooks.",
+        "number is flagged: pre_adoption_placeholders + notice. An as_of before every version held, " +
+        "or an unknown id, is an isError miss. get_referrers finds operationalising checks/playbooks.",
       inputSchema: {
         id: lenient(regulationIdSchema).describe(
           "A regulation id from search_regulation or resolve_citation — shape regulation://{document}/{provision}",
@@ -170,14 +170,14 @@ export function registerRegulationTools(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Present only when as_of was given and the corpus records no version for that date, so the " +
-              "current text was served. Says which version (document_version) and that it must not be " +
+            "Present only when as_of was given and this library has no version for that date, so the " +
+              "current text was returned. Says which version (`document_version`) and that it must not be " +
               "presented as the historical text.",
           ),
         pending_changes_note: z
           .string()
           .optional()
-          .describe("A registry-recorded change to this document the corpus has not ingested."),
+          .describe("A change recorded for this document that its text does not yet include."),
         pre_adoption_placeholders: z
           .array(z.string().max(MAX_PLACEHOLDER_SPAN_CHARS))
           .max(MAX_PLACEHOLDER_SPANS)
@@ -201,9 +201,9 @@ export function registerRegulationTools(server: McpServer): void {
       }
       if (as_of !== undefined && (await adapters.regulation.get(id)) !== null) {
         return miss(
-          `No version of ${id} was in force on ${as_of} according to this corpus's history. ` +
-            "Historical coverage rule: as_of resolves against recorded versions only — a date " +
-            `predating every recorded version returns nothing. ${AS_OF_MISS_CONTEXT} ` +
+          `This library has no version of ${id} in force on ${as_of}. ` +
+            "Historical coverage rule: as_of resolves against the versions held only — a date " +
+            `before every version held returns nothing. ${AS_OF_MISS_CONTEXT} ` +
             "Retry without as_of for the current text.",
         );
       }
