@@ -11,6 +11,7 @@ import {
   CitationResolutionSchema,
   ExternalCitationSchema,
   CommentarySchema,
+  CompiledPlaybookSchema,
   CorpusInfoSchema,
   MilestoneSchema,
   PhaseSchema,
@@ -20,6 +21,7 @@ import {
   ReviewAreaSchema,
   SourceSchema,
   TestSchema,
+  TopicsSchema,
 } from "../src/schema.ts";
 
 export const surfaceSchemas = {
@@ -39,6 +41,9 @@ export const supportingSchemas = {
   Referrers: ReferrersSchema,
   CitationResolution: CitationResolutionSchema,
   ExternalCitation: ExternalCitationSchema,
+  // The 1.0 playbook and the topics it is compiled from. Registered beside the 0.x `Playbook`, which it replaces in 1.0.0.
+  CompiledPlaybook: CompiledPlaybookSchema,
+  Topics: TopicsSchema,
 } as const;
 
 export const schemaRegistry = { ...surfaceSchemas, ...supportingSchemas };

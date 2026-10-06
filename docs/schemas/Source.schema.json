@@ -151,6 +151,9 @@
                 "generic"
               ]
             },
+            "short_name": {
+              "type": "string"
+            },
             "chapters": {
               "type": "object",
               "additionalProperties": {

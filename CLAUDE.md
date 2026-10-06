@@ -22,6 +22,10 @@ src/
 ├── holdings.ts            computeHoldings, partialClause, missingRecordClause, holdingForId, idDocSegment, holdingsWarnings — the ONE per-document holdings definition
 ├── placeholders.ts        preAdoptionPlaceholders / withPlaceholderFlag — the ONE definition of a pre-adoption placeholder; computed from served text, never authored
 ├── pending.ts             pendingState, openPendingChanges, openPendingFor, pendingChangesNote, pendingSearchNotice, pendingChangeSummaries, pendingChangeWarnings — the ONE definition of a pending change and the words that describe one; the state is computed at serve time, never stored
+├── citation-style.ts      citationOf / locatorOf — the ONE official-citation definition (`Art. 179(1)(d) CRR`, `EBA/GL/2017/16 para 28`); never guesses, falls back to the record's own citation
+├── playbook-context.ts    PlaybookContext: the plain maps the playbook renderer and verifier read
+├── render.ts              renderPlaybook — a compiled playbook as deterministic text; citations from ids, never from the compiler; budgets; one requirement by handle
+├── playbook-verify.ts     verifyPlaybook — V1-V8, the gate between a compiled draft and a reader (pure)
 ├── search.ts              rankedSearch + per-surface field sets — the ONE ranking definition (uncapped; stopword-filtered; whole-sentence excerpts)
 ├── resources.ts           URI templates mirroring the schemes (completions; misses are -32002)
 ├── tools/                 meta (incl. traversal tools) + one file per surface + shared.ts (envelopes, size ceilings, annotations, leniency; the ONE as_of resolution — resolveRegulation, asOfNote, asOfGroupNote, withAsOfNote — and the ONE search envelope, rankedSearchResult) + pending.ts (the tool-layer half of the pending-change signal: pendingNoteFor, withPendingNote, pendingPageNotice)
@@ -104,6 +108,7 @@ Bun. TypeScript strict. `@modelcontextprotocol/sdk` (TS-first). zod for runtime 
 - `Test.family` + `Test.aliases` + `Test.acceptance_criteria` — equivalence reasoning across bank-specific test variants.
 - `Regulation.commentary` — interpretive material (Q&A, supervisor letters), source-attributed.
 - `Playbook.phases` — structured walkthrough with mixed-surface references in each phase.
+- **Compiled playbooks (`CompiledPlaybookSchema`, `render.ts`, `playbook-verify.ts`)** — one playbook per TOPIC, compiled across documents by the factory and checked here. Three things to keep: (1) a citation in rendered text comes from the provision id (`citationOf` through the document's `citation_style`), never from the compiler, and the compiler's own is kept only where it adds a pinpoint to what the id gives; (2) the verifier is pure and its rules are the failures actually seen (a quote the provision does not say, a provision named in prose but not cited, a member provision silently dropped, practice presented as a requirement), so a rule is added with a failing fixture or not at all; (3) V5's word list is the language rule's less "record", "holdings" and "served" (ordinary words in a playbook) plus "record id". It is named `CompiledPlaybookSchema` until 1.0.0 removes the 0.x tools and `LegacyPlaybookSchema` is the 0.x shape.
 - `ReviewArea` — canonical taxonomy. The map from "what an analyst is doing" to "what's in the corpus."
 
 ## Design constraints
@@ -139,7 +144,7 @@ Tools:       19   9 cross-cutting + (search + get) × 4 surfaces + (list + get) 
                                  expand_regulation · get_regulation_tree · get_coverage_gaps
 Templates:    5   one per URI scheme
 Prompts:      3   validate_review_area · review_calibration · assess_findings
-Schemas:     13   (DocumentHolding, PendingChange and PendingChangeSummary are embedded in Source / CorpusInfo, not registered)
+Schemas:     15   (CompiledPlaybook and Topics are registered beside the 0.x Playbook until 1.0.0; DocumentHolding, PendingChange and PendingChangeSummary are embedded in Source / CorpusInfo, not registered)
                   Regulation · Test · Check · Playbook · Source · CorpusInfo
                   · Referrers · Commentary · Phase · Milestone · ReviewArea
                   · CitationResolution · ExternalCitation

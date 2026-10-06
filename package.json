@@ -13,7 +13,11 @@
     "./schema": "./src/schema.ts",
     "./adapters": "./src/adapters.ts",
     "./file-adapter": "./src/file-adapter.ts",
-    "./validate": "./src/validate.ts"
+    "./validate": "./src/validate.ts",
+    "./citation-style": "./src/citation-style.ts",
+    "./playbook-context": "./src/playbook-context.ts",
+    "./playbook-verify": "./src/playbook-verify.ts",
+    "./render": "./src/render.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
