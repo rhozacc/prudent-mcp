@@ -1,5 +1,17 @@
 # Changes
 
+## Unreleased (0.11)
+
+**Schema 0.11.** Additive only: every new field is optional, nothing is defaulted, published output schemas stay open, and a corpus file written for 0.10 loads unchanged and serves exactly what it did. These are the fields the 1.0 plan (`docs/design/1.0.md`) builds on; nothing reads them yet except the linter.
+
+- **`Regulation.heading_path`** — the document's own headings above a provision, outermost first, verbatim.
+- **`Regulation.role`** — `operative | definition | scope | transitional | background | annex`. What a provision is for, as opposed to its `kind`. Absent means never classified, which is not `operative`.
+- **`Regulation.amends`** — on a provision of an amending instrument: `{ target, op: replace | insert_after | delete, effective_from }[]`.
+- **`Source.citation_style`** — `{ kind: eba-gl | ecb-guide | eu-regulation | generic, chapters? }`, how an id renders as a citation.
+- **`PendingChange.affects_ids`** — the provisions a change concerns, as ids. Unlike `affects` (free text, never parsed) these are matched.
+- **Corpus file: `glossary` and `topics`** — validated and passed through; the server reads neither yet.
+- **Linter, both fatal** — an `amends[].target` resolves to a record of a *different* document (framework + `document_id`); every `affects_ids` entry resolves.
+
 ## Say what is coming
 
 **0.10.0.** Additive: every new key is optional, published output schemas stay open, and a corpus file written for 0.9.0 loads unchanged and serves exactly what it did (no source declares the new field, so nothing new is said). Prompted by a gap the registry could already half-fill: `verified` and `stale_sources` say when the registry last looked, and `milestones` list dates, but nothing said that a document's text had been overtaken, or would be, or whether this corpus had caught up. A text the law has moved past reads exactly like one it has not.

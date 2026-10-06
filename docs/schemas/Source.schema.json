@@ -117,6 +117,13 @@
                   "type": "string"
                 }
               },
+              "affects_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^regulation:\\/\\/.+"
+                }
+              },
               "note": {
                 "type": "string"
               },
@@ -131,6 +138,30 @@
             ],
             "additionalProperties": false
           }
+        },
+        "citation_style": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "eba-gl",
+                "ecb-guide",
+                "eu-regulation",
+                "generic"
+              ]
+            },
+            "chapters": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

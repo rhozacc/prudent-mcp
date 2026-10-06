@@ -79,6 +79,35 @@ export const ProvisionKindSchema = z.enum([
 ]);
 export type ProvisionKind = z.infer<typeof ProvisionKindSchema>;
 
+// What a provision is FOR, as opposed to what sort of node it is (`kind`).
+// Search, `brief` and the playbook verifier read it: a background or
+// consultation-feedback record must never outrank the operative text it
+// discusses, and an annex is not a requirement. Optional, never defaulted: a
+// corpus that never classified its records says nothing, which is not
+// `operative`.
+export const ProvisionRoleSchema = z.enum([
+  "operative",
+  "definition",
+  "scope",
+  "transitional",
+  "background",
+  "annex",
+]);
+export type ProvisionRole = z.infer<typeof ProvisionRoleSchema>;
+
+// A provision of an amending instrument that changes a provision of another
+// document. The server never parses amending text: the target is authored by
+// the factory, resolves to a record of a DIFFERENT document (linter rule), and
+// is what lets a note say "amended from <date>" on the provisions the
+// amendment touches and stay silent on the rest of the document.
+export const AmendmentOpSchema = z.enum(["replace", "insert_after", "delete"]);
+export const AmendmentSchema = z.object({
+  target: regulationIdSchema,
+  op: AmendmentOpSchema,
+  effective_from: z.string().date(),
+});
+export type Amendment = z.infer<typeof AmendmentSchema>;
+
 export const RegulationSchema = z.object({
   id: regulationIdSchema,
   framework: z.string(),                // "crr" | "eba" | "ecb" | ...
@@ -130,6 +159,13 @@ export const RegulationSchema = z.object({
   // find out.
   is_metadata_only: z.boolean().optional(),
   cites: z.array(ExternalCitationSchema).optional(),
+  // The document's own headings above this provision, outermost first, verbatim
+  // ("Section 4.2.4", "Representativeness of the data"). The words a reader
+  // would search by often sit in a heading and not in the paragraph under it.
+  heading_path: z.array(z.string()).optional(),
+  role: ProvisionRoleSchema.optional(),
+  // Present on a provision of an AMENDING instrument: what it changes.
+  amends: z.array(AmendmentSchema).optional(),
   // Future fields: supersedes, last_amended, effective_from, ...
 });
 export type Regulation = z.infer<typeof RegulationSchema>;
@@ -221,6 +257,10 @@ export const PendingChangeSchema = z.object({
   effective_from: z.string().date().optional(),  // absent = no application date recorded
   ingested: z.boolean(),                     // does the text this corpus serves already reflect the change?
   affects: z.array(z.string()).optional(),   // provisions concerned, free text for a reader — never parsed or matched
+  // The provisions concerned, as ids. Unlike `affects` these ARE matched: a note
+  // rides only on the records named here, where the document-level join would
+  // put it on every record of the document. Linter-checked to resolve.
+  affects_ids: z.array(regulationIdSchema).optional(),
   note: z.string().optional(),
   url: z.string().optional(),
 });
@@ -231,6 +271,14 @@ export type PendingChange = z.infer<typeof PendingChangeSchema>;
 // out of step, so nothing is surfaced beside a record.
 export const PendingChangeStateSchema = z.enum(["upcoming", "in_force_not_ingested", "undated", "ingested"]);
 export type PendingChangeState = z.infer<typeof PendingChangeStateSchema>;
+
+export const CitationStyleSchema = z.object({
+  kind: z.enum(["eba-gl", "ecb-guide", "eu-regulation", "generic"]),
+  // Chapter number (as it appears in the id) -> the chapter's name, for
+  // documents whose citations lead with one.
+  chapters: z.record(z.string()).optional(),
+});
+export type CitationStyle = z.infer<typeof CitationStyleSchema>;
 
 export const SourceSchema = z.object({
   id: sourceIdSchema,                    // source://{framework}/{document-id}, e.g. source://eba/gl-2017-16
@@ -260,6 +308,10 @@ export const SourceSchema = z.object({
   // and found nothing pending (`verified` says when). Never defaulted to `[]`: that
   // would turn "nobody checked" into "nothing is coming".
   pending_changes: z.array(PendingChangeSchema).optional(),
+  // How this document numbers its provisions, so an id can be rendered as the
+  // citation a practitioner would write ("para. 31 of the EBA guidelines", "Ch. 3
+  // para. 186 of the ECB guide"). Absent = render the record's own `citation`.
+  citation_style: CitationStyleSchema.optional(),
   // Future fields: supersedes, celex_id, ...
 });
 export type Source = z.infer<typeof SourceSchema>;

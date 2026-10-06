@@ -147,6 +147,53 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
             ],
             "additionalProperties": false
           }
+        },
+        "heading_path": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "operative",
+            "definition",
+            "scope",
+            "transitional",
+            "background",
+            "annex"
+          ]
+        },
+        "amends": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "target": {
+                "type": "string",
+                "pattern": "^regulation:\\/\\/.+"
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "replace",
+                  "insert_after",
+                  "delete"
+                ]
+              },
+              "effective_from": {
+                "type": "string",
+                "format": "date"
+              }
+            },
+            "required": [
+              "target",
+              "op",
+              "effective_from"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -525,6 +572,13 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
                   "type": "string"
                 }
               },
+              "affects_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^regulation:\\/\\/.+"
+                }
+              },
               "note": {
                 "type": "string"
               },
@@ -539,6 +593,30 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
             ],
             "additionalProperties": false
           }
+        },
+        "citation_style": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "eba-gl",
+                "ecb-guide",
+                "eu-regulation",
+                "generic"
+              ]
+            },
+            "chapters": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -1071,6 +1149,53 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
                     "required": [
                       "framework",
                       "citation"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "heading_path": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "operative",
+                    "definition",
+                    "scope",
+                    "transitional",
+                    "background",
+                    "annex"
+                  ]
+                },
+                "amends": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "target": {
+                        "type": "string",
+                        "pattern": "^regulation:\\/\\/.+"
+                      },
+                      "op": {
+                        "type": "string",
+                        "enum": [
+                          "replace",
+                          "insert_after",
+                          "delete"
+                        ]
+                      },
+                      "effective_from": {
+                        "type": "string",
+                        "format": "date"
+                      }
+                    },
+                    "required": [
+                      "target",
+                      "op",
+                      "effective_from"
                     ],
                     "additionalProperties": false
                   }

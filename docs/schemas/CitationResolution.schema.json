@@ -136,6 +136,53 @@
                     ],
                     "additionalProperties": false
                   }
+                },
+                "heading_path": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "operative",
+                    "definition",
+                    "scope",
+                    "transitional",
+                    "background",
+                    "annex"
+                  ]
+                },
+                "amends": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "target": {
+                        "type": "string",
+                        "pattern": "^regulation:\\/\\/.+"
+                      },
+                      "op": {
+                        "type": "string",
+                        "enum": [
+                          "replace",
+                          "insert_after",
+                          "delete"
+                        ]
+                      },
+                      "effective_from": {
+                        "type": "string",
+                        "format": "date"
+                      }
+                    },
+                    "required": [
+                      "target",
+                      "op",
+                      "effective_from"
+                    ],
+                    "additionalProperties": false
+                  }
                 }
               },
               "required": [

@@ -64,6 +64,21 @@ export const RegulationHistoryEntrySchema = z.object({
 });
 export type RegulationHistoryEntry = z.infer<typeof RegulationHistoryEntrySchema>;
 
+// Areas -> topics, authored in the factory and carried in the corpus file. The
+// server reads nothing from it yet (the 1.0 playbook tools will), so it is
+// validated loosely and passed through: an unknown key on an area or a topic
+// is kept, not stripped.
+export const CorpusTopicSchema = z
+  .object({ id: z.string(), title: z.string(), scope: z.string().optional() })
+  .passthrough();
+export const CorpusTopicsSchema = z
+  .object({
+    areas: z.array(
+      z.object({ id: z.string(), title: z.string(), topics: z.array(CorpusTopicSchema) }).passthrough(),
+    ),
+  })
+  .passthrough();
+
 export const CorpusFileSchema = z.object({
   regulation: z.array(RegulationSchema).default([]),
   tests: z.array(TestSchema).default([]),
@@ -78,6 +93,10 @@ export const CorpusFileSchema = z.object({
   // demo follows the same convention). loadCorpusFile defaults this to [].
   regulation_history: z.array(RegulationHistoryEntrySchema).default([]),
   corpus_info: CorpusInfoSchema.optional(),
+  // Abbreviation -> the phrases the texts use for it ("rds": ["reference data
+  // set"]). Data, not code, so this public server stays corpus-agnostic.
+  glossary: z.record(z.array(z.string())).optional(),
+  topics: CorpusTopicsSchema.optional(),
 });
 
 // `regulation_history` stays optional on the exported TYPE (parse always
