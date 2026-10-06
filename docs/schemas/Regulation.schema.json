@@ -169,6 +169,10 @@
               "effective_from": {
                 "type": "string",
                 "format": "date"
+              },
+              "point": {
+                "type": "string",
+                "minLength": 1
               }
             },
             "required": [

@@ -106,6 +106,10 @@ export const AmendmentSchema = z.object({
   target: regulationIdSchema,
   op: AmendmentOpSchema,
   effective_from: z.string().date(),
+  // The point of the target the amendment is confined to, as the amending text names it: "(d)" for "Point (d) in
+  // paragraph 23 is replaced". Absent means the whole provision. Without it a deleted point read as a deleted
+  // provision, which says more than the amendment does.
+  point: z.string().min(1).optional(),
 });
 export type Amendment = z.infer<typeof AmendmentSchema>;
 

@@ -48,6 +48,8 @@ export interface AmendmentEntry {
   target: RegulationId;
   op: AmendmentOp;
   effective_from: string;
+  /** The point of the target the change is confined to, as the amending text names it; absent = the whole provision. */
+  point?: string;
   /** The provision of the amending instrument that makes the change. */
   by: Regulation;
 }
@@ -82,7 +84,7 @@ export function amendmentIndex(regulations: Regulation[]): AmendmentIndex {
       const target = byId.get(a.target);
       if (target === undefined) continue; // dangling: the linter's business, nothing to say here
       const list = byTarget.get(a.target) ?? [];
-      list.push({ target: a.target, op: a.op, effective_from: a.effective_from, by });
+      list.push({ target: a.target, op: a.op, effective_from: a.effective_from, ...(a.point === undefined ? {} : { point: a.point }), by });
       byTarget.set(a.target, list);
       targetedDocuments.add(docKey(target));
     }
@@ -165,11 +167,13 @@ function sentenceForAmendment(a: OpenAmendment, sources: Source[], today: string
   const upcoming = a.state === "upcoming";
   const when = upcoming ? `from ${a.effective_from}${whenPhrase(today, a.effective_from)}` : `since ${a.effective_from}`;
   const behind = upcoming ? "the text below is the version before it" : "the text below may no longer be the text in force";
+  // An amendment confined to one point says so: "deletes point (a) of this provision" is not "deletes this provision".
+  const what = a.point === undefined ? "this provision" : `point ${a.point} of this provision`;
   switch (a.op) {
     case "replace":
-      return `${who} ${upcoming ? "replaces" : "has replaced"} this provision ${when}; ${behind}. New wording: ${wording(a.by)}.`;
+      return `${who} ${upcoming ? "replaces" : "has replaced"} ${what} ${when}; ${behind}. New wording: ${wording(a.by)}.`;
     case "delete":
-      return `${who} ${upcoming ? "deletes" : "has deleted"} this provision ${when}; ${behind}. It is deleted, with no new wording.`;
+      return `${who} ${upcoming ? "deletes" : "has deleted"} ${what} ${when}; ${behind}. ${a.point === undefined ? "It is" : "That point is"} deleted, with no new wording.`;
     case "insert_after":
       return `${who} ${upcoming ? "inserts" : "has inserted"} a new provision after this one ${when}${upcoming ? "" : "; it is not in the text of this library"}. New provision: ${wording(a.by)}.`;
   }

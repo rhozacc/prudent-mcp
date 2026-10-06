@@ -130,6 +130,32 @@ describe("provisionPendingNote", () => {
     );
   });
 
+  it("an amendment confined to a point says so: a deleted point is not a deleted provision", () => {
+    const pointed = [
+      ...base,
+      amender(1, "Point (d) in paragraph 1 is replaced by the following: (d) the new point.", [{ target: P(1), op: "replace", effective_from: iso(30), point: "(d)" }]),
+      amender(2, "Point (a) in paragraph 2 is deleted.", [{ target: P(2), op: "delete", effective_from: iso(-5), point: "(a)" }]),
+    ];
+    expect(note(pointed, sources, P(1))).toBe(
+      `Pending change to this provision: Amending Guidelines (Paragraph a-1) replaces point (d) of this provision from ${iso(30)} (in 30 days); ` +
+        "the text below is the version before it. New wording: “Point (d) in paragraph 1 is replaced by the following: (d) the new point.”.",
+    );
+    expect(note(pointed, sources, P(2))).toBe(
+      `Text may be out of date: Amending Guidelines (Paragraph a-2) has deleted point (a) of this provision since ${iso(-5)}; ` +
+        "the text below may no longer be the text in force. That point is deleted, with no new wording.",
+    );
+    // and it never says the whole provision is deleted
+    expect(note(pointed, sources, P(2))).not.toContain("deleted this provision");
+    expect(note(pointed, sources, P(2))).not.toContain("It is deleted");
+  });
+
+  it("the index carries the point, and an amendment with none still reads as the whole provision", () => {
+    const withPoint = [...base, amender(1, "x", [{ target: P(1), op: "delete", effective_from: iso(1), point: "(a)" }, { target: P(2), op: "delete", effective_from: iso(1) }])];
+    const idx = amendmentIndex(withPoint);
+    expect(idx.byTarget.get(P(1))![0]!.point).toBe("(a)");
+    expect("point" in idx.byTarget.get(P(2))![0]!).toBe(false);
+  });
+
   it("says an insertion adds a provision after this one, quoting it", () => {
     expect(note(regs, sources, P(3))).toBe(
       `Pending change to this provision: Amending Guidelines (Paragraph a-3) inserts a new provision after this one from ${iso(30)} (in 30 days). ` +

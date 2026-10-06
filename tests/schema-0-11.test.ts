@@ -49,6 +49,23 @@ describe("0.11 fields round-trip", () => {
     ]);
   });
 
+  it("an amendment may be confined to a point, and an empty point is not one", () => {
+    const parsed = RegulationSchema.parse(
+      rec("regulation://gl-b/paragraph-9", {
+        document_id: "gl-b",
+        amends: [{ target: "regulation://gl-a/paragraph-1", op: "delete", effective_from: "2026-10-19", point: "(a)" }],
+      }),
+    );
+    expect(parsed.amends?.[0]?.point).toBe("(a)");
+    expect(() =>
+      RegulationSchema.parse(
+        rec("regulation://gl-b/paragraph-9", {
+          amends: [{ target: "regulation://gl-a/paragraph-1", op: "delete", effective_from: "2026-10-19", point: "" }],
+        }),
+      ),
+    ).toThrow();
+  });
+
   it("rejects an unknown role, an unknown op and a non-ISO date", () => {
     expect(() => RegulationSchema.parse(rec("regulation://gl-a/paragraph-1", { role: "preamble" }))).toThrow();
     expect(() =>
