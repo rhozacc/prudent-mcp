@@ -53,6 +53,13 @@ import { staleSourceIds } from "../src/validate.ts";
 // Seed data — one cohesive slice (PD calibration + default definition aside)
 // ============================================================================
 
+// Source registry seeds. Unlike the frozen dates elsewhere in this file,
+// `verified` is computed relative to today so the demo permanently shows
+// exactly one stale source (the eba/gl-2017-16 seed) instead of every seed
+// rotting past the 30-day line as time passes.
+const daysAgo = (n: number): string =>
+  new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+
 const REGULATIONS: Record<RegulationId, Regulation> = {
   "regulation://crr/180": {
     id: "regulation://crr/180",
@@ -154,6 +161,24 @@ const REGULATIONS: Record<RegulationId, Regulation> = {
       "more than 90 days on any material credit obligation, with materiality assessed " +
       "against thresholds set in the relevant Commission Delegated Regulation.",
     commentary: [],
+    children: [],
+  },
+  // A provision of the instrument that amends the CRR record above, held in the demo so
+  // that the amendment is pinned to the provision it changes and not to the document:
+  // 178(1)(a) is noted, and 178(1)(b) and Article 180 (same document) are not (eval I15).
+  // Its wording is invented for the demo.
+  "regulation://crr-amending-demo/art-1": {
+    id: "regulation://crr-amending-demo/art-1",
+    framework: "crr",
+    document_id: "crr-amending-demo",
+    document_version: daysAgo(10),
+    citation: "Article 1",
+    text:
+      "Article 178(1)(a) is replaced by the following: a default shall be considered to have " +
+      "occurred when the institution considers that the obligor is unlikely to pay its credit " +
+      "obligations in full, whether or not security is realised.",
+    commentary: [],
+    amends: [{ target: "regulation://crr/178/1/a", op: "replace", effective_from: daysAgo(-60) }],
     children: [],
   },
 };
@@ -375,12 +400,6 @@ const REVIEW_AREAS: ReviewArea[] = [
   { id: "discriminatory-power", name: "Discriminatory Power", children: [] },
 ];
 
-// Source registry seeds. Unlike the frozen dates elsewhere in this file,
-// `verified` is computed relative to today so the demo permanently shows
-// exactly one stale source (the eba/gl-2017-16 seed) instead of every seed
-// rotting past the 30-day line as time passes.
-const daysAgo = (n: number): string =>
-  new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
 
 const SOURCES: Record<SourceId, Source> = {
   "source://crr/575-2013": {
@@ -408,10 +427,26 @@ const SOURCES: Record<SourceId, Source> = {
         effective_from: daysAgo(-60),
         ingested: false,
         affects: ["Article 178"],
+        // The same fact as ids, which is what pins the note to the provision it concerns.
+        affects_ids: ["regulation://crr/178/1/a"],
       },
     ],
     milestones: [],
     url: "https://eur-lex.europa.eu/eli/reg/2013/575/oj",
+  },
+  "source://crr/amending-demo": {
+    id: "source://crr/amending-demo",
+    title: "Amending Regulation (demo)",
+    framework: "crr",
+    document_id: "crr-amending-demo",
+    doc_type: "regulation",
+    status: "current",
+    published: daysAgo(30),
+    effective_from: daysAgo(-60),
+    coverage: "full",
+    pending_changes: [],
+    verified: daysAgo(3),
+    milestones: [],
   },
   "source://eba/gl-2017-16": {
     id: "source://eba/gl-2017-16",

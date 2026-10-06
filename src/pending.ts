@@ -136,7 +136,7 @@ const daysBetween = (today: string, date: string): number =>
   Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
 
 /** "in 17 days", "tomorrow"; nothing for a date far enough ahead that a count says little. */
-function whenPhrase(today: string, date: string): string {
+export function whenPhrase(today: string, date: string): string {
   const n = daysBetween(today, date);
   if (n === 1) return " (tomorrow)";
   if (n > 1 && n <= 120) return ` (in ${n} days)`;
@@ -152,7 +152,7 @@ const affectsOf = (c: PendingChange): string =>
     : ` Said to concern ${c.affects.slice(0, MAX_AFFECTS).join("; ")}${c.affects.length > MAX_AFFECTS ? "; ..." : ""}.`;
 
 /** What one open change says about the text being served. */
-function sentenceFor(o: OpenPendingChange, today: string): string {
+export function sentenceFor(o: OpenPendingChange, today: string): string {
   const { change: c, state } = o;
   const announced = c.status === "announced";
   const label = labelOf(c);

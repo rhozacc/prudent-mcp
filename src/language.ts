@@ -53,12 +53,23 @@ const BANNED = new RegExp(`\\b(?:${BANNED_TERMS.map((t) => t.replace(/ /g, "\\s+
 const IDENTIFIER =
   /`[^`]*`|\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+(?:\.[a-z_][a-z0-9_]*)*\b|\b[a-z][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)+\b/g;
 
-/** Banned terms in `text`, as written, in order. Identifiers are not prose and are skipped. */
+/**
+ * A quotation is somebody else's words: the text of a provision a note quotes as
+ * the new wording of an amendment, or the citation a caller typed and a decline
+ * repeats back. The server did not write it, so the rule does not read it. The
+ * delimiters are straight and curly double quotes; an apostrophe is not one.
+ */
+const QUOTATION = /"[^"\n]*"|“[^”\n]*”/g;
+
+/** `text` without its quotations. */
+export const withoutQuotations = (text: string): string => text.replace(QUOTATION, " ");
+
+/** Banned terms in `text`, as written, in order. Identifiers and quotations are not the server's prose and are skipped. */
 export function bannedTermsIn(text: string): string[] {
-  return [...text.replace(IDENTIFIER, " ").matchAll(BANNED)].map((m) => m[0]);
+  return [...withoutQuotations(text).replace(IDENTIFIER, " ").matchAll(BANNED)].map((m) => m[0]);
 }
 
-/** Identifiers in `text`: what an answer-bearing string must not contain at all. */
+/** Identifiers in `text`: what an answer-bearing string must not contain at all. Quotations are skipped. */
 export function identifiersIn(text: string): string[] {
-  return [...text.matchAll(IDENTIFIER)].map((m) => m[0]);
+  return [...withoutQuotations(text).matchAll(IDENTIFIER)].map((m) => m[0]);
 }

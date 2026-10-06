@@ -2,6 +2,15 @@
 
 ## Unreleased (0.11)
 
+**Amendment notes 0.11 (behaviour change).** A pending change is told only on the provisions it names. Before, `pending_changes_note` rode on every record of the document, so an amendment to a handful of paragraphs said "the text may be out of date" on all the others, and a model repeated it about paragraphs the amendment never touched.
+
+- **`src/amendments.ts`**, the one definition. A provision is named by an `amends` entry on a provision of the amending instrument (`{ target, op, effective_from }`, added in this release) or by `affects_ids` on a pending change of its own document. The note then names the amending instrument (its source's title) and provision, what it does (replaces, deletes, inserts a provision after this one), from when, and quotes the amending provision's text as the new wording (cut at 480 characters; a deletion says there is none). The server never parses that text.
+- **A sibling that nothing names carries no note**, whatever its document has pending, and so does a named provision under an `as_of` before the amendment applies (each amendment by its own `effective_from`) or once the document's changes are all ingested.
+- **A document whose open changes name no provision is unmapped:** its provisions carry no note and the change is said once, at document level, in `get_source`, `get_corpus_info` and the search page's notice. This is the state of every document today until its amendments are mapped. A provision of an unmapped document reads as current; that loss is deliberate, because the alternative is a note nobody reads on provisions it does not concern.
+- **The search page's notice** names, by citation (three, the rest counted), the named provisions on the page, and says the document-level sentence only for unmapped documents on it.
+- **Eval I15 is rewritten to this rule** (fatal): a named provision carries the note on every tool and through a citation, a sibling carries none, a named provision under an earlier `as_of` carries none, an unmapped document carries none on its provisions but is said in the search notice. The mapping is read from `get_source` (`affects_ids`) and, where the session has the corpus file, from `amends`. The demo gains an amending provision (and its source) so all of it binds in CI.
+- **Not done here:** `expand_regulation` and `get_regulation_tree` note the root provision only; descendants that are named are not counted in the root's note.
+
 **Schema 0.11.** Additive only: every new field is optional, nothing is defaulted, published output schemas stay open, and a corpus file written for 0.10 loads unchanged and serves exactly what it did. These are the fields the 1.0 plan (`docs/design/1.0.md`) builds on; nothing reads them yet except the linter.
 
 - **`Regulation.heading_path`** — the document's own headings above a provision, outermost first, verbatim.

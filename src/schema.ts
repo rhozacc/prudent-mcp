@@ -101,6 +101,7 @@ export type ProvisionRole = z.infer<typeof ProvisionRoleSchema>;
 // is what lets a note say "amended from <date>" on the provisions the
 // amendment touches and stay silent on the rest of the document.
 export const AmendmentOpSchema = z.enum(["replace", "insert_after", "delete"]);
+export type AmendmentOp = z.infer<typeof AmendmentOpSchema>;
 export const AmendmentSchema = z.object({
   target: regulationIdSchema,
   op: AmendmentOpSchema,

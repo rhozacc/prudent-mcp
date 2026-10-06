@@ -80,7 +80,7 @@ The record is still the best text the corpus has, so it is served and not turned
 ```ts
 get_regulation("regulation://crr/178/1/a")   // the registry records an amendment applying later
 → {
-    pending_changes_note: "Pending change to this document: Amending Regulation (demo) applies from 2026-12-02 (in 60 days) and is not ingested here, so the text served is the version before it. Registry: concerns Article 178. See get_source for the registry entry.",
+    pending_changes_note: "Pending change to this provision: Amending Regulation (demo) (Article 1) replaces this provision from 2026-12-02 (in 60 days); the text below is the version before it. New wording: “Article 178(1)(a) is replaced by the following: …”.",
     id: "regulation://crr/178/1/a", document_version: "2024-01-09", text: "...", ...
   }
 ```
@@ -89,15 +89,17 @@ What it says depends on where the change stands today, computed from the registr
 
 | State | The note says |
 |---|---|
-| `upcoming` (not ingested, applies after today) | "Pending change to this document: … applies from D (in N days) and is not ingested here, so the text served is the version before it." |
-| `in_force_not_ingested` (not ingested, applies today or earlier) | "Text may be out of date: … has applied since D and is not ingested here, so the text served may no longer be the text in force." |
-| `undated` (not ingested, no application date) | "… is adopted/announced with no application date recorded and is not ingested here." |
+| `upcoming` (not ingested, applies after today) | "Pending change to this provision: … applies from D (in N days); the text below is the version before it." |
+| `in_force_not_ingested` (not ingested, applies today or earlier) | "Text may be out of date: … has applied since D; the text below may no longer be the text in force." |
+| `undated` (not ingested, no application date) | "… is adopted/announced with no application date recorded; the text below does not reflect it." |
 
-An `announced` change reads "is expected to apply" (or "was expected to apply" once its date has passed), because nothing says it did. The note names at most three changes, most urgent first (already in force, then the soonest, then undated) and counts the rest ("(2 more in get_source.)"). It quotes the registry's `affects` hints as "Registry: concerns …" and says **nothing about what the change provides**: the corpus does not hold it, and the note is a statement about the corpus, not about the law. It always ends by pointing at `get_source`, which has the entry.
+For a provision an amending provision aims at (`amends`), the note names the instrument by its source's title and the amending provision, says what it does (replaces, deletes, inserts a provision after this one), when, and quotes its text as the new wording; a deletion says there is none.
 
-- **Document-level.** The join is `framework` + `document_id`, so the note rides on every record of the document; `affects` is a hint for the reader and is never used to decide which records get it.
-- **Absent, never empty.** No note when no change is open, when the registry declared nothing, when the only declaring source is not current, and under an `as_of` earlier than every open change's `effective_from` (the text of a date before the change is not behind it; `as_of_note` still says what it says). An undated change has no such bound and stays. "No pending change recorded" is not "none is coming", so the server never offers the absence as reassurance.
-- **Tools.** `get_regulation`, `expand_regulation` (the record asked for), `get_regulation_tree` (once, on the root, for the root's document) and a `resolve_citation` match carry it. `search_regulation` rows do not carry it; the page's `notice` gains one sentence naming the documents on the page that have a change not ingested. `get_corpus_info.pending_changes` lists every open change, `list_sources` rows carry `open_pending_changes`, and `get_source` serves each change with its computed `state`.
+An `announced` change reads "is expected to apply" (or "was expected to apply" once its date has passed), because nothing says it did. The note names at most three changes, most urgent first (already in force, then the soonest, then undated) and counts the rest ("(2 more.)"). Where a change has no amending provision held, it says **nothing about what the change provides**: this library does not hold it, and the note is a statement about what is held, not about the law; the new wording is quoted only where the amending provision is held.
+
+- **Provision-level.** A provision is told only when something names it: an `amends` entry on a provision of the amending instrument, or the change's `affects_ids`. A sibling that nothing names carries no note, whatever its document has pending. A document whose open changes name no provision is said at document level only (`get_source`, `get_corpus_info`, the search page's notice). `affects` (free text) is a hint for the reader and decides nothing.
+- **Absent, never empty.** No note when no change is open, when the registry declared nothing, when the only declaring source is not current, and under an `as_of` earlier than the date of every amendment or change that names the provision (the text of a date before the change is not behind it; `as_of_note` still says what it says). An undated change has no such bound and stays. "No pending change recorded" is not "none is coming", so the server never offers the absence as reassurance.
+- **Tools.** `get_regulation`, `expand_regulation` (the provision asked for), `get_regulation_tree` (once, on the root provision) and a `resolve_citation` match carry it, when the provision is named. `search_regulation` rows do not carry it; the page's `notice` gains a sentence for each unmapped document on the page that has a change not ingested, and one naming, by citation, the named provisions on it. `get_corpus_info.pending_changes` lists every open change, `list_sources` rows carry `open_pending_changes`, and `get_source` serves each change with its computed `state`.
 
 It is declared optional in the tool's published output schema, which stays open; the canonical `RegulationSchema` is unchanged.
 

@@ -2176,23 +2176,30 @@ export async function placeholdersAreMarked(s: Session): Promise<InvariantResult
  * belief at stake is "the text I was handed is the law" - and a text that has been
  * overtaken reads exactly like one that has not.
  *
- * So for every CURRENT source whose `pending_changes` has an entry the corpus has
- * not ingested (read from the server's own `get_source`), a record of that
- * document must come back carrying a `pending_changes_note` on every tool that
- * serves a regulation by id (and on a citation that resolves to it), the note must
- * name each change and say what its state means (the date when it is ahead; that
- * the text may be out of date when it has come into force), `get_corpus_info`
- * must list it, a search page that returns the document must say so in its
- * notice, and a record asked for as of a date BEFORE the change applied must NOT
- * carry it. The converse is checked too: a record of a document with nothing open
- * must carry no note, because a warning that is always present is not read.
+ * What a caller must be told, and where, depends on whether anything says WHICH
+ * provisions the change touches (`affects_ids` on the change, served by
+ * `get_source`; `amends` on the amending instrument's provisions, read from the
+ * corpus file when the session has one):
+ *
+ * - A provision that is named must carry a `pending_changes_note` on every tool
+ *   that serves a regulation by id (and on a citation that resolves to it): the
+ *   date when it is ahead, that the text may be out of date when it has come into
+ *   force. A sibling of the same document that nothing names must carry none, and
+ *   so must the named one under an `as_of` before it applies — a warning that is
+ *   always present is not read, and a note on a provision the change does not
+ *   touch says something false about it.
+ * - A document whose open changes name no provision is said at document level
+ *   only: `get_corpus_info` lists the change, a search page that returns the
+ *   document says so in its notice, and no provision of it carries a note.
+ * - A search page that returns a named provision says so in its notice.
+ * - The converse for a document with nothing open: no note.
  *
  * The served `state` of each change is checked against the date arithmetic the
  * registry's own fields imply, so a state cannot be wrong in the one direction
  * (a change in force reading as "upcoming") that makes the note misleading.
  *
  * Applicable only when some current source has a change that is not ingested and
- * a record of its document can be reached through search.
+ * a provision of its document can be reached.
  */
 export async function pendingChangesAreNeverSilent(s: Session): Promise<InvariantResult> {
   const id = "I15";
@@ -2255,105 +2262,179 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
     }
   }
 
-  // One sampled record per document, found the way a caller would: through search.
+  // Rows of a document, found the way a caller would: through search.
   const queries = ["default", "estimation", "risk", "data", "model", "validation", "institution", "article"];
-  const sample = async (documentId: string): Promise<{ row: Row; notice: string | undefined } | null> => {
-    for (const q of queries) {
+  const rowsOfDocument = async (documentId: string, extra: string[] = []): Promise<Array<{ row: Row; notice: string | undefined }>> => {
+    const out: Array<{ row: Row; notice: string | undefined }> = [];
+    for (const q of [...extra, ...queries]) {
       const t = await s.call("search_regulation", { query: q, limit: 100 });
-      const row = rowsOf(t.json).find((r) => r.document_id === documentId);
-      if (row !== undefined) {
-        const notice = asRecord(t.json)?.["notice"];
-        return { row, notice: typeof notice === "string" ? notice : undefined };
+      const notice = asRecord(t.json)?.["notice"];
+      for (const row of rowsOf(t.json).filter((r) => r.document_id === documentId)) {
+        out.push({ row, notice: typeof notice === "string" ? notice : undefined });
       }
+      if (out.length >= 12) break;
     }
-    return null;
+    return out;
   };
+  const sample = async (documentId: string): Promise<{ row: Row; notice: string | undefined } | null> =>
+    (await rowsOfDocument(documentId))[0] ?? null;
+
+  // What the corpus file says each amending provision targets: structural, and not
+  // something a reply states in aggregate. Without a file, only `affects_ids` is known.
+  type FileRegulation = { id: string; framework: string; document_id: string; amends?: Array<{ target: string; effective_from: string }> };
+  const fileRegulations: FileRegulation[] = s.corpusFile === undefined ? [] : (loadCorpusFile(s.corpusFile).regulation as FileRegulation[]);
+  const fileById = new Map(fileRegulations.map((r) => [r.id, r]));
 
   let bound = 0;
   const day = (iso: string, delta: number): string => new Date(Date.parse(`${iso}T00:00:00Z`) + delta * 86_400_000).toISOString().slice(0, 10);
 
   for (const src of withOpen) {
     if (src.document_id === undefined) continue;
-    const found = await sample(src.document_id);
-    if (found === null) continue;
     const open = openOf(src);
-    const rid = found.row.id as string;
-    bound++;
 
-    // The meaning, not the sentence: a change exists, and the text shown is the version before it.
-    if (found.notice === undefined || !/\bchange\b/i.test(found.notice) || !/version before it/i.test(found.notice)) {
-      findings.push({
-        id: "I15/search",
-        severity: "fatal",
-        summary: "A search page returned a record of a document with a change the corpus has not ingested and its notice does not say so.",
-        evidence: [`document ${src.document_id}`, `notice: ${found.notice?.slice(0, 200) ?? "(none)"}`],
-      });
+    // Which provisions of this document something names, and the dates it gives them.
+    const named = new Map<string, Array<string | undefined>>();
+    const name = (id: string, date: string | undefined): void => {
+      named.set(id, [...(named.get(id) ?? []), date]);
+    };
+    for (const c of open) for (const nid of (c as Change & { affects_ids?: string[] }).affects_ids ?? []) name(nid, c.effective_from);
+    for (const by of fileRegulations) {
+      for (const a of by.amends ?? []) {
+        const t = fileById.get(a.target);
+        if (t !== undefined && t.document_id === src.document_id && t.framework === src.framework) name(a.target, a.effective_from);
+      }
     }
 
-    const mustSay = (note: string): string[] => {
+    const mustSay = (note: string, dates: Array<string | undefined>): string[] => {
       const problems: string[] = [];
-      for (const c of open.slice(0, 3)) {
-        if (typeof c.title === "string" && !note.includes(c.title)) problems.push(`does not name "${c.title}"`);
-        const st = expectedState(c);
-        if (st === "upcoming" && c.effective_from !== undefined && !note.includes(c.effective_from)) problems.push(`does not give the date ${c.effective_from}`);
-        if (st === "in_force_not_ingested" && !/out of date|no longer/i.test(note)) problems.push("does not say the text may be out of date");
+      for (const d of dates) {
+        if (d === undefined) continue;
+        if (d > today && !note.includes(d)) problems.push(`does not give the date ${d}`);
+        if (d <= today && !/out of date|no longer/i.test(note)) problems.push("does not say the text may be out of date");
       }
-      return problems;
+      return [...new Set(problems)];
     };
+    // The meaning, not the sentence: a change exists, and the text shown is the version before it.
+    const saysChange = (notice: string | undefined): boolean =>
+      notice !== undefined && /\bchange\b/i.test(notice) && /version before it/i.test(notice);
+
+    if (named.size === 0) {
+      // Document-level only: said where a caller asks about sources and in the search notice,
+      // and NOT on the document's provisions.
+      const found = await sample(src.document_id);
+      if (found === null) continue;
+      bound++;
+      if (!saysChange(found.notice)) {
+        findings.push({
+          id: "I15/search",
+          severity: "fatal",
+          summary: "A search page returned a provision of a document with a change its text does not yet include and its notice does not say so.",
+          evidence: [`document ${src.document_id}`, `notice: ${found.notice?.slice(0, 200) ?? "(none)"}`],
+        });
+      }
+      const r = await s.call("get_regulation", { id: found.row.id as string });
+      if (!r.isError && typeof asRecord(r.json)?.["pending_changes_note"] === "string") {
+        findings.push({
+          id: "I15/unmapped-note",
+          severity: "fatal",
+          summary: "get_regulation carried a pending_changes_note on a provision of a document whose open changes name no provision: a warning on every provision of a document is not read.",
+          evidence: [`id ${String(found.row.id)}`, `document ${src.document_id}`],
+        });
+      }
+      continue;
+    }
+
+    // A named provision: found by id, so it need not be among the first a search returns.
+    let target: { id: string; citation?: string } | null = null;
+    for (const nid of named.keys()) {
+      const t = await s.call("get_regulation", { id: nid });
+      const j = asRecord(t.json);
+      if (!t.isError && j !== null) {
+        target = { id: nid, ...(typeof j["citation"] === "string" ? { citation: j["citation"] } : {}) };
+        break;
+      }
+    }
+    if (target === null) continue;
+    bound++;
+    const dates = named.get(target.id) ?? [];
 
     for (const tool of ["get_regulation", "expand_regulation", "get_regulation_tree"] as const) {
-      const r = await s.call(tool, { id: rid });
+      const r = await s.call(tool, { id: target.id });
       const note = asRecord(r.json)?.["pending_changes_note"];
       if (r.isError || typeof note !== "string") {
         findings.push({
           id: `I15/${tool}`,
           severity: "fatal",
-          summary: `${tool} served a record of a document with a change the corpus has not ingested and said nothing about it.`,
-          evidence: [`id ${rid}`, `document ${src.document_id}`, `isError ${String(r.isError)}`],
+          summary: `${tool} served a provision a pending change names and said nothing about it.`,
+          evidence: [`id ${target.id}`, `document ${src.document_id}`, `isError ${String(r.isError)}`],
         });
         continue;
       }
-      const problems = mustSay(note);
+      const problems = mustSay(note, dates);
       if (problems.length > 0) {
         findings.push({
           id: `I15/${tool}/note`,
           severity: "fatal",
           summary: `${tool}'s pending_changes_note does not say enough: it ${problems.join("; ")}.`,
-          evidence: [`id ${rid}`, `note: ${note.slice(0, 240)}`],
+          evidence: [`id ${target.id}`, `note: ${note.slice(0, 240)}`],
         });
       }
     }
 
-    // The same record reached through a citation.
-    if (typeof found.row.citation === "string") {
-      const cite = await s.call("resolve_citation", { text: found.row.citation });
+    // The same provision reached through a citation.
+    if (target.citation !== undefined) {
+      const cite = await s.call("resolve_citation", { text: target.citation });
       const body = asRecord(cite.json);
       const match = asRecord(body?.["match"]);
-      if (match !== null && match["id"] === rid && typeof body?.["pending_changes_note"] !== "string") {
+      if (match !== null && match["id"] === target.id && typeof body?.["pending_changes_note"] !== "string") {
         findings.push({
           id: "I15/resolve_citation",
           severity: "fatal",
-          summary: "resolve_citation matched a record of a document with a change the corpus has not ingested and said nothing about it.",
-          evidence: [`id ${rid}`, `citation ${found.row.citation}`],
+          summary: "resolve_citation matched a provision a pending change names and said nothing about it.",
+          evidence: [`id ${target.id}`, `citation ${target.citation}`],
+        });
+      }
+      // And a search page that returns it says so.
+      const page = await s.call("search_regulation", { query: target.citation, limit: 100 });
+      const rows = rowsOf(page.json);
+      const pageNotice = asRecord(page.json)?.["notice"];
+      if (rows.some((r) => r.id === target.id) && !saysChange(typeof pageNotice === "string" ? pageNotice : undefined)) {
+        findings.push({
+          id: "I15/search",
+          severity: "fatal",
+          summary: "A search page returned a provision a pending change names and its notice does not say so.",
+          evidence: [`id ${target.id}`, `notice: ${typeof pageNotice === "string" ? pageNotice.slice(0, 200) : "(none)"}`],
         });
       }
     }
 
-    // As of a date before every open change applied: the text is not behind them.
-    const dates = open.map((c) => c.effective_from);
-    if (dates.every((d): d is string => typeof d === "string")) {
-      const earliest = [...(dates as string[])].sort()[0];
-      if (earliest !== undefined) {
-        const asOf = day(earliest, -1);
-        const before = await s.call("get_regulation", { id: rid, as_of: asOf });
-        if (!before.isError && typeof asRecord(before.json)?.["pending_changes_note"] === "string") {
-          findings.push({
-            id: "I15/as_of",
-            severity: "fatal",
-            summary: "get_regulation under an as_of earlier than every open change carried a pending_changes_note: the text served for that date is not behind a change that had not applied.",
-            evidence: [`id ${rid}`, `as_of ${asOf}`, `earliest change ${earliest}`],
-          });
-        }
+    // A sibling of the same document that nothing names carries no note.
+    const sibling = (await rowsOfDocument(src.document_id)).find((x) => typeof x.row.id === "string" && !named.has(x.row.id));
+    if (sibling !== undefined) {
+      const r = await s.call("get_regulation", { id: sibling.row.id as string });
+      if (!r.isError && typeof asRecord(r.json)?.["pending_changes_note"] === "string") {
+        findings.push({
+          id: "I15/over-flag",
+          severity: "fatal",
+          summary: "get_regulation carried a pending_changes_note on a provision no pending change names, because its document has one: the warning is on provisions it does not concern.",
+          evidence: [`id ${String(sibling.row.id)}`, `document ${src.document_id}`, `named: ${target.id}`],
+        });
+      }
+    }
+
+    // As of a date before every date given for the provision: the text is not behind it.
+    const given = dates.filter((d): d is string => typeof d === "string");
+    if (given.length > 0 && given.length === dates.length) {
+      const earliest = [...given].sort()[0] as string;
+      const asOf = day(earliest, -1);
+      const before = await s.call("get_regulation", { id: target.id, as_of: asOf });
+      if (!before.isError && typeof asRecord(before.json)?.["pending_changes_note"] === "string") {
+        findings.push({
+          id: "I15/as_of",
+          severity: "fatal",
+          summary: "get_regulation under an as_of earlier than every change that names the provision carried a pending_changes_note: the text served for that date is not behind a change that had not applied.",
+          evidence: [`id ${target.id}`, `as_of ${asOf}`, `earliest change ${earliest}`],
+        });
       }
     }
   }
