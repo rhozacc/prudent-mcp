@@ -147,10 +147,15 @@ export function isTargeted(
 /** How much of the new wording one note quotes; the amending provision has the rest. */
 export const MAX_WORDING_CHARS = 480;
 
-/** The amending instrument, as a reader knows it: its source's title, else its document id. */
+/**
+ * The amending instrument, as a reader knows it: the name its citation style gives it ("EBA/GL/2026/05"), else its
+ * source's title, else its document id. A practitioner writes the first; the title of an amending guideline is a
+ * sentence about the guideline it amends.
+ */
 function instrumentName(by: Regulation, sources: Source[]): string {
   const matching = sources.filter((s) => s.framework === by.framework && s.document_id === by.document_id);
-  return (matching.find((s) => s.status === "current") ?? matching[0])?.title ?? by.document_id;
+  const source = matching.find((s) => s.status === "current") ?? matching[0];
+  return source?.citation_style?.short_name ?? source?.title ?? by.document_id;
 }
 
 /** The amending provision's own text, whitespace collapsed and cut at a word. Quoted as a quotation. */

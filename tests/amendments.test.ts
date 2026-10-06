@@ -199,9 +199,12 @@ describe("provisionPendingNote", () => {
     expect(note(regs, sources, P(2), iso(-5))).toContain("has deleted");
   });
 
-  it("names the amending instrument by its source's title, else by its document id", () => {
+  it("names the amending instrument by its short name, else its source's title, else its document id", () => {
     expect(note(regs, sources, P(1))).toContain("Amending Guidelines (");
     expect(note(regs, [sources[0]!], P(1))).toContain("amender-doc (Paragraph a-1)");
+    const named = { ...amenderSource, citation_style: { kind: "eba-gl" as const, short_name: "EBA/GL/2026/05" } };
+    expect(note(regs, [sources[0]!, named], P(1))).toContain("EBA/GL/2026/05 (Paragraph a-1) replaces");
+    expect(note(regs, [sources[0]!, named], P(1))).not.toContain("Amending Guidelines");
   });
 
   it("quotes the new wording as a quotation, cut at a word and marked, when it is long", () => {
