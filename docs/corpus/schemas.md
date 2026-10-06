@@ -185,6 +185,10 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
               "effective_from": {
                 "type": "string",
                 "format": "date"
+              },
+              "point": {
+                "type": "string",
+                "minLength": 1
               }
             },
             "required": [
@@ -1193,6 +1197,10 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
                       "effective_from": {
                         "type": "string",
                         "format": "date"
+                      },
+                      "point": {
+                        "type": "string",
+                        "minLength": 1
                       }
                     },
                     "required": [

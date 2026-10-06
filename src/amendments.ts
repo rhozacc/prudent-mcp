@@ -48,6 +48,8 @@ export interface AmendmentEntry {
   target: RegulationId;
   op: AmendmentOp;
   effective_from: string;
+  /** The point of the target the change is confined to, as the amending text names it; absent = the whole provision. */
+  point?: string;
   /** The provision of the amending instrument that makes the change. */
   by: Regulation;
 }
@@ -82,7 +84,7 @@ export function amendmentIndex(regulations: Regulation[]): AmendmentIndex {
       const target = byId.get(a.target);
       if (target === undefined) continue; // dangling: the linter's business, nothing to say here
       const list = byTarget.get(a.target) ?? [];
-      list.push({ target: a.target, op: a.op, effective_from: a.effective_from, by });
+      list.push({ target: a.target, op: a.op, effective_from: a.effective_from, ...(a.point === undefined ? {} : { point: a.point }), by });
       byTarget.set(a.target, list);
       targetedDocuments.add(docKey(target));
     }
@@ -145,10 +147,15 @@ export function isTargeted(
 /** How much of the new wording one note quotes; the amending provision has the rest. */
 export const MAX_WORDING_CHARS = 480;
 
-/** The amending instrument, as a reader knows it: its source's title, else its document id. */
+/**
+ * The amending instrument, as a reader knows it: the name its citation style gives it ("EBA/GL/2026/05"), else its
+ * source's title, else its document id. A practitioner writes the first; the title of an amending guideline is a
+ * sentence about the guideline it amends.
+ */
 function instrumentName(by: Regulation, sources: Source[]): string {
   const matching = sources.filter((s) => s.framework === by.framework && s.document_id === by.document_id);
-  return (matching.find((s) => s.status === "current") ?? matching[0])?.title ?? by.document_id;
+  const source = matching.find((s) => s.status === "current") ?? matching[0];
+  return source?.citation_style?.short_name ?? source?.title ?? by.document_id;
 }
 
 /** The amending provision's own text, whitespace collapsed and cut at a word. Quoted as a quotation. */
@@ -165,11 +172,13 @@ function sentenceForAmendment(a: OpenAmendment, sources: Source[], today: string
   const upcoming = a.state === "upcoming";
   const when = upcoming ? `from ${a.effective_from}${whenPhrase(today, a.effective_from)}` : `since ${a.effective_from}`;
   const behind = upcoming ? "the text below is the version before it" : "the text below may no longer be the text in force";
+  // An amendment confined to one point says so: "deletes point (a) of this provision" is not "deletes this provision".
+  const what = a.point === undefined ? "this provision" : `point ${a.point} of this provision`;
   switch (a.op) {
     case "replace":
-      return `${who} ${upcoming ? "replaces" : "has replaced"} this provision ${when}; ${behind}. New wording: ${wording(a.by)}.`;
+      return `${who} ${upcoming ? "replaces" : "has replaced"} ${what} ${when}; ${behind}. New wording: ${wording(a.by)}.`;
     case "delete":
-      return `${who} ${upcoming ? "deletes" : "has deleted"} this provision ${when}; ${behind}. It is deleted, with no new wording.`;
+      return `${who} ${upcoming ? "deletes" : "has deleted"} ${what} ${when}; ${behind}. ${a.point === undefined ? "It is" : "That point is"} deleted, with no new wording.`;
     case "insert_after":
       return `${who} ${upcoming ? "inserts" : "has inserted"} a new provision after this one ${when}${upcoming ? "" : "; it is not in the text of this library"}. New provision: ${wording(a.by)}.`;
   }

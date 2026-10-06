@@ -2,6 +2,10 @@
 
 ## Unreleased (0.11)
 
+**Amendment points (additive).** `Amendment.point` (optional, `"(d)"`) confines an amendment to one point of its target. Amending instruments routinely say "Point (d) in paragraph 23 is replaced" and "Point (a) in paragraph 39 is deleted"; without a point the note could only say the provision was replaced or deleted, which says more than the amendment does. With one the note reads "replaces point (d) of this provision" or "deletes point (a) of this provision ... That point is deleted, with no new wording." An amendment with no point reads exactly as before.
+
+The note also names the amending instrument by its citation style's `short_name` ("EBA/GL/2026/05") when the source has one, instead of its title: the title of an amending guideline is a sentence about the guideline it amends.
+
 **Compiled playbooks 0.11 (additive; nothing the 0.x tools serve changes).** The schema, renderer and verifier the 1.0 server serves playbooks with. All three are pure functions over plain maps, so the factory can run them over a corpus file with no server in between.
 
 - **`CompiledPlaybookSchema` and `TopicsSchema`** (registered as `CompiledPlaybook` and `Topics`): one playbook per topic, crossing documents, with `basis` (sources, each labelled law, delegated act, guideline, supervisory expectation or other), ordered `requirements` (handle `R1`..., statement, provisions with optional verbatim quotes, evidence, checks, tests), `methods` (regulatory, or market practice), `pitfalls`, `related`, `outside_library`, `excluded` (member provisions deliberately not cited) and `provenance`. It keeps this name until 1.0.0 removes the 0.x tools, then takes `PlaybookSchema`; `LegacyPlaybookSchema` is the 0.x shape under its future name. This is the one departure from the work package, which redefines `PlaybookSchema` at once: nothing in the 0.x server reads the compiled shape, and swapping the name would break every adapter and tool for no gain until M3.1.

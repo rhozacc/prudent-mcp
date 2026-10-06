@@ -93,7 +93,7 @@ What it says depends on where the change stands today, computed from the registr
 | `in_force_not_ingested` (not ingested, applies today or earlier) | "Text may be out of date: … has applied since D; the text below may no longer be the text in force." |
 | `undated` (not ingested, no application date) | "… is adopted/announced with no application date recorded; the text below does not reflect it." |
 
-For a provision an amending provision aims at (`amends`), the note names the instrument by its source's title and the amending provision, says what it does (replaces, deletes, inserts a provision after this one), when, and quotes its text as the new wording; a deletion says there is none.
+For a provision an amending provision aims at (`amends`), the note names the instrument by its short name (else its source's title) and the amending provision, says what it does (replaces, deletes, inserts a provision after this one), when, and quotes its text as the new wording; a deletion says there is none.
 
 An `announced` change reads "is expected to apply" (or "was expected to apply" once its date has passed), because nothing says it did. The note names at most three changes, most urgent first (already in force, then the soonest, then undated) and counts the rest ("(2 more.)"). Where a change has no amending provision held, it says **nothing about what the change provides**: this library does not hold it, and the note is a statement about what is held, not about the law; the new wording is quoted only where the amending provision is held.
 
