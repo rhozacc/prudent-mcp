@@ -113,7 +113,7 @@ describe("a numbered act in every standard spelling is an instrument the corpus 
       reg("regulation://gl-a/p77", "Paragraph 77", "acme-gl-a", "acme", { text: "Institutions apply Directive 2014/65/EU here." }),
     ];
     const note = resolveCitationDetailed(regs, "Article 5 of Directive (EU) 2014/65").coverage_note ?? "";
-    expect(note).toContain("1 served record(s) name it: regulation://gl-a/p77");
+    expect(note).toContain("1 held provision(s) name it: regulation://gl-a/p77");
   });
 });
 
@@ -190,7 +190,7 @@ describe("a numbered act written number first is read as the same act written ki
       reg("regulation://gl-a/p77", "Paragraph 77", "acme-gl-a", "acme", { text: "Institutions apply the 2014/65/EU Directive here." }),
     ];
     const note = resolveCitationDetailed(regs, "Article 5 of Directive 2014/65/EU").coverage_note ?? "";
-    expect(note).toContain("1 served record(s) name it: regulation://gl-a/p77");
+    expect(note).toContain("1 held provision(s) name it: regulation://gl-a/p77");
   });
 });
 
@@ -276,7 +276,7 @@ describe("the CRR and the CRD are one instrument however they are named", () => 
       reg("regulation://gl-a/p77", "Paragraph 77", "acme-gl-a", "acme", { text: "See Regulation (EU) No 575/2013." }),
     ];
     const note = resolveCitationDetailed(regs, "Article 160 CRR").coverage_note ?? "";
-    expect(note).toContain("1 served record(s) name it: regulation://gl-a/p77");
+    expect(note).toContain("1 held provision(s) name it: regulation://gl-a/p77");
   });
 });
 
@@ -429,8 +429,8 @@ describe("a held instrument named in the citation scopes it to the documents tha
       const r = resolveCitationDetailed(corpus(), `Article 153 of ${name}`, holdings);
       declined(r);
       expect(r.unmatched_segments).toEqual(["153"]);
-      expect(r.coverage_note).toContain("Nothing in this corpus is numbered 153 in the document named");
-      expect(r.coverage_note).toContain("This corpus holds only part of Regulation (EU) No 575/2013 (CRR)");
+      expect(r.coverage_note).toContain("Nothing in this library is numbered 153 in the document named");
+      expect(r.coverage_note).toContain("This library holds only part of Regulation (EU) No 575/2013 (CRR)");
     });
 
     it(`Article 12 of ${name}: the CRR's article, though both guidelines have a paragraph 12`, () => {
@@ -715,7 +715,7 @@ describe("a document named in words nothing here recognises", () => {
     expect(r.coverage_note).toContain("a guess");
     expect(r.coverage_note).toContain("crr, acme-gl-a, acme-gl-b");
     // A document held only in part is named, so the absence is read as the corpus's.
-    expect(r.coverage_note).toContain("This corpus holds only part of Regulation (EU) No 575/2013 (CRR)");
+    expect(r.coverage_note).toContain("This library holds only part of Regulation (EU) No 575/2013 (CRR)");
   });
 
   for (const text of [

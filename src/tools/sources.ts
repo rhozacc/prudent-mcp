@@ -45,7 +45,7 @@ const SourceSummarySchema = z.object({
   effective_from: z.string().optional(),
   superseded_by: sourceIdSchema.optional(),
   next_milestone: MilestoneSchema.optional().describe("First upcoming regulatory date"),
-  open_pending_changes: z.number().int().optional().describe("Changes not yet ingested."),
+  open_pending_changes: z.number().int().optional().describe("Changes its text does not yet include."),
 });
 
 // A pending change as get_source serves it: the stored fields plus where it stands
@@ -64,14 +64,14 @@ export function registerSourceTools(server: McpServer): void {
     {
       title: "List sources",
       description:
-        "The registry of source documents the corpus derives from — the " +
+        "The list of source documents this library is built from — the " +
         "'is my regulatory context current?' answer. Returns { sources: [...] } with, per " +
         "source: id, title, doc_type, status (current | pending | superseded), verified " +
         "(last date currency was confirmed against the publisher), effective_from, " +
         "superseded_by, next_milestone (the first upcoming regulatory date) and open_pending_changes " +
-        "(changes not yet ingested). Optionally filter by status. Call get_source for the full " +
-        "record including all milestones, or search_regulation for corpus content under a " +
-        "document (sources join regulation records via framework + document_id).",
+        "(changes its text does not yet include). Optionally filter by status. Call get_source for the full " +
+        "entry including all milestones, or search_regulation for the library's content under a " +
+        "document (sources join provisions via framework + document_id).",
       inputSchema: {
         status: SourceStatusSchema.optional().describe("Filter by lifecycle status."),
       },
@@ -103,13 +103,13 @@ export function registerSourceTools(server: McpServer): void {
     {
       title: "Get source",
       description:
-        "Fetch one source document record by ID. Returns the full record: title, framework, " +
+        "Fetch one source document by ID. Returns the full entry: title, framework, " +
         "document_id (joins to Regulation.document_id), doc_type, status, published / " +
         "effective_from / verified dates, superseded_by (set when status is superseded), " +
         "milestones (upcoming regulatory dates, chronological), pending_changes (each with its state today: " +
-        "upcoming | in_force_not_ingested | undated | ingested), url, and notes. Unknown ids " +
-        "return isError with a pointer. Use list_sources to see the whole registry, or " +
-        "search_regulation for the corpus content derived from this document.",
+        "`upcoming` | `in_force_not_ingested` | `undated` | `ingested`), url, and notes. Unknown ids " +
+        "return isError with a pointer. Use list_sources to see all sources, or " +
+        "search_regulation for the library's content derived from this document.",
       inputSchema: {
         id: lenient(sourceIdSchema).describe(
           "A source id from list_sources — shape source://{framework}/{document-id}",
@@ -120,7 +120,7 @@ export function registerSourceTools(server: McpServer): void {
     },
     async ({ id }) => {
       const record = await adapters.source.get(id);
-      if (record === null) return miss(`No record for ${id}. Verify the id with list_sources.`);
+      if (record === null) return miss(`No source has the id ${id}. Verify the id with list_sources.`);
       if (record.pending_changes === undefined) return ok(record);
       const today = isoDay(new Date());
       return ok({

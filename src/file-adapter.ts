@@ -16,7 +16,9 @@ import { computeReferrers } from "./referrers.ts";
 import {
   checkSearchFields,
   playbookSearchFields,
+  rankedRecords,
   rankedSearch,
+  regulationRanking,
   regulationSearchFields,
   testSearchFields,
 } from "./search.ts";
@@ -64,6 +66,21 @@ export const RegulationHistoryEntrySchema = z.object({
 });
 export type RegulationHistoryEntry = z.infer<typeof RegulationHistoryEntrySchema>;
 
+// Areas -> topics, authored in the factory and carried in the corpus file. The
+// server reads nothing from it yet (the 1.0 playbook tools will), so it is
+// validated loosely and passed through: an unknown key on an area or a topic
+// is kept, not stripped.
+export const CorpusTopicSchema = z
+  .object({ id: z.string(), title: z.string(), scope: z.string().optional() })
+  .passthrough();
+export const CorpusTopicsSchema = z
+  .object({
+    areas: z.array(
+      z.object({ id: z.string(), title: z.string(), topics: z.array(CorpusTopicSchema) }).passthrough(),
+    ),
+  })
+  .passthrough();
+
 export const CorpusFileSchema = z.object({
   regulation: z.array(RegulationSchema).default([]),
   tests: z.array(TestSchema).default([]),
@@ -78,6 +95,10 @@ export const CorpusFileSchema = z.object({
   // demo follows the same convention). loadCorpusFile defaults this to [].
   regulation_history: z.array(RegulationHistoryEntrySchema).default([]),
   corpus_info: CorpusInfoSchema.optional(),
+  // Abbreviation -> the phrases the texts use for it ("rds": ["reference data
+  // set"]). Data, not code, so this public server stays corpus-agnostic.
+  glossary: z.record(z.array(z.string())).optional(),
+  topics: CorpusTopicsSchema.optional(),
 });
 
 // `regulation_history` stays optional on the exported TYPE (parse always
@@ -1117,7 +1138,7 @@ const EMPOWERMENTS: Record<string, { kind: string; empoweredBy?: string; visible
   "regulation-2010-1093": {
     kind:
       "the Regulation establishing the EBA; its Article 16 is the basis on which every EBA " +
-      "guideline in this corpus is issued, and the source of their comply-or-explain effect",
+      "guideline in this library is issued, and the source of their comply-or-explain effect",
     visibleAt: "regulation://crr/article-181",
   },
 };
@@ -1307,7 +1328,7 @@ function ambiguousResolution(text: string, hits: Regulation[]): CitationResoluti
     candidates: hits.slice(0, MAX_CANDIDATES).map(asCandidate),
     unmatched_segments: [],
     coverage_note:
-      `"${text}" matches ${hits.length} records across ${docs.size} document(s)` +
+      `"${text}" matches ${hits.length} provisions across ${docs.size} document(s)` +
       `${hits.length > MAX_CANDIDATES ? ` (first ${MAX_CANDIDATES} listed)` : ""}. ` +
       "Name the document to disambiguate, or open one of the candidates.",
   };
@@ -1445,7 +1466,7 @@ export function resolveCitationDetailed(
       coverage_note:
         hit === undefined
           ? undefined
-          : `Matched an alias. This record's own citation is "${hit.citation}" — quote that, ` +
+          : `Matched an alias. This provision's own citation is "${hit.citation}" — quote that, ` +
             `not "${text}".`,
     };
   }
@@ -1504,7 +1525,7 @@ export function resolveCitationDetailed(
     const shown = mentions.slice(0, 3);
     return none({
       coverage_note:
-        `This corpus holds no ${instrumentLabel(gated, unheldMention.tag)}. Nothing was matched, rather than ` +
+        `This library holds no ${instrumentLabel(gated, unheldMention.tag)}. Nothing was matched, rather than ` +
         "sourcing a same-numbered provision from another document. " +
         (what === undefined
           ? ""
@@ -1513,12 +1534,12 @@ export function resolveCitationDetailed(
             ". " +
             (what.visibleAt === undefined
               ? ""
-              : `That relationship is stated in served text at ${what.visibleAt}. `)) +
+              : `That relationship is stated in the text at ${what.visibleAt}. `)) +
         (shown.length > 0
-          ? `${mentions.length} served record(s) name it: ${shown.join(", ")}` +
-            `${mentions.length > shown.length ? ", …" : ""} — open those for what this corpus ` +
-            "says about it. Its own text is not here, so do not state its requirements from this corpus."
-          : "Use get_corpus_info for the documents actually loaded."),
+          ? `${mentions.length} held provision(s) name it: ${shown.join(", ")}` +
+            `${mentions.length > shown.length ? ", …" : ""} — open those for what this library ` +
+            "says about it. Its own text is not here, so do not state its requirements from this library."
+          : "The library's overview lists the documents it holds."),
     });
   }
 
@@ -1578,7 +1599,7 @@ export function resolveCitationDetailed(
     const group = instrument === null && (namedDocs?.size ?? 0) > 1;
     const heldList = group
       ? `documents under a framework or name it shares (${heldNames.slice(0, 3).join(", ")}${heldNames.length > 3 ? ", …" : ""})`
-      : `a document this corpus holds (${heldNames.slice(0, 3).join(", ")})`;
+      : `a document this library holds (${heldNames.slice(0, 3).join(", ")})`;
     // A number the number gate cannot read is not a reason to say "cite it by
     // number": the caller did, and the form is what was missing.
     const numberedDescription = !identifiers && unheld.some((d) => d.numbered);
@@ -1587,11 +1608,11 @@ export function resolveCitationDetailed(
         ? ""
         : numberedDescription
           ? "Cite the instrument in full, kind then \"(EU)\" then its number (for example " +
-            "\"Regulation (EU) YYYY/NNN\"), so the corpus can say whether it is held; "
-          : "Cite the instrument by number so the corpus can say whether it is held; ") +
-      (identifiers ? "Use" : "use") +
-      " search_regulation with its name for what served records say about it, or " +
-      "get_corpus_info for what is loaded. This note states nothing about what it requires.";
+            "\"Regulation (EU) YYYY/NNN\"), so this library can say whether it is held; "
+          : "Cite the instrument by number so this library can say whether it is held; ") +
+      (identifiers ? "Search" : "search") +
+      " for its name to see what the provisions held here say about it, or check the library's overview for " +
+      "what it holds. This note states nothing about what it requires.";
     const how = identifiers ? "an identifier" : "description";
     // A description by an issuer's kind ("ECB Guidelines") does not mean the corpus
     // holds nothing from that issuer, and "no document identified as such" must not
@@ -1609,10 +1630,10 @@ export function resolveCitationDetailed(
       coverage_note:
         heldNames.length === 0
           ? identifiers
-            ? `"${text}" names an instrument by an identifier (${quoted}), and this corpus holds no ` +
+            ? `"${text}" names an instrument by an identifier (${quoted}), and this library holds no ` +
               "document identified as such. Nothing was matched, rather than sourcing a " +
               `same-numbered provision from another document. ${wayOut}`
-            : `"${text}" names an instrument by description (${quoted}), and this corpus holds no ` +
+            : `"${text}" names an instrument by description (${quoted}), and this library holds no ` +
               "document identified as such. Nothing was matched, rather than sourcing a same-numbered " +
               `provision from another document.${issuerNote} ${wayOut}`
           : `"${text}" names ${heldList} ` +
@@ -1634,10 +1655,10 @@ export function resolveCitationDetailed(
   if (unplaced !== null) {
     return none({
       coverage_note:
-        `"${text}" names a document by the number ${unplaced}, and this corpus holds no document that ` +
+        `"${text}" names a document by the number ${unplaced}, and this library holds no document that ` +
         "answers to it, so the number was not read as part of a provision's. Nothing was matched, " +
-        "rather than sourcing a same-numbered provision from another document. Use get_corpus_info " +
-        "for the documents actually loaded, or search_regulation with the document's name.",
+        "rather than sourcing a same-numbered provision from another document. The library's overview " +
+        "lists the documents it holds; or search with the document's name.",
     });
   }
 
@@ -1656,9 +1677,9 @@ export function resolveCitationDetailed(
     const partialNote = citationPartialClause(holdings, null);
     return none({
       coverage_note:
-        `"${text}" is about something this corpus does not recognise as a document it holds ` +
+        `"${text}" is about something this library does not recognise as a document it holds ` +
         `("${unrecognised.join(" ")}"), so a provision with that number in a held document would be a ` +
-        "guess. Nothing was matched. Name the document by an id or title get_corpus_info shows" +
+        "guess. Nothing was matched. Name the document by an id or title from the library's overview" +
         `${held.length === 0 ? "" : ` (${held.slice(0, 6).join(", ")}${held.length > 6 ? ", …" : ""})`}, ` +
         "or drop the words that are not part of its name." +
         `${partialNote === null ? "" : ` ${partialNote}`}`,
@@ -1682,11 +1703,11 @@ export function resolveCitationDetailed(
     return none({
       coverage_note:
         named.length > 0
-          ? `"${text}" names a document this corpus holds (${named.join(", ")}) but no provision ` +
-            "within it. Add a provision number, or use search_regulation to search inside it."
-          : `"${text}" carries no provision number to resolve, and names no document this corpus ` +
-            "holds. If it names an instrument, this corpus may still describe it without holding " +
-            "it — search_regulation with its distinctive words, or get_corpus_info for what is loaded.",
+          ? `"${text}" names a document this library holds (${named.join(", ")}) but no provision ` +
+            "within it. Add a provision number, or search inside it."
+          : `"${text}" carries no provision number to resolve, and names no document this library ` +
+            "holds. If it names an instrument, this library may still describe it without holding " +
+            "it — search for its distinctive words, or check the library's overview for what it holds.",
     });
   }
 
@@ -1713,9 +1734,9 @@ export function resolveCitationDetailed(
     return none({
       candidates: relatives.slice(0, MAX_CANDIDATES).map(asCandidate),
       coverage_note: withPartial(
-        `No record is "${text}" itself. The corpus holds ${relatives.length} narrower provision(s) ` +
+        `No provision is "${text}" itself. This library holds ${relatives.length} narrower provision(s) ` +
           `under it${relatives.length > MAX_CANDIDATES ? ` (first ${MAX_CANDIDATES} listed)` : ""}; ` +
-          "open one, or use get_regulation_tree on it for the whole subtree.",
+          "open one, or walk its subtree.",
       ),
     });
   }
@@ -1771,8 +1792,8 @@ export function resolveCitationDetailed(
         unmatched_segments: spine,
         candidates: listed.map(asCandidate),
         coverage_note:
-          `No record is "${text}" itself — this corpus does not address provisions at that granularity. ` +
-          `Records that could contain it ${where}, so which one it belongs to cannot be told, and nothing ` +
+          `No provision is "${text}" itself — this library does not address provisions at that granularity. ` +
+          `Provisions that could contain it ${where}, so which one it belongs to cannot be told, and nothing ` +
           `is said here about whether the text of any of them has the point. ` +
           `${perDocument.length > listed.length ? `(First ${MAX_CANDIDATES} listed.) ` : ""}` +
           "Name the document, or open the candidates and check.",
@@ -1799,7 +1820,7 @@ export function resolveCitationDetailed(
       unmatched_segments: spine,
       candidates: containers.slice(0, MAX_CANDIDATES).map(({ r }) => asCandidate(r)),
       coverage_note:
-        `No record is "${text}" itself — this corpus does not address provisions at that ` +
+        `No provision is "${text}" itself — this library does not address provisions at that ` +
         `granularity. ${held}${tail}`,
     });
   }
@@ -1809,9 +1830,9 @@ export function resolveCitationDetailed(
   return none({
     unmatched_segments: spine,
     coverage_note:
-      `Nothing in this corpus is numbered ${spine.join(".")}${docs === null ? "" : " in the document named"}. ` +
+      `Nothing in this library is numbered ${spine.join(".")}${docs === null ? "" : " in the document named"}. ` +
       (partial === null ? "" : `${partial} `) +
-      "Try search_regulation with the citation's key words.",
+      "Try a search on the citation's key words.",
   });
 }
 
@@ -1911,8 +1932,9 @@ export function createFileAdapters(corpus: CorpusFile): {
   };
 
   const regulation: RegulationAdapter = {
-    async search(query) {
-      return rankedSearch(corpus.regulation, query, regulationSearchFields(query)).map(m => m.record);
+    async search(query, options) {
+      const ranking = regulationRanking({ scope: options?.scope, glossary: corpus.glossary });
+      return rankedRecords(corpus.regulation, query, regulationSearchFields(query), undefined, ranking);
     },
     async get(id, asOf) {
       if (asOf === undefined) return regMap.get(id) ?? null;
@@ -1924,7 +1946,7 @@ export function createFileAdapters(corpus: CorpusFile): {
 
   const test: TestAdapter = {
     async search(query) {
-      return rankedSearch(corpus.tests, query, testSearchFields).map(m => m.record);
+      return rankedRecords(corpus.tests, query, testSearchFields, undefined, { glossary: corpus.glossary });
     },
     async get(id) { return testMap.get(id) ?? null; },
     async list() { return corpus.tests; },
@@ -1932,7 +1954,7 @@ export function createFileAdapters(corpus: CorpusFile): {
 
   const check: CheckAdapter = {
     async search(query) {
-      return rankedSearch(corpus.checks, query, checkSearchFields).map(m => m.record);
+      return rankedRecords(corpus.checks, query, checkSearchFields, undefined, { glossary: corpus.glossary });
     },
     async get(id) { return checkMap.get(id) ?? null; },
     async list() { return corpus.checks; },
@@ -1940,7 +1962,7 @@ export function createFileAdapters(corpus: CorpusFile): {
 
   const playbook: PlaybookAdapter = {
     async search(query) {
-      return rankedSearch(corpus.playbooks, query, playbookSearchFields).map(m => m.record);
+      return rankedRecords(corpus.playbooks, query, playbookSearchFields, undefined, { glossary: corpus.glossary });
     },
     async get(id) { return playbookMap.get(id) ?? null; },
     async list() { return corpus.playbooks; },
@@ -2011,6 +2033,9 @@ export function createFileAdapters(corpus: CorpusFile): {
       // rather than serving [] — an empty list here takes list_review_areas
       // AND get_area_overview out of service, and those are the entry path.
       return corpus.taxonomy.length > 0 ? corpus.taxonomy : deriveTaxonomy(corpus.playbooks);
+    },
+    async glossary() {
+      return corpus.glossary;
     },
   };
 

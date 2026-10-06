@@ -61,8 +61,12 @@ export type AsOfResolution =
   | { record: null };
 
 export interface RegulationAdapter {
-  /** Ranked search over citation/text/commentary. Empty query ⇒ []. */
-  search(query: string): Promise<Regulation[]>;
+  /**
+   * Ranked search over heading path/citation/text/commentary. Empty query ⇒ [].
+   * `scope: "all"` includes records marked `role: background`, which the default
+   * leaves out; an adapter that carries no roles can ignore it.
+   */
+  search(query: string, options?: { scope?: "default" | "all" }): Promise<Regulation[]>;
   /**
    * Fetch one record, optionally as of an ISO date. `asOf` resolves against
    * the backend's version history; when the backend has no history for the id
@@ -140,6 +144,13 @@ export interface MetaAdapter {
    */
   resolveCitation(text: string): Promise<CitationResolution>;
   taxonomy(): Promise<ReviewArea[]>;
+  /**
+   * OPTIONAL. The corpus's abbreviation table (`"rds"` → `["reference data set"]`),
+   * which search expands by OR. The tool layer reads it so the coverage and
+   * excerpt it recomputes agree with the adapter's ranking; an adapter without
+   * it simply gets no expansion.
+   */
+  glossary?(): Promise<Record<string, string[]> | undefined>;
 }
 
 // --- Empty defaults ----------------------------------------------------------

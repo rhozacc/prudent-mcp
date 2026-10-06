@@ -14,6 +14,7 @@ import {
   miss,
   ok,
   rankedSearchResult,
+  searchGlossary,
   rowCoverageShape,
   searchInputShape,
   searchOutputShape,
@@ -37,7 +38,7 @@ export function registerCheckTools(server: McpServer): void {
         "Ranked, field-scoped search over the catalog of qualitative checks: name, " +
         "expectation, expected_evidence. Returns { results, total_matches, offset, truncated }; " +
         "concise results (default) are { id, name, expectation_first_sentence, derived_from } — " +
-        "pass detail: 'full' for complete records. Call get_check on an id for the full record, " +
+        "pass detail: 'full' for complete entries. Call get_check on an id for the full entry, " +
         "or get_regulation on any derived_from id to read the underlying law.",
       inputSchema: searchInputShape("name, expectation, and expected evidence"),
       outputSchema: searchOutputShape(z.union([ConciseCheckHit, CheckSchema])),
@@ -45,10 +46,12 @@ export function registerCheckTools(server: McpServer): void {
     },
     async ({ query, limit, offset, detail }) => {
       const records = await adapters.check.search(query);
+      const options = { glossary: await searchGlossary() };
       return rankedSearchResult({
         records,
         query,
         fields: checkSearchFields,
+        options,
         detail,
         limit,
         offset,
@@ -67,7 +70,7 @@ export function registerCheckTools(server: McpServer): void {
     {
       title: "Get check",
       description:
-        "Fetch one check by ID. Returns the full record: name, expectation (concrete " +
+        "Fetch one check by ID. Returns the full entry: name, expectation (concrete " +
         "pass/fail bar), derived_from (RegulationId[] this check operationalises), and " +
         "expected_evidence (artifacts the reviewer must gather). Unknown ids return isError " +
         "with a pointer. Use get_regulation on any derived_from id to read the underlying law.",
@@ -81,7 +84,7 @@ export function registerCheckTools(server: McpServer): void {
     },
     async ({ id }) => {
       const record = await adapters.check.get(id);
-      if (record === null) return miss(`No record for ${id}. Verify the id with search_checks or list_review_areas.`);
+      if (record === null) return miss(`No check has the id ${id}. Verify the id with search_checks or list_review_areas.`);
       return ok(record);
     },
   );

@@ -25,6 +25,7 @@ import type {
 import { resolveCitationDetailed } from "../src/file-adapter.ts";
 import { computeHoldings } from "../src/holdings.ts";
 import { pendingChangeSummaries } from "../src/pending.ts";
+import { playbookContext, type PlaybookContext } from "../src/playbook-context.ts";
 import { computeReferrers } from "../src/referrers.ts";
 import {
   checkSearchFields,
@@ -36,6 +37,7 @@ import {
 import type {
   Check,
   CheckId,
+  CompiledPlaybook,
   Playbook,
   PlaybookId,
   Regulation,
@@ -45,6 +47,7 @@ import type {
   SourceId,
   Test,
   TestId,
+  Topics,
 } from "../src/schema.ts";
 import { createServer } from "../src/server.ts";
 import { staleSourceIds } from "../src/validate.ts";
@@ -52,6 +55,13 @@ import { staleSourceIds } from "../src/validate.ts";
 // ============================================================================
 // Seed data — one cohesive slice (PD calibration + default definition aside)
 // ============================================================================
+
+// Source registry seeds. Unlike the frozen dates elsewhere in this file,
+// `verified` is computed relative to today so the demo permanently shows
+// exactly one stale source (the eba/gl-2017-16 seed) instead of every seed
+// rotting past the 30-day line as time passes.
+const daysAgo = (n: number): string =>
+  new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
 
 const REGULATIONS: Record<RegulationId, Regulation> = {
   "regulation://crr/180": {
@@ -154,6 +164,24 @@ const REGULATIONS: Record<RegulationId, Regulation> = {
       "more than 90 days on any material credit obligation, with materiality assessed " +
       "against thresholds set in the relevant Commission Delegated Regulation.",
     commentary: [],
+    children: [],
+  },
+  // A provision of the instrument that amends the CRR record above, held in the demo so
+  // that the amendment is pinned to the provision it changes and not to the document:
+  // 178(1)(a) is noted, and 178(1)(b) and Article 180 (same document) are not (eval I15).
+  // Its wording is invented for the demo.
+  "regulation://crr-amending-demo/art-1": {
+    id: "regulation://crr-amending-demo/art-1",
+    framework: "crr",
+    document_id: "crr-amending-demo",
+    document_version: daysAgo(10),
+    citation: "Article 1",
+    text:
+      "Article 178(1)(a) is replaced by the following: a default shall be considered to have " +
+      "occurred when the institution considers that the obligor is unlikely to pay its credit " +
+      "obligations in full, whether or not security is realised.",
+    commentary: [],
+    amends: [{ target: "regulation://crr/178/1/a", op: "replace", effective_from: daysAgo(-60) }],
     children: [],
   },
 };
@@ -375,12 +403,6 @@ const REVIEW_AREAS: ReviewArea[] = [
   { id: "discriminatory-power", name: "Discriminatory Power", children: [] },
 ];
 
-// Source registry seeds. Unlike the frozen dates elsewhere in this file,
-// `verified` is computed relative to today so the demo permanently shows
-// exactly one stale source (the eba/gl-2017-16 seed) instead of every seed
-// rotting past the 30-day line as time passes.
-const daysAgo = (n: number): string =>
-  new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
 
 const SOURCES: Record<SourceId, Source> = {
   "source://crr/575-2013": {
@@ -397,6 +419,7 @@ const SOURCES: Record<SourceId, Source> = {
     // what makes a miss on an unseeded article read as absent from the corpus
     // rather than from the law (and what binds eval I12 on the demo).
     coverage: "partial",
+    citation_style: { kind: "eu-regulation", short_name: "CRR" },
     // An amendment the registry knows is coming and the seed does not carry. It is
     // dated relative to today, like `verified`, so the demo permanently shows an
     // UPCOMING change instead of one that rots into "in force" (and it is what
@@ -408,10 +431,26 @@ const SOURCES: Record<SourceId, Source> = {
         effective_from: daysAgo(-60),
         ingested: false,
         affects: ["Article 178"],
+        // The same fact as ids, which is what pins the note to the provision it concerns.
+        affects_ids: ["regulation://crr/178/1/a"],
       },
     ],
     milestones: [],
     url: "https://eur-lex.europa.eu/eli/reg/2013/575/oj",
+  },
+  "source://crr/amending-demo": {
+    id: "source://crr/amending-demo",
+    title: "Amending Regulation (demo)",
+    framework: "crr",
+    document_id: "crr-amending-demo",
+    doc_type: "regulation",
+    status: "current",
+    published: daysAgo(30),
+    effective_from: daysAgo(-60),
+    coverage: "full",
+    pending_changes: [],
+    verified: daysAgo(3),
+    milestones: [],
   },
   "source://eba/gl-2017-16": {
     id: "source://eba/gl-2017-16",
@@ -423,6 +462,7 @@ const SOURCES: Record<SourceId, Source> = {
     published: "2017-11-20",
     effective_from: "2021-01-01",
     coverage: "full",
+    citation_style: { kind: "eba-gl", short_name: "EBA/GL/2017/16" },
     // Looked at and nothing pending: `[]` is a statement, an absent key is not.
     pending_changes: [],
     // Deliberately stale — exercises stale_sources and the validate warning.
@@ -602,6 +642,140 @@ const inMemoryMeta: MetaAdapter = {
     return [...REVIEW_AREAS];
   },
 };
+
+// ============================================================================
+// Compiled playbooks (1.0): one topic, compiled across documents
+// ============================================================================
+//
+// Not served by the 0.x tools (they read the per-chapter playbooks above); the 1.0
+// surface will serve these. They exist here so the renderer and verifier have a
+// worked example whose output is pinned by a golden test.
+
+export const DEMO_TOPICS: Topics = {
+  version: 1,
+  areas: [
+    {
+      id: "calibration",
+      title: "Calibration",
+      topics: [
+        {
+          id: "pd-long-run-average",
+          title: "Long-run average default rate for PD calibration",
+          scope: "How the long-run average one-year default rate is estimated and shown to be representative of the range of variability.",
+          anchors: ["CRR Art. 180(1)(a)", "EBA/GL/2017/16 para 78"],
+          questions: ["How do I estimate the long-run average default rate for a PD model?"],
+        },
+      ],
+    },
+  ],
+};
+
+export const DEMO_COMPILED_PLAYBOOKS: Record<PlaybookId, CompiledPlaybook> = {
+  "playbook://pd-long-run-average": {
+    id: "playbook://pd-long-run-average",
+    title: "Long-run average default rate for PD calibration",
+    area: "calibration",
+    summary:
+      "Estimate each grade's PD from the long-run average of its one-year default rates (Art. 180(1)(a) CRR), and show that the " +
+      "average reflects the likely range of variability of those rates, including downturn periods relevant to the portfolio " +
+      "(EBA/GL/2017/16 para 78). What counts as a long enough history is a matter of your own policy and the portfolio.",
+    questions: [
+      "How do I estimate the long-run average default rate for a PD model?",
+      "Does the calibration target have to include a downturn?",
+    ],
+    applies_to: { parameters: ["pd"], stages: ["calibration", "validation"] },
+    basis: [
+      {
+        citation: "Art. 180(1)(a) CRR",
+        force: "law",
+        role: "PDs are estimated by obligor grade from long-run averages of one-year default rates.",
+        provisions: [
+          {
+            id: "regulation://crr/180/1/a",
+            quote: "Institutions shall estimate PDs by obligor grade from long-run averages of one-year default rates.",
+          },
+        ],
+      },
+      {
+        citation: "EBA/GL/2017/16 para 78",
+        force: "guideline",
+        role: "The calibration target must reflect the likely range of variability of one-year default rates, downturn periods included.",
+        provisions: [
+          {
+            id: "regulation://eba/gl-2017-16/78",
+            quote: "the long-run average default rate used as the calibration target reflects the likely range of variability of one-year default rates",
+          },
+        ],
+      },
+    ],
+    requirements: [
+      {
+        id: "R1",
+        title: "Estimate PDs by grade from long-run averages",
+        statement:
+          "Derive each grade's PD from the long-run average of its one-year default rates rather than from the latest year. " +
+          "Document the grades, the observation window and how the one-year rates are averaged.",
+        provisions: [{ id: "regulation://crr/180/1/a" }],
+        evidence: ["the grade-level default-rate series", "the averaging method and its documentation"],
+        checks: ["check://calibration/pd/lra-derived"],
+        tests: [],
+      },
+      {
+        id: "R2",
+        title: "Show the target reflects the range of variability",
+        statement:
+          "Show that the average used as the calibration target reflects how far one-year default rates move, " +
+          "including downturn periods relevant to the portfolio, and say what the history leaves out.",
+        provisions: [{ id: "regulation://eba/gl-2017-16/78" }],
+        evidence: ["the observed range of one-year default rates", "a statement of the downturn periods covered"],
+        checks: ["check://calibration/pd/segment-tested"],
+        tests: ["test://binomial"],
+      },
+    ],
+    methods: [
+      {
+        name: "Average the grade-level one-year default rates over the full window",
+        description: "The estimate the law names, taken over every year of the window.",
+        basis: "regulatory",
+        provisions: ["regulation://crr/180/1/a"],
+      },
+      {
+        name: "Compare the target with an external default-rate series",
+        description: "A cross-check many institutions run; no provision asks for it.",
+        basis: "practice",
+        provisions: [],
+      },
+    ],
+    pitfalls: [
+      { text: "Using the most recent years only understates a downturn the window did not contain.", provisions: ["regulation://eba/gl-2017-16/78"] },
+    ],
+    related: [],
+    outside_library: [
+      { name: "The Commission Delegated Regulation on the IRB assessment methodology", why: "It sets further requirements on the observation period that this topic does not reproduce." },
+    ],
+    excluded: [
+      { id: "regulation://crr/180", reason: "The article's opening sentence; its sub-paragraph is cited." },
+      { id: "regulation://eba/gl-2017-16/s4", reason: "A section heading with no requirement of its own." },
+    ],
+    provenance: {
+      status: "approved",
+      compiled_at: "2026-10-01T00:00:00Z",
+      inputs_sha: "0".repeat(64),
+      approved_by: "demo",
+      approved_at: "2026-10-02",
+    },
+  },
+};
+
+/** What the renderer and verifier read, over the demo's seed. */
+export const demoPlaybookContext = (): PlaybookContext =>
+  playbookContext({
+    regulations: Object.values(REGULATIONS),
+    sources: Object.values(SOURCES),
+    checks: Object.values(CHECKS),
+    tests: Object.values(TESTS),
+    playbooks: Object.values(DEMO_COMPILED_PLAYBOOKS),
+  });
 
 // ============================================================================
 // Wire-up

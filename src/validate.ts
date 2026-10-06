@@ -31,6 +31,13 @@
  *   7. URI-safe ids — no character that a URI stops at when written into
  *      ordinary prose, because an id is copied out of one response and pasted
  *      into the next call.
+ *   8. Amendment targets — an `amends[].target` resolves, and to a record of a
+ *      DIFFERENT document (framework + document_id): an instrument amends
+ *      another instrument, and a self-pointing target would put an
+ *      "amended from" note on the amending text itself.
+ *   9. Pending-change provisions — every `affects_ids` entry of a source's
+ *      pending change resolves, because the note rides only on the records it
+ *      names and a dangling id would silently drop it.
  *
  * Staleness (a current source whose `verified` is older than
  * STALE_AFTER_DAYS) is advisory, not fatal — see `corpusWarnings`.
@@ -327,6 +334,30 @@ export function validateCorpus(corpus: CorpusInput, now: Date = new Date()): str
   for (const c of checks) idSafe(c.id);
   for (const p of playbooks) idSafe(p.id);
   for (const s of sources) idSafe(s.id);
+
+  // 8 — an amendment's target is another document's provision.
+  for (const reg of regs) {
+    for (const [i, a] of (reg.amends ?? []).entries()) {
+      const target = regById.get(a.target);
+      if (target === undefined) {
+        errors.push(`${reg.id}: amends[${i}].target ${a.target} does not resolve`);
+      } else if (target.framework === reg.framework && target.document_id === reg.document_id) {
+        errors.push(
+          `${reg.id}: amends[${i}].target ${a.target} is in the same document (${reg.framework}/${reg.document_id}); ` +
+            "an amendment targets a provision of a different document",
+        );
+      }
+    }
+  }
+
+  // 9 — a pending change names provisions that exist.
+  for (const s of sources) {
+    for (const [i, pc] of (s.pending_changes ?? []).entries()) {
+      for (const id of pc.affects_ids ?? []) {
+        if (!regIds.has(id)) errors.push(`${s.id}: pending_changes[${i}].affects_ids ${id} does not resolve`);
+      }
+    }
+  }
 
   return [...new Set(errors)];
 }

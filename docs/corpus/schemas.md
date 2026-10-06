@@ -147,6 +147,53 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
             ],
             "additionalProperties": false
           }
+        },
+        "heading_path": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "operative",
+            "definition",
+            "scope",
+            "transitional",
+            "background",
+            "annex"
+          ]
+        },
+        "amends": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "target": {
+                "type": "string",
+                "pattern": "^regulation:\\/\\/.+"
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "replace",
+                  "insert_after",
+                  "delete"
+                ]
+              },
+              "effective_from": {
+                "type": "string",
+                "format": "date"
+              }
+            },
+            "required": [
+              "target",
+              "op",
+              "effective_from"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -525,6 +572,13 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
                   "type": "string"
                 }
               },
+              "affects_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^regulation:\\/\\/.+"
+                }
+              },
               "note": {
                 "type": "string"
               },
@@ -539,6 +593,33 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
             ],
             "additionalProperties": false
           }
+        },
+        "citation_style": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "eba-gl",
+                "ecb-guide",
+                "eu-regulation",
+                "generic"
+              ]
+            },
+            "short_name": {
+              "type": "string"
+            },
+            "chapters": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -1074,6 +1155,53 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
                     ],
                     "additionalProperties": false
                   }
+                },
+                "heading_path": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "operative",
+                    "definition",
+                    "scope",
+                    "transitional",
+                    "background",
+                    "annex"
+                  ]
+                },
+                "amends": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "target": {
+                        "type": "string",
+                        "pattern": "^regulation:\\/\\/.+"
+                      },
+                      "op": {
+                        "type": "string",
+                        "enum": [
+                          "replace",
+                          "insert_after",
+                          "delete"
+                        ]
+                      },
+                      "effective_from": {
+                        "type": "string",
+                        "format": "date"
+                      }
+                    },
+                    "required": [
+                      "target",
+                      "op",
+                      "effective_from"
+                    ],
+                    "additionalProperties": false
+                  }
                 }
               },
               "required": [
@@ -1176,6 +1304,455 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
       "required": [
         "framework",
         "citation"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}
+```
+
+</details>
+
+<details>
+<summary><code>CompiledPlaybook</code></summary>
+
+```json
+{
+  "$ref": "#/definitions/CompiledPlaybook",
+  "definitions": {
+    "CompiledPlaybook": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^playbook:\\/\\/.+"
+        },
+        "title": {
+          "type": "string"
+        },
+        "area": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "applies_to": {
+          "type": "object",
+          "properties": {
+            "parameters": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "pd",
+                  "lgd",
+                  "ccf",
+                  "el",
+                  "general"
+                ]
+              }
+            },
+            "stages": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "development",
+                  "calibration",
+                  "validation",
+                  "review",
+                  "use",
+                  "governance"
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "basis": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "citation": {
+                "type": "string"
+              },
+              "force": {
+                "type": "string",
+                "enum": [
+                  "law",
+                  "delegated_act",
+                  "guideline",
+                  "supervisory_expectation",
+                  "other"
+                ]
+              },
+              "role": {
+                "type": "string"
+              },
+              "provisions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^regulation:\\/\\/.+"
+                    },
+                    "quote": {
+                      "type": "string",
+                      "maxLength": 300
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                "default": []
+              }
+            },
+            "required": [
+              "citation",
+              "force",
+              "role"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "requirements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^R\\d+$"
+              },
+              "title": {
+                "type": "string"
+              },
+              "statement": {
+                "type": "string"
+              },
+              "provisions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^regulation:\\/\\/.+"
+                    },
+                    "quote": {
+                      "type": "string",
+                      "maxLength": 300
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "checks": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^check:\\/\\/.+"
+                },
+                "default": []
+              },
+              "tests": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^test:\\/\\/.+"
+                },
+                "default": []
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "statement",
+              "provisions"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1
+        },
+        "methods": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "basis": {
+                "type": "string",
+                "enum": [
+                  "regulatory",
+                  "practice"
+                ]
+              },
+              "provisions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^regulation:\\/\\/.+"
+                },
+                "default": []
+              }
+            },
+            "required": [
+              "name",
+              "description",
+              "basis"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "pitfalls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "provisions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^regulation:\\/\\/.+"
+                },
+                "default": []
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "related": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^playbook:\\/\\/.+"
+          },
+          "default": []
+        },
+        "outside_library": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "why"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "excluded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^regulation:\\/\\/.+"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "reason"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "approved",
+                "exemplar"
+              ]
+            },
+            "compiled_at": {
+              "type": "string"
+            },
+            "compiler": {
+              "type": "object",
+              "properties": {
+                "prompt_sha": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "effort": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "prompt_sha",
+                "model"
+              ],
+              "additionalProperties": false
+            },
+            "inputs_sha": {
+              "type": "string"
+            },
+            "approved_by": {
+              "type": "string"
+            },
+            "approved_at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "compiled_at",
+            "inputs_sha"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "area",
+        "summary",
+        "questions",
+        "basis",
+        "requirements",
+        "provenance"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}
+```
+
+</details>
+
+<details>
+<summary><code>Topics</code></summary>
+
+```json
+{
+  "$ref": "#/definitions/Topics",
+  "definitions": {
+    "Topics": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "areas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "topics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string"
+                    },
+                    "anchors": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    },
+                    "questions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "scope"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "topics"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "version",
+        "areas"
       ],
       "additionalProperties": false
     }

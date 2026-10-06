@@ -79,6 +79,36 @@ export const ProvisionKindSchema = z.enum([
 ]);
 export type ProvisionKind = z.infer<typeof ProvisionKindSchema>;
 
+// What a provision is FOR, as opposed to what sort of node it is (`kind`).
+// Search, `brief` and the playbook verifier read it: a background or
+// consultation-feedback record must never outrank the operative text it
+// discusses, and an annex is not a requirement. Optional, never defaulted: a
+// corpus that never classified its records says nothing, which is not
+// `operative`.
+export const ProvisionRoleSchema = z.enum([
+  "operative",
+  "definition",
+  "scope",
+  "transitional",
+  "background",
+  "annex",
+]);
+export type ProvisionRole = z.infer<typeof ProvisionRoleSchema>;
+
+// A provision of an amending instrument that changes a provision of another
+// document. The server never parses amending text: the target is authored by
+// the factory, resolves to a record of a DIFFERENT document (linter rule), and
+// is what lets a note say "amended from <date>" on the provisions the
+// amendment touches and stay silent on the rest of the document.
+export const AmendmentOpSchema = z.enum(["replace", "insert_after", "delete"]);
+export type AmendmentOp = z.infer<typeof AmendmentOpSchema>;
+export const AmendmentSchema = z.object({
+  target: regulationIdSchema,
+  op: AmendmentOpSchema,
+  effective_from: z.string().date(),
+});
+export type Amendment = z.infer<typeof AmendmentSchema>;
+
 export const RegulationSchema = z.object({
   id: regulationIdSchema,
   framework: z.string(),                // "crr" | "eba" | "ecb" | ...
@@ -130,6 +160,13 @@ export const RegulationSchema = z.object({
   // find out.
   is_metadata_only: z.boolean().optional(),
   cites: z.array(ExternalCitationSchema).optional(),
+  // The document's own headings above this provision, outermost first, verbatim
+  // ("Section 4.2.4", "Representativeness of the data"). The words a reader
+  // would search by often sit in a heading and not in the paragraph under it.
+  heading_path: z.array(z.string()).optional(),
+  role: ProvisionRoleSchema.optional(),
+  // Present on a provision of an AMENDING instrument: what it changes.
+  amends: z.array(AmendmentSchema).optional(),
   // Future fields: supersedes, last_amended, effective_from, ...
 });
 export type Regulation = z.infer<typeof RegulationSchema>;
@@ -192,6 +229,117 @@ export const PlaybookSchema = z.object({
   // Future fields: prerequisites, deliverables, ...
 });
 export type Playbook = z.infer<typeof PlaybookSchema>;
+/** The 0.x playbook (a per-chapter phase list), under the name it keeps once the compiled playbook takes `PlaybookSchema` in 1.0.0. */
+export const LegacyPlaybookSchema = PlaybookSchema;
+export type LegacyPlaybook = Playbook;
+
+// --- Compiled playbook (1.0) -------------------------------------------------
+//
+// One playbook is the compiled answer to the questions of ONE TOPIC: it crosses
+// documents, is self-contained, ties every regulatory statement to provisions and
+// keeps law, guidelines, supervisory expectations and market practice apart. It
+// is authored by the factory (one structured model call, then the verifier in
+// `playbook-verify.ts`) and rendered deterministically by `render.ts`.
+//
+// It is `CompiledPlaybookSchema` until 1.0.0 removes the 0.x tools; then it takes
+// the name `PlaybookSchema` and the legacy one is dropped. Until then the two
+// coexist, because nothing in the 0.x server reads the compiled shape.
+
+const provisionRefSchema = z.object({
+  id: regulationIdSchema,
+  // A verbatim excerpt of the provision (the verifier checks it, V2).
+  quote: z.string().max(300).optional(),
+});
+
+export const PlaybookForceSchema = z.enum(["law", "delegated_act", "guideline", "supervisory_expectation", "other"]);
+export type PlaybookForce = z.infer<typeof PlaybookForceSchema>;
+
+export const PlaybookStatusSchema = z.enum(["draft", "approved", "exemplar"]);
+export type PlaybookStatus = z.infer<typeof PlaybookStatusSchema>;
+
+export const CompiledPlaybookSchema = z.object({
+  id: playbookIdSchema,                          // playbook://{topic-id}, no document segment
+  title: z.string(),
+  area: z.string(),                              // area id from the topics file
+  summary: z.string(),                           // the direct answer, at most 180 words
+  questions: z.array(z.string()).min(1),         // typical questions; used for routing
+  applies_to: z
+    .object({
+      parameters: z.array(z.enum(["pd", "lgd", "ccf", "el", "general"])).optional(),
+      stages: z.array(z.enum(["development", "calibration", "validation", "review", "use", "governance"])).optional(),
+    })
+    .optional(),
+  // The hierarchy of sources the topic rests on.
+  basis: z.array(
+    z.object({
+      citation: z.string(),                      // rendered from the ids where provisions are given
+      force: PlaybookForceSchema,
+      role: z.string(),                          // one sentence: what this source contributes
+      provisions: z.array(provisionRefSchema).default([]),
+    }),
+  ),
+  // The ordered outline: what has to be shown.
+  requirements: z
+    .array(
+      z.object({
+        id: z.string().regex(/^R\d+$/),
+        title: z.string(),
+        statement: z.string(),                   // plain-language synthesis, at most 220 words
+        provisions: z.array(provisionRefSchema).min(1),
+        evidence: z.array(z.string()).default([]),   // what a reviewer will ask to see
+        checks: z.array(checkIdSchema).default([]),
+        tests: z.array(testIdSchema).default([]),
+      }),
+    )
+    .min(1),
+  // How, in practice.
+  methods: z
+    .array(
+      z.object({
+        name: z.string(),
+        description: z.string(),
+        // "practice" = market convention, labelled as such when rendered.
+        basis: z.enum(["regulatory", "practice"]),
+        // Only when basis is "regulatory" (the text names it).
+        provisions: z.array(regulationIdSchema).default([]),
+      }),
+    )
+    .default([]),
+  pitfalls: z.array(z.object({ text: z.string(), provisions: z.array(regulationIdSchema).default([]) })).default([]),
+  related: z.array(playbookIdSchema).default([]),
+  // Instruments the topic turns on that this library does not hold.
+  outside_library: z.array(z.object({ name: z.string(), why: z.string() })).default([]),
+  // Member provisions deliberately not cited.
+  excluded: z.array(z.object({ id: regulationIdSchema, reason: z.string() })).default([]),
+  provenance: z.object({
+    status: PlaybookStatusSchema,
+    compiled_at: z.string(),                     // ISO datetime
+    compiler: z.object({ prompt_sha: z.string(), model: z.string(), effort: z.string().optional() }).optional(),
+    // Hash over (topic spec, sorted member ids with text shas, check and test shas): what staleness compares.
+    inputs_sha: z.string(),
+    approved_by: z.string().optional(),
+    approved_at: z.string().optional(),
+  }),
+});
+export type CompiledPlaybook = z.infer<typeof CompiledPlaybookSchema>;
+
+// --- Topics (authored in the factory; the playbook ids are built from them) ---
+
+export const TopicSchema = z.object({
+  id: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  title: z.string(),
+  scope: z.string(),
+  // Public citations, resolved by the membership step.
+  anchors: z.array(z.string()).default([]),
+  questions: z.array(z.string()).default([]),
+});
+export type Topic = z.infer<typeof TopicSchema>;
+
+export const TopicsSchema = z.object({
+  version: z.number().int().min(1),
+  areas: z.array(z.object({ id: z.string(), title: z.string(), topics: z.array(TopicSchema) })),
+});
+export type Topics = z.infer<typeof TopicsSchema>;
 
 // --- Source registry (latest only — supersession is a status + pointer) -------
 
@@ -221,6 +369,10 @@ export const PendingChangeSchema = z.object({
   effective_from: z.string().date().optional(),  // absent = no application date recorded
   ingested: z.boolean(),                     // does the text this corpus serves already reflect the change?
   affects: z.array(z.string()).optional(),   // provisions concerned, free text for a reader — never parsed or matched
+  // The provisions concerned, as ids. Unlike `affects` these ARE matched: a note
+  // rides only on the records named here, where the document-level join would
+  // put it on every record of the document. Linter-checked to resolve.
+  affects_ids: z.array(regulationIdSchema).optional(),
   note: z.string().optional(),
   url: z.string().optional(),
 });
@@ -231,6 +383,18 @@ export type PendingChange = z.infer<typeof PendingChangeSchema>;
 // out of step, so nothing is surfaced beside a record.
 export const PendingChangeStateSchema = z.enum(["upcoming", "in_force_not_ingested", "undated", "ingested"]);
 export type PendingChangeState = z.infer<typeof PendingChangeStateSchema>;
+
+export const CitationStyleSchema = z.object({
+  kind: z.enum(["eba-gl", "ecb-guide", "eu-regulation", "generic"]),
+  // How the document is named in a citation: "CRR", "EBA/GL/2017/16", "ECB guide
+  // to internal models". Without it a provision cannot be cited by its official
+  // name, and the renderer falls back to the record's own `citation`.
+  short_name: z.string().optional(),
+  // Chapter number (as it appears in the id) -> the chapter's name, for
+  // documents whose citations lead with one.
+  chapters: z.record(z.string()).optional(),
+});
+export type CitationStyle = z.infer<typeof CitationStyleSchema>;
 
 export const SourceSchema = z.object({
   id: sourceIdSchema,                    // source://{framework}/{document-id}, e.g. source://eba/gl-2017-16
@@ -260,6 +424,10 @@ export const SourceSchema = z.object({
   // and found nothing pending (`verified` says when). Never defaulted to `[]`: that
   // would turn "nobody checked" into "nothing is coming".
   pending_changes: z.array(PendingChangeSchema).optional(),
+  // How this document numbers its provisions, so an id can be rendered as the
+  // citation a practitioner would write ("para. 31 of the EBA guidelines", "Ch. 3
+  // para. 186 of the ECB guide"). Absent = render the record's own `citation`.
+  citation_style: CitationStyleSchema.optional(),
   // Future fields: supersedes, celex_id, ...
 });
 export type Source = z.infer<typeof SourceSchema>;

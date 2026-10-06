@@ -262,7 +262,7 @@ describe("sources surface", () => {
 
   it("list_sources returns the seeded registry", async () => {
     const all = await adapters.source.list();
-    expect(all.length).toBe(5);
+    expect(all.length).toBe(6);
   });
 
   it("list_sources filters by status", async () => {
@@ -296,7 +296,7 @@ describe("sources surface", () => {
     const info = await adapters.meta.info();
     // Explicit assertion because zod-3 records are Partial at the type level —
     // the compiler never forces a source count into counts literals.
-    expect(info.counts.source).toBe(5);
+    expect(info.counts.source).toBe(6);
     // Exactly the deliberately-stale current seed; the superseded seed with an
     // equally old verified date must stay out.
     expect(info.stale_sources).toEqual(["source://eba/gl-2017-16"]);

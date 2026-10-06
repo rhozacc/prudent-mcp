@@ -150,11 +150,11 @@ describe("pendingChangesNote", () => {
     expect(noteFor([change({ ingested: true })])).toBeUndefined();
   });
 
-  it("an upcoming adopted change: the date, the distance, and that the text served is the version before it", () => {
+  it("an upcoming adopted change: the date, the distance, and that the text below is the version before it", () => {
     const note = noteFor([change({ title: "Amending act A", effective_from: iso(17) })]) ?? "";
     expect(note).toContain("Pending change to this document");
     expect(note).toContain(`applies from ${iso(17)} (in 17 days)`);
-    expect(note).toContain("not ingested here");
+    expect(note).toContain("the text below is the version before it");
     expect(note).toContain("the version before it");
     expect(note).not.toContain("out of date");
   });
@@ -186,7 +186,7 @@ describe("pendingChangesNote", () => {
 
   it("quotes the registry's affects hint (capped) and never parses it", () => {
     const note = noteFor([change({ affects: ["para 23(d)", "paras 31-32", "x", "y", "z"] })]) ?? "";
-    expect(note).toContain("Registry: concerns para 23(d); paras 31-32; x; y; ....");
+    expect(note).toContain("Said to concern para 23(d); paras 31-32; x; y; ....");
   });
 
   it("does not repeat a reference the title already carries, and adds one it lacks", () => {
@@ -200,7 +200,7 @@ describe("pendingChangesNote", () => {
     expect(note).toContain("Change 1");
     expect(note).toContain("Change 3");
     expect(note).not.toContain("Change 4");
-    expect(note).toContain("(2 more in get_source.)");
+    expect(note).toContain("(2 more.)");
   });
 });
 
@@ -212,10 +212,10 @@ describe("pendingSearchNotice", () => {
     expect(pendingSearchNotice([{ title: "Quiet", open: [] }])).toBeUndefined();
   });
 
-  it("names the document and the change once, and says the text served is the version before it", () => {
+  it("names the document and the change once, and says the text shown is the version before it", () => {
     const n = pendingSearchNotice([{ title: "Acme Regulation", open: open(change({ title: "Amending act", effective_from: iso(9) })) }]) ?? "";
     expect(n).toContain("Acme Regulation (Amending act, from " + iso(9) + ")");
-    expect(n).toContain("not ingested");
+    expect(n).toContain("does not yet include");
     expect(n).toContain("version before it");
   });
 
@@ -244,6 +244,14 @@ describe("the linter", () => {
 });
 
 // ── The tools over the wire ─────────────────────────────────────────────────────
+//
+// Two documents have open changes, and they are different cases. `acme-reg`'s
+// changes name no provision and no amending provision is held: they are the
+// document's business and are said at document level (`get_source`,
+// `get_corpus_info`, a search page's notice), never on its provisions. `mapped-reg`
+// is amended by `amender-reg`, whose provisions say which of its provisions they
+// replace, delete or follow, and one of its changes names a provision by id: only
+// the provisions so named are told, and a sibling that nothing names is not.
 
 const rec = (id: string, citation: string, text: string, doc = "acme-reg", framework = "acme") => ({
   id,
@@ -254,27 +262,53 @@ const rec = (id: string, citation: string, text: string, doc = "acme-reg", frame
   text: `${text} Synthetic default risk wording.`,
 });
 
-const corpus = CorpusFileSchema.parse({
-  regulation: [
-    { ...rec("regulation://acme/art-1", "Acme Article 1", "Open article one."), children: ["regulation://acme/art-1/a"] },
-    { ...rec("regulation://acme/art-1/a", "Acme Article 1(a)", "Open article one point a."), parent: "regulation://acme/art-1" },
-    rec("regulation://acme/art-2", "Acme Article 2", "Open article two."),
-    rec("regulation://quiet/q-1", "Quiet paragraph 1", "Quiet document, looked at.", "quiet-doc", "quiet"),
-    rec("regulation://silent/s-1", "Silent paragraph 1", "Silent document, never looked at.", "silent-doc", "silent"),
-  ],
-  sources: [
-    src({
-      title: "Acme Regulation",
-      pending_changes: [
-        change({ title: "Overdue amendment", effective_from: iso(-10), affects: ["Article 1"] }),
-        change({ title: "Coming amendment", effective_from: iso(30) }),
-        change({ title: "Already folded in", ingested: true, effective_from: iso(-100) }),
-      ],
-    }),
-    src({ id: "source://quiet/quiet-doc", title: "Quiet", framework: "quiet", document_id: "quiet-doc", pending_changes: [] }),
-    src({ id: "source://silent/silent-doc", title: "Silent", framework: "silent", document_id: "silent-doc" }),
-  ],
+const M = (n: number) => `regulation://mapped/m-${n}`;
+const amending = (n: number, text: string, target: number, op: "replace" | "delete" | "insert_after", effective_from: string) => ({
+  ...rec(`regulation://amender/a-${n}`, `Article ${n}`, text, "amender-reg", "amender"),
+  amends: [{ target: M(target), op, effective_from }],
 });
+
+const regulation = [
+  { ...rec("regulation://acme/art-1", "Acme Article 1", "Open article one."), children: ["regulation://acme/art-1/a"] },
+  { ...rec("regulation://acme/art-1/a", "Acme Article 1(a)", "Open article one point a."), parent: "regulation://acme/art-1" },
+  rec("regulation://acme/art-2", "Acme Article 2", "Open article two."),
+  rec(M(1), "Mapped Article 1", "Replaced by an amendment coming.", "mapped-reg", "mapped"),
+  rec(M(2), "Mapped Article 2", "Named by a change, with no amending provision held.", "mapped-reg", "mapped"),
+  rec(M(3), "Mapped Article 3", "Not named by anything.", "mapped-reg", "mapped"),
+  rec(M(4), "Mapped Article 4", "Deleted by an amendment in force.", "mapped-reg", "mapped"),
+  rec(M(5), "Mapped Article 5", "Followed by a new provision.", "mapped-reg", "mapped"),
+  amending(1, "Mapped Article 1 is replaced by the following: new rule for the first article.", 1, "replace", iso(30)),
+  amending(2, "Mapped Article 4 is deleted.", 4, "delete", iso(-10)),
+  amending(3, "After Mapped Article 5 the following is inserted: a provision about the fifth.", 5, "insert_after", iso(30)),
+  rec("regulation://quiet/q-1", "Quiet paragraph 1", "Quiet document, looked at.", "quiet-doc", "quiet"),
+  rec("regulation://silent/s-1", "Silent paragraph 1", "Silent document, never looked at.", "silent-doc", "silent"),
+];
+
+const sources = (mappedIngested = false): Source[] => [
+  src({
+    title: "Acme Regulation",
+    pending_changes: [
+      change({ title: "Overdue amendment", effective_from: iso(-10), affects: ["Article 1"] }),
+      change({ title: "Coming amendment", effective_from: iso(30) }),
+      change({ title: "Already folded in", ingested: true, effective_from: iso(-100) }),
+    ],
+  }),
+  src({
+    id: "source://mapped/mapped-reg",
+    title: "Mapped Regulation",
+    framework: "mapped",
+    document_id: "mapped-reg",
+    pending_changes: [
+      change({ title: "Mapped amendment", effective_from: iso(30), ingested: mappedIngested, affects_ids: [M(2) as never] }),
+    ],
+  }),
+  src({ id: "source://amender/amender-reg", title: "Amending Act", framework: "amender", document_id: "amender-reg", pending_changes: [] }),
+  src({ id: "source://quiet/quiet-doc", title: "Quiet", framework: "quiet", document_id: "quiet-doc", pending_changes: [] }),
+  src({ id: "source://silent/silent-doc", title: "Silent", framework: "silent", document_id: "silent-doc" }),
+];
+
+const corpusOf = (mappedIngested = false) => CorpusFileSchema.parse({ regulation, sources: sources(mappedIngested) });
+const corpus = corpusOf();
 
 describe("the pending-change signal on the tools", () => {
   let client: Client | undefined;
@@ -310,68 +344,113 @@ describe("the pending-change signal on the tools", () => {
     const text = (res.content as Array<{ text: string }>)[0]?.text ?? "";
     return { isError: res.isError === true, text, body: (res.structuredContent ?? {}) as Record<string, unknown> };
   }
+  const noteOf = async (id: string, args: Record<string, unknown> = {}): Promise<string | undefined> => {
+    const r = await call("get_regulation", { id, ...args });
+    expect(r.isError).toBe(false);
+    const n = r.body["pending_changes_note"];
+    return typeof n === "string" ? n : undefined;
+  };
 
   describe("get_regulation", () => {
-    it("carries the note, leading the body, for a document with open changes", async () => {
-      const r = await call("get_regulation", { id: "regulation://acme/art-2" });
-      expect(r.isError).toBe(false);
+    it("a provision an amendment replaces carries the note, leading the body, with the new wording", async () => {
+      const r = await call("get_regulation", { id: M(1) });
       expect(Object.keys(r.body)[0]).toBe("pending_changes_note");
       const note = String(r.body["pending_changes_note"]);
+      expect(note.startsWith("Pending change to this provision: ")).toBe(true);
+      expect(note).toContain(`Amending Act (Article 1) replaces this provision from ${iso(30)} (in 30 days)`);
+      expect(note).toContain("the text below is the version before it");
+      expect(note).toContain("New wording: “Mapped Article 1 is replaced by the following: new rule for the first article.");
+      expect(r.body["text"]).toContain("Replaced by an amendment coming.");
+    });
+
+    it("one an amendment in force deletes says the text may be out of date, leads with it, and gives no new wording", async () => {
+      const note = String(await noteOf(M(4)));
       expect(note.startsWith("Text may be out of date: ")).toBe(true);
-      expect(note).toContain("Overdue amendment");
-      expect(note).toContain("Coming amendment");
-      expect(note).toContain(`applies from ${iso(30)} (in 30 days)`);
-      expect(note).not.toContain("Already folded in");
-      expect(r.body["text"]).toContain("Open article two.");
+      expect(note).toContain(`Amending Act (Article 2) has deleted this provision since ${iso(-10)}`);
+      expect(note).toContain("may no longer be the text in force");
+      expect(note).toContain("deleted, with no new wording");
+      expect(note).not.toContain("New wording");
+    });
+
+    it("one an amendment adds a provision after says what is added, and that the text itself is unchanged", async () => {
+      const note = String(await noteOf(M(5)));
+      expect(note).toContain(`inserts a new provision after this one from ${iso(30)}`);
+      expect(note).toContain("New provision: “After Mapped Article 5 the following is inserted");
+    });
+
+    it("one a change names by id, with no amending provision held, says it in the change's own words", async () => {
+      const note = String(await noteOf(M(2)));
+      expect(note.startsWith("Pending change to this provision: ")).toBe(true);
+      expect(note).toContain(`Mapped amendment applies from ${iso(30)} (in 30 days)`);
+      expect(note).toContain("the text below is the version before it");
+      expect(note).not.toContain("New wording");
+    });
+
+    it("a sibling of the same document that nothing names carries none, though its document has open changes", async () => {
+      expect(await noteOf(M(3))).toBeUndefined();
+    });
+
+    it("a document whose open changes name no provision says nothing on its provisions", async () => {
+      for (const id of ["regulation://acme/art-1", "regulation://acme/art-1/a", "regulation://acme/art-2"]) {
+        expect(await noteOf(id), id).toBeUndefined();
+      }
     });
 
     it("says nothing for a document looked at with nothing pending, nor for one never looked at", async () => {
       for (const id of ["regulation://quiet/q-1", "regulation://silent/s-1"]) {
-        const r = await call("get_regulation", { id });
-        expect(r.isError).toBe(false);
-        expect("pending_changes_note" in r.body, id).toBe(false);
+        expect(await noteOf(id), id).toBeUndefined();
       }
     });
 
-    it("an as_of before a change applied leaves that change out; before all of them, no note at all", async () => {
-      const mid = await call("get_regulation", { id: "regulation://acme/art-2", as_of: iso(-5) });
-      const note = String(mid.body["pending_changes_note"]);
-      expect(note).toContain("Overdue amendment");
-      expect(note).not.toContain("Coming amendment");
-      const early = await call("get_regulation", { id: "regulation://acme/art-2", as_of: iso(-20) });
-      expect(early.isError).toBe(false);
-      expect("pending_changes_note" in early.body).toBe(false);
+    it("says nothing once the document's changes are ingested: the text already carries the amendments", async () => {
+      await connect(createFileAdapters(corpusOf(true)));
+      for (const n of [1, 2, 4, 5]) expect(await noteOf(M(n)), `m-${n}`).toBeUndefined();
+    });
+
+    it("an as_of before an amendment applies leaves it out; the day it applies, it is there", async () => {
+      expect(await noteOf(M(1), { as_of: iso(29) })).toBeUndefined();
+      expect(await noteOf(M(1), { as_of: iso(30) })).toContain("replaces this provision");
+      expect(await noteOf(M(4), { as_of: iso(-11) })).toBeUndefined();
+      expect(await noteOf(M(4), { as_of: iso(-10) })).toContain("has deleted this provision");
+    });
+
+    it("an as_of before a change that names the provision leaves that out too", async () => {
+      expect(await noteOf(M(2), { as_of: iso(29) })).toBeUndefined();
+      expect(await noteOf(M(2), { as_of: iso(30) })).toContain("Mapped amendment");
     });
 
     it("sits beside the as_of_note, which still comes first", async () => {
-      const r = await call("get_regulation", { id: "regulation://acme/art-2", as_of: iso(-5) });
+      const r = await call("get_regulation", { id: M(4), as_of: iso(-5) });
       const keys = Object.keys(r.body);
       expect(keys[0]).toBe("as_of_note");
       expect(keys[1]).toBe("pending_changes_note");
     });
 
     it("a miss carries no note", async () => {
-      const r = await call("get_regulation", { id: "regulation://acme/nope" });
+      const r = await call("get_regulation", { id: "regulation://mapped/nope" });
       expect(r.isError).toBe(true);
       expect(r.text).not.toContain("pending_changes_note");
     });
   });
 
-  it("expand_regulation and get_regulation_tree carry the note for the root's document", async () => {
-    const expanded = await call("expand_regulation", { id: "regulation://acme/art-1" });
-    expect(String(expanded.body["pending_changes_note"])).toContain("Overdue amendment");
-    const tree = await call("get_regulation_tree", { id: "regulation://acme/art-1" });
-    expect(String(tree.body["pending_changes_note"])).toContain("Overdue amendment");
-    const quiet = await call("expand_regulation", { id: "regulation://quiet/q-1" });
-    expect("pending_changes_note" in quiet.body).toBe(false);
+  it("expand_regulation and get_regulation_tree carry the note for the root provision, and none for an unnamed one", async () => {
+    const expanded = await call("expand_regulation", { id: M(1) });
+    expect(String(expanded.body["pending_changes_note"])).toContain("replaces this provision");
+    const tree = await call("get_regulation_tree", { id: M(1) });
+    expect(String(tree.body["pending_changes_note"])).toContain("replaces this provision");
+    for (const [tool, id] of [["expand_regulation", M(3)], ["get_regulation_tree", M(3)], ["expand_regulation", "regulation://acme/art-1"], ["expand_regulation", "regulation://quiet/q-1"]] as const) {
+      expect("pending_changes_note" in (await call(tool, { id })).body, `${tool} ${id}`).toBe(false);
+    }
   });
 
-  it("resolve_citation: a match carries the note, a decline carries none", async () => {
-    const hit = await call("resolve_citation", { text: "Acme Article 2" });
-    expect((hit.body["match"] as { id: string }).id).toBe("regulation://acme/art-2");
-    expect(String(hit.body["pending_changes_note"])).toContain("Overdue amendment");
+  it("resolve_citation: a match carries its note, an unnamed match and a decline carry none", async () => {
+    const hit = await call("resolve_citation", { text: "Mapped Article 1" });
+    expect((hit.body["match"] as { id: string }).id).toBe(M(1));
+    expect(String(hit.body["pending_changes_note"])).toContain("replaces this provision");
+    const sibling = await call("resolve_citation", { text: "Mapped Article 3" });
+    expect((sibling.body["match"] as { id: string }).id).toBe(M(3));
+    expect("pending_changes_note" in sibling.body).toBe(false);
     const quiet = await call("resolve_citation", { text: "Quiet paragraph 1" });
-    expect((quiet.body["match"] as { id: string } | null)?.id).toBe("regulation://quiet/q-1");
     expect("pending_changes_note" in quiet.body).toBe(false);
     const none = await call("resolve_citation", { text: "Acme Article 99" });
     expect(none.body["match"]).toBeNull();
@@ -379,24 +458,45 @@ describe("the pending-change signal on the tools", () => {
   });
 
   describe("search_regulation", () => {
-    it("adds one sentence to the notice when the page holds rows of such a document", async () => {
-      const r = await call("search_regulation", { query: "default risk" });
+    it("says a document whose changes name no provision once, and names the provisions that are named, not their document", async () => {
+      const r = await call("search_regulation", { query: "default risk", limit: 100 });
       const notice = String(r.body["notice"]);
-      expect(notice).toContain("a change this corpus has not ingested");
+      expect(notice).toContain("a change its text does not yet include");
       expect(notice).toContain("Acme Regulation");
       expect(notice.match(/Acme Regulation/g)?.length).toBe(1);
+      // The mapped document is not described as a document with a change; its named provisions are named.
+      expect(notice).not.toContain("Mapped Regulation");
+      expect(notice).toContain("provisions that a recorded change affects");
+      // Four are named; the sentence spells out three and counts the rest. The fifth, which nothing names, is not there.
+      const cited = [1, 2, 4, 5].filter((n) => notice.includes(`Mapped Article ${n}`));
+      expect(cited).toHaveLength(3);
+      expect(notice).toContain("; and 1 more");
+      expect(notice).not.toContain("Mapped Article 3");
+      expect(notice).toContain("The text shown is the version before it.");
+    });
+
+    it("a page of provisions nothing names says nothing about their document's changes", async () => {
+      const r = await call("search_regulation", { query: "anything" });
+      expect((r.body["results"] as Array<{ id: string }>).map((x) => x.id)).toEqual([M(3)]);
+      expect(String(r.body["notice"] ?? "")).not.toContain("change");
+    });
+
+    it("one named provision on the page is said in the singular, by citation", async () => {
+      const r = await call("search_regulation", { query: "coming" });
+      expect((r.body["results"] as Array<{ id: string }>).map((x) => x.id)).toEqual([M(1)]);
+      const notice = String(r.body["notice"]);
+      expect(notice).toContain("One result is a provision that a recorded change affects: Mapped Article 1.");
     });
 
     it("appends it after the truncation notice instead of replacing it", async () => {
       const r = await call("search_regulation", { query: "default risk", limit: 1 });
       const notice = String(r.body["notice"]);
       expect(notice.startsWith("Showing 1 of ")).toBe(true);
-      expect(notice).toContain("not ingested");
     });
 
     it("is about the rows on the page: a page of quiet rows says nothing", async () => {
       const r = await call("search_regulation", { query: "Quiet document" });
-      expect(String(r.body["notice"] ?? "")).not.toContain("not ingested");
+      expect(String(r.body["notice"] ?? "")).not.toContain("does not yet include");
     });
   });
 
@@ -406,6 +506,7 @@ describe("the pending-change signal on the tools", () => {
     expect(list.map((c) => [c.title, c.state])).toEqual([
       ["Overdue amendment", "in_force_not_ingested"],
       ["Coming amendment", "upcoming"],
+      ["Mapped amendment", "upcoming"],
     ]);
   });
 
@@ -428,6 +529,7 @@ describe("the pending-change signal on the tools", () => {
     // Read the serialized body: `undefined`-valued keys drop out of it, as they do on a real wire.
     const rows = (JSON.parse(listed.text) as { sources: Array<{ id: string; open_pending_changes?: number }> }).sources;
     expect(rows.find((s) => s.id === "source://acme/acme-reg")?.open_pending_changes).toBe(2);
+    expect(rows.find((s) => s.id === "source://mapped/mapped-reg")?.open_pending_changes).toBe(1);
     expect("open_pending_changes" in (rows.find((s) => s.id === "source://quiet/quiet-doc") ?? {})).toBe(false);
     // A source that declares nothing is served as stored.
     const silent = await call("get_source", { id: "source://silent/silent-doc" });
@@ -436,8 +538,6 @@ describe("the pending-change signal on the tools", () => {
 
   it("a backend with no registry serves no note", async () => {
     adapters.source = { async list() { return []; }, async get() { return null; } };
-    const r = await call("get_regulation", { id: "regulation://acme/art-2" });
-    expect(r.isError).toBe(false);
-    expect("pending_changes_note" in r.body).toBe(false);
+    expect(await noteOf(M(1))).toBeUndefined();
   });
 });

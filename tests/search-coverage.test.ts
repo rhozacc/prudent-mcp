@@ -131,8 +131,8 @@ describe("search coverage over the wire", () => {
         const notice = r.body["notice"] as string;
         expect(notice).toBe(weakMatchNotice(4, 9));
         expect(notice).toMatch(/only 4 of the query's 9 meaningful terms/);
-        expect(notice).toMatch(/may not be in this corpus/);
-        expect(notice).toMatch(/statement about the corpus, not about the law/);
+        expect(notice).toMatch(/may not be in this library/);
+        expect(notice).toMatch(/statement about what this library holds, not about the law/);
       });
 
       it("does not raise it at exactly half, or above", async () => {
@@ -180,8 +180,8 @@ describe("search coverage over the wire", () => {
         expect(notice).toBe(weakMatchNotice(0, 2));
         expect(notice).toMatch(/partial-word matches only/);
         expect(notice).not.toMatch(/only 0 of/);
-        expect(notice).not.toMatch(/may not be in this corpus/);
-        expect(notice).toMatch(/statement about the corpus, not about the law/);
+        expect(notice).not.toMatch(/may not be in this library/);
+        expect(notice).toMatch(/statement about what this library holds, not about the law/);
       });
 
       it("counts distinct meaningful terms: stopwords and repeats are not terms", async () => {

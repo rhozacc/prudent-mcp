@@ -207,10 +207,10 @@ describe("as_of_note on the regulation tools", () => {
       const note = as_of_note as string;
       expect(note).toContain("2024-12-31");
       expect(note).toContain("2024-05-01"); // document_version of the record served
-      expect(note).toContain("document_version");
-      expect(note).toMatch(/records no version/i);
+      expect(note).toMatch(/version dated 2024-05-01/);
+      expect(note).toMatch(/has no version/i);
       expect(note).toMatch(/may differ from the text in force/i);
-      expect(note).toMatch(/not present it as the historical text/i);
+      expect(note).toMatch(/not present it as the text of that date/i);
       // The same note is in the text block a client reads.
       expect(JSON.parse(r.text).as_of_note).toBe(note);
     });
@@ -249,22 +249,22 @@ describe("as_of_note on the regulation tools", () => {
     it("history present but the date predates every entry is still a miss", async () => {
       const r = await call("get_regulation", { id: art1b.id, as_of: "2010-01-01" });
       expect(r.isError).toBe(true);
-      expect(r.text).toContain("No version of");
+      expect(r.text).toContain("has no version of");
       // The miss says what the same call does elsewhere, so it is not read as
       // "as_of is unsupported" — and the date dropped along with the note.
-      expect(r.text).toMatch(/current text is served together with an as_of_note/);
+      expect(r.text).toMatch(/current text is returned together with an as_of_note/);
     });
 
     it("a date before the document existed is still a miss", async () => {
       const r = await call("get_regulation", { id: young.id, as_of: "2016-01-01" });
       expect(r.isError).toBe(true);
-      expect(r.text).toContain("No version of");
+      expect(r.text).toContain("has no version of");
     });
 
     it("an unknown id is still the plain miss", async () => {
       const r = await call("get_regulation", { id: "regulation://acme/nope", as_of: "2020-01-01" });
       expect(r.isError).toBe(true);
-      expect(r.text).toContain("No record for");
+      expect(r.text).toContain("No provision has the id");
     });
 
     it("publishes as_of_note in the output schema without closing it", async () => {
@@ -341,7 +341,7 @@ describe("as_of_note on the regulation tools", () => {
         expect(r.body["text"], detail).toBe(OLD);
         const note = r.body["as_of_note"] as string;
         expect(typeof note, detail).toBe("string");
-        expect(note).toContain("1 child of this provision was served from current text");
+        expect(note).toContain("1 child of this provision was shown from current text");
         expect(note).toContain("2019-01-01");
         // The record itself is the historical version; the note must not call it current.
         expect(note).not.toContain("document_version (2024-05-01)");
@@ -364,7 +364,7 @@ describe("as_of_note on the regulation tools", () => {
       };
       await connect(adapter);
       const r = await call("expand_regulation", { id: wide.id, as_of: "2019-01-01" });
-      expect(r.body["as_of_note"]).toContain("2 children of this provision were served from current text");
+      expect(r.body["as_of_note"]).toContain("2 children of this provision were shown from current text");
     });
 
     it("misses are unchanged", async () => {
@@ -374,12 +374,12 @@ describe("as_of_note on the regulation tools", () => {
 
     it("a miss says that current text comes with an as_of_note elsewhere", async () => {
       const r = await call("expand_regulation", { id: art1b.id, as_of: "2010-01-01" });
-      expect(r.text).toMatch(/current text is served together with an as_of_note/);
+      expect(r.text).toMatch(/current text is returned together with an as_of_note/);
     });
   });
 
   describe("get_regulation_tree", () => {
-    it("puts one note on the root and counts the other nodes served from current text", async () => {
+    it("puts one note on the root and counts the other nodes shown from current text", async () => {
       // art-1 and art-1/a and art-1/b/i have no history; art-1/b is served from it.
       const r = await call("get_regulation_tree", { id: art1.id, as_of: "2019-01-01", detail: "full" });
       expect(r.isError).toBe(false);
@@ -409,7 +409,7 @@ describe("as_of_note on the regulation tools", () => {
     it("a root of its own, with no other node from current text, gets the plain note", async () => {
       const r = await call("get_regulation_tree", { id: art1a.id, as_of: "2019-01-01" });
       const note = r.body["as_of_note"] as string;
-      expect(note).toMatch(/records no version of this provision/i);
+      expect(note).toMatch(/has no version of this provision/i);
       expect(note).not.toMatch(/other provision/i);
     });
 
@@ -439,7 +439,7 @@ describe("as_of_note on the regulation tools", () => {
 
     it("a miss says that current text comes with an as_of_note elsewhere", async () => {
       const r = await call("get_regulation_tree", { id: art1b.id, as_of: "2010-01-01" });
-      expect(r.text).toMatch(/current text is served together with an as_of_note/);
+      expect(r.text).toMatch(/current text is returned together with an as_of_note/);
     });
   });
 
@@ -475,13 +475,13 @@ describe("as_of_note on the regulation tools", () => {
       await connect(rooted(gappy, lone));
     });
 
-    it("expand_regulation counts the children with no version, apart from the ones served from current text", async () => {
+    it("expand_regulation counts the children with no version, apart from the ones shown from current text", async () => {
       const r = await call("expand_regulation", { id: gappy.id, as_of: DATE });
       expect(r.isError).toBe(false);
       const note = r.body["as_of_note"] as string;
       expect(typeof note).toBe("string");
-      expect(note).toContain("1 child of this provision was served from current text");
-      expect(note).toContain("2 children of this provision have no recorded version for the requested as_of date (2016-01-01)");
+      expect(note).toContain("1 child of this provision was shown from current text");
+      expect(note).toContain("2 children of this provision have no version held for the requested date (2016-01-01)");
       expect(note).toContain("listed by id only, with no label or text");
       expect(note).toContain("not evidence that they did not exist or did not apply on that date");
       // The id the corpus does not hold at all is a dangling reference, not a gap.
@@ -501,9 +501,9 @@ describe("as_of_note on the regulation tools", () => {
     it("says so when the children with no version are the only thing to say, and in the singular", async () => {
       const r = await call("expand_regulation", { id: lone.id, as_of: DATE });
       const note = r.body["as_of_note"] as string;
-      expect(note).toContain("1 child of this provision has no recorded version for the requested as_of date (2016-01-01)");
+      expect(note).toContain("1 child of this provision has no version held for the requested date (2016-01-01)");
       expect(note).toContain("it is listed by id only");
-      expect(note).not.toContain("served from current text");
+      expect(note).not.toContain("shown from current text");
       expect(Object.keys(r.body)[0]).toBe("as_of_note");
     });
 
@@ -517,8 +517,8 @@ describe("as_of_note on the regulation tools", () => {
       const r = await call("get_regulation_tree", { id: gappy.id, as_of: DATE });
       expect(r.isError).toBe(false);
       const note = r.body["as_of_note"] as string;
-      expect(note).toContain("1 provision in this tree other than the root was served from current text");
-      expect(note).toContain("2 provisions in this tree other than the root have no recorded version for the requested as_of date (2016-01-01)");
+      expect(note).toContain("1 provision in this tree other than the root was shown from current text");
+      expect(note).toContain("2 provisions in this tree other than the root have no version held for the requested date (2016-01-01)");
       expect(note).toContain("by id only, with no label or text, and the walk goes no further there");
       expect(r.text.match(/as_of_note/g)).toHaveLength(1);
       const kids = (r.body as unknown as { children: Array<{ id: string; citation: string }> }).children;
@@ -528,7 +528,7 @@ describe("as_of_note on the regulation tools", () => {
 
     it("get_regulation_tree says it in the singular as well", async () => {
       const note = (await call("get_regulation_tree", { id: lone.id, as_of: DATE })).body["as_of_note"] as string;
-      expect(note).toContain("1 provision in this tree other than the root has no recorded version");
+      expect(note).toContain("1 provision in this tree other than the root has no version held");
       expect(note).toContain("it appears by id only");
     });
 
@@ -540,9 +540,9 @@ describe("as_of_note on the regulation tools", () => {
       };
       await connect(legacy);
       const note = (await call("expand_regulation", { id: lone.id, as_of: DATE })).body["as_of_note"] as string;
-      expect(note).toContain("1 child of this provision has no recorded version");
+      expect(note).toContain("1 child of this provision has no version held");
       // ...and still asserts no substitution of its own: nothing here says the root was current text.
-      expect(note).not.toContain("served from current text");
+      expect(note).not.toContain("shown from current text");
     });
   });
 

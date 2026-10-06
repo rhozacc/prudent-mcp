@@ -114,7 +114,7 @@ describe("withPlaceholderFlag", () => {
     const out = withPlaceholderFlag({ id: "regulation://a/b", text: "see Regulation (EU) xx/xx [RTS]" }) as Record<string, unknown>;
     expect(Object.keys(out).slice(0, 2)).toEqual(["pre_adoption_placeholders", "notice"]);
     expect(out["notice"]).toMatch(/placeholder is not a citation/);
-    expect(out["notice"]).toMatch(/elsewhere in the corpus or not at all/);
+    expect(out["notice"]).toMatch(/elsewhere in this library or not at all/);
     expect(out["notice"]).toMatch(/current state of the law/);
   });
 

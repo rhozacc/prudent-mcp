@@ -80,7 +80,7 @@ describe("eval I13 on servers that do not declare it", () => {
     session.call = async (tool, args = {}) => {
       const t = await inner(tool, args);
       if (/\s/.test(String(args["query"] ?? "").trim()) || t.json === undefined) return t;
-      const json = { ...(t.json as object), notice: "The best result matches only 0 of the query's 1 meaningful terms, so the topic may not be in this corpus." };
+      const json = { ...(t.json as object), notice: "The best result matches only 0 of the query's 1 meaningful terms, so the topic may not be in this library." };
       return { ...t, json, text: JSON.stringify(json) };
     };
     const r = await weakBestMatchIsDeclared(session);
@@ -95,7 +95,7 @@ describe("eval I13 on servers that do not declare it", () => {
 
   it("fails a server that overstates how much of the query a hit matched", async () => {
     const r = await weakBestMatchIsDeclared(
-      stub({ query_tokens: 4, best_coverage: 3, results: [{ id: "x://y/z", coverage: 3 }], notice: "The topic may not be in this corpus; this is not about the law." }),
+      stub({ query_tokens: 4, best_coverage: 3, results: [{ id: "x://y/z", coverage: 3 }], notice: "The topic may not be in this library; this is not about the law." }),
     );
     const fatal = r.findings.filter((f) => f.severity === "fatal");
     expect(fatal.length).toBe(4);
@@ -108,7 +108,7 @@ describe("eval I13 on servers that do not declare it", () => {
         query_tokens: 4,
         best_coverage: 1,
         results: [{ id: "x://y/z", coverage: 1 }],
-        notice: "Showing 1 of 500 matches. The best result matches only 1 of the query's 4 meaningful terms, so the topic may not be in this corpus. Absence of a strong match is a statement about the corpus, not about the law.",
+        notice: "Showing 1 of 500 matches. The best result matches only 1 of the query's 4 meaningful terms, so the topic may not be in this library. Not finding a strong match is a statement about what this library holds, not about the law.",
       }),
     );
     expect(r.findings).toEqual([]);
