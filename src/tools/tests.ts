@@ -14,6 +14,7 @@ import {
   miss,
   ok,
   rankedSearchResult,
+  searchGlossary,
   rowCoverageShape,
   searchInputShape,
   searchOutputShape,
@@ -45,10 +46,12 @@ export function registerTestTools(server: McpServer): void {
     },
     async ({ query, limit, offset, detail }) => {
       const records = await adapters.test.search(query);
+      const options = { glossary: await searchGlossary() };
       return rankedSearchResult({
         records,
         query,
         fields: testSearchFields,
+        options,
         detail,
         limit,
         offset,

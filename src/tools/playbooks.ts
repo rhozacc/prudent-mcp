@@ -14,6 +14,7 @@ import {
   miss,
   ok,
   rankedSearchResult,
+  searchGlossary,
   rowCoverageShape,
   searchInputShape,
   searchOutputShape,
@@ -82,10 +83,12 @@ export function registerPlaybookTools(server: McpServer): void {
     },
     async ({ query, limit, offset, detail }) => {
       const records = await adapters.playbook.search(query);
+      const options = { glossary: await searchGlossary() };
       return rankedSearchResult({
         records,
         query,
         fields: playbookSearchFields,
+        options,
         detail,
         limit,
         offset,

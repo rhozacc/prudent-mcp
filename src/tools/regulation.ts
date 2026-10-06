@@ -8,7 +8,7 @@ import { adapters } from "../adapters.ts";
 import { MAX_PLACEHOLDER_SPANS, MAX_PLACEHOLDER_SPAN_CHARS, withPlaceholderFlag } from "../placeholders.ts";
 import type { Regulation } from "../schema.ts";
 import { ProvisionKindSchema, RegulationSchema, regulationIdSchema } from "../schema.ts";
-import { regulationSearchFields } from "../search.ts";
+import { regulationRanking, regulationSearchFields } from "../search.ts";
 import { pendingNoteFor, pendingPageNotice, withPendingNote } from "./pending.ts";
 import {
   AS_OF_MISS_CONTEXT,
@@ -17,6 +17,7 @@ import {
   miss,
   ok,
   rankedSearchResult,
+  searchGlossary,
   resolveRegulation,
   rowCoverageShape,
   searchInputShape,
@@ -77,7 +78,7 @@ export function registerRegulationTools(server: McpServer): void {
     {
       title: "Search regulation",
       description:
-        "Ranked, field-scoped search over regulation citation, text, and commentary " +
+        "Ranked, field-scoped search over regulation heading path, citation, text, and commentary " +
         "(record ids join in only for URI-like queries). Returns { results, returned, " +
         "total_matches, offset, truncated, next_offset, notice }; total_matches is the whole " +
         "match set, not this page. Concise results (default) are { id, citation, " +
@@ -86,7 +87,13 @@ export function registerRegulationTools(server: McpServer): void {
         "capped (commentary_omitted says how many were left out; get_regulation serves them " +
         "all). Latest versions only. Follow up with get_regulation (as_of for history) or " +
         "get_referrers on any id.",
-      inputSchema: searchInputShape("citation, text, and commentary"),
+      inputSchema: {
+        ...searchInputShape("heading path, citation, text, and commentary"),
+        scope: z
+          .enum(["default", "all"])
+          .default("default")
+          .describe("all also searches background material, which is left out by default."),
+      },
       outputSchema: searchOutputShape(
         z.union([
           ConciseRegulationHit,
@@ -101,8 +108,9 @@ export function registerRegulationTools(server: McpServer): void {
       ),
       annotations: READ_ONLY_HINTS,
     },
-    async ({ query, limit, offset, detail }) => {
-      const records = await adapters.regulation.search(query);
+    async ({ query, limit, offset, detail, scope }) => {
+      const records = await adapters.regulation.search(query, { scope });
+      const options = regulationRanking({ scope, glossary: await searchGlossary() });
       // Rows from a document with a change the corpus has not ingested say so once
       // per page, in `notice`; the note on each record is one get_regulation away.
       const pageNotice = await pendingPageNotice(records);
@@ -112,6 +120,7 @@ export function registerRegulationTools(server: McpServer): void {
         pageNotice,
         query,
         fields: regulationSearchFields(query),
+        options,
         detail,
         limit,
         offset,

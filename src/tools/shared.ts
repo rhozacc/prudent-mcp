@@ -19,7 +19,15 @@ import { z } from "zod";
 import { adapters } from "../adapters.ts";
 import { computeHoldings, missingRecordClause } from "../holdings.ts";
 import type { Regulation, RegulationId } from "../schema.ts";
-import { distinctQueryTokens, rankedSearch, type SearchField, type SearchMatch } from "../search.ts";
+import {
+  distinctQueryTokens,
+  rankedSearch,
+  rankingOf,
+  type Glossary,
+  type RankOptions,
+  type SearchField,
+  type SearchMatch,
+} from "../search.ts";
 
 // Every tool on this server reads a local knowledge base and nothing else.
 export const READ_ONLY_HINTS: ToolAnnotations = {
@@ -248,6 +256,16 @@ export interface RankedSearchPage<T extends { id: string }, Row extends object> 
    * notices and never in place of them.
    */
   pageNotice?: (pageRows: object[]) => string | undefined;
+  /**
+   * The ranking knobs the adapter searched with (glossary, scope). Passed on to
+   * the local recompute so its coverage and excerpts describe the same ranking.
+   */
+  options?: RankOptions<T>;
+}
+
+/** The corpus's abbreviation table, when the adapter carries one. */
+export async function searchGlossary(): Promise<Glossary | undefined> {
+  return adapters.meta.glossary?.();
 }
 
 /**
@@ -266,16 +284,24 @@ export function rankedSearchResult<T extends { id: string }, Row extends object>
   page: RankedSearchPage<T, Row>,
 ): CallToolResult {
   const { records, query, fields, detail, limit, offset } = page;
-  const ranked = rankedSearch(records, query, fields);
+  // The adapter's own ranking when it left one (see `rankedRecords`); otherwise
+  // the records are ranked again here, with the field set and knobs it used.
+  const ranked = rankingOf(records) ?? rankedSearch(records, query, fields, undefined, page.options);
   const byId = new Map(ranked.map((m) => [m.record.id, m]));
-  const rows: object[] =
-    detail === "full"
-      ? records.map((r) => (page.full === undefined ? r : page.full(r)))
-      : records.map((r) => {
-          const match = byId.get(r.id);
-          const row = page.concise(r, match);
-          return match === undefined ? row : { ...row, coverage: match.coverage };
-        });
+  // Rows are built for the requested window only — `paginate` reads nothing
+  // else, and a concise row costs an excerpt. The array keeps its full length
+  // so `total_matches` counts every match.
+  const rows: object[] = new Array<object>(records.length);
+  for (let i = offset; i < Math.min(records.length, offset + limit); i++) {
+    const r = records[i]!;
+    if (detail === "full") {
+      rows[i] = page.full === undefined ? r : page.full(r);
+    } else {
+      const match = byId.get(r.id);
+      const row = page.concise(r, match);
+      rows[i] = match === undefined ? row : { ...row, coverage: match.coverage };
+    }
+  }
   // Highest of the whole ranked set, taken before paging.
   const best = ranked.reduce<number | undefined>((b, m) => (b === undefined || m.coverage > b ? m.coverage : b), undefined);
   const envelope = withQueryCoverage(paginate(rows, limit, offset), distinctQueryTokens(query), best);

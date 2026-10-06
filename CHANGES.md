@@ -12,6 +12,17 @@
 - **Corpus file: `glossary` and `topics`** — validated and passed through; the server reads neither yet.
 - **Linter, both fatal** — an `amends[].target` resolves to a record of a *different* document (framework + `document_id`); every `affects_ids` entry resolves.
 
+**Ranking 0.11 (behaviour change, search order only).** `rankedSearch` is now BM25F; nothing else about a search response changes shape (`total_matches`, `coverage`, `query_tokens`, `best_coverage`, notices, excerpts and paging are as before).
+
+- **IDF, saturation and length normalisation replace the occurrence sum, and coverage no longer sorts.** The sum let a long record repeating common words outrank the one paragraph that said the rare word once. Fields and weights for regulation: `heading_path` 3, `citation` 2, `text` 1, `commentary` 0.3 (checks, tests and playbooks keep their field sets). Coverage is still computed and still drives the weak-match notice; one guard stays above the score — a record matched only loosely never outranks one that matched a typed word.
+- **Terms are stemmed** (plurals and verb inflection only; derivational endings are deliberately left alone, which measured better) at index and query time by one function.
+- **A longer word containing a query term of four or more letters still scores, at a quarter weight and never as coverage**, as the substring match it replaces did.
+- **Glossary.** The corpus file's optional `glossary` expands an abbreviation into the phrases the texts use; a phrase is one pseudo-term present where its words run together. `MetaAdapter.glossary?()` exposes it to the tool layer.
+- **`search_regulation` gains `scope: "default" | "all"`.** The default leaves out records marked `role: background`; `all` includes them. Records with no `role` are unaffected. `section` records rank at 0.35 and `is_metadata_only` records at 0.5 of an equal match.
+- **`RegulationAdapter.search(query, options?)`** takes `{ scope }`; an adapter that ignores it keeps compiling. New exports from `src/search.ts`: `stem`, `regulationRanking`, `rankedRecords`, `rankingOf`, and the `Glossary`, `RankOptions` and `SearchScope` types.
+- **Faster.** The index is built once per corpus and the tool layer reads the adapter's ranking back instead of re-ranking, and cuts excerpts only for the page it returns: a warm regulation search over a corpus of about a thousand records takes about a third of what it did before.
+- **Tests updated:** two that pinned the old arithmetic (a raw occurrence-count score; the loser of a coverage-first ordering scoring higher) now assert the BM25F equivalents.
+
 ## Say what is coming
 
 **0.10.0.** Additive: every new key is optional, published output schemas stay open, and a corpus file written for 0.9.0 loads unchanged and serves exactly what it did (no source declares the new field, so nothing new is said). Prompted by a gap the registry could already half-fill: `verified` and `stale_sources` say when the registry last looked, and `milestones` list dates, but nothing said that a document's text had been overtaken, or would be, or whether this corpus had caught up. A text the law has moved past reads exactly like one it has not.

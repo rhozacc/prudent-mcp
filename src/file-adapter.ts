@@ -16,7 +16,9 @@ import { computeReferrers } from "./referrers.ts";
 import {
   checkSearchFields,
   playbookSearchFields,
+  rankedRecords,
   rankedSearch,
+  regulationRanking,
   regulationSearchFields,
   testSearchFields,
 } from "./search.ts";
@@ -1930,8 +1932,9 @@ export function createFileAdapters(corpus: CorpusFile): {
   };
 
   const regulation: RegulationAdapter = {
-    async search(query) {
-      return rankedSearch(corpus.regulation, query, regulationSearchFields(query)).map(m => m.record);
+    async search(query, options) {
+      const ranking = regulationRanking({ scope: options?.scope, glossary: corpus.glossary });
+      return rankedRecords(corpus.regulation, query, regulationSearchFields(query), undefined, ranking);
     },
     async get(id, asOf) {
       if (asOf === undefined) return regMap.get(id) ?? null;
@@ -1943,7 +1946,7 @@ export function createFileAdapters(corpus: CorpusFile): {
 
   const test: TestAdapter = {
     async search(query) {
-      return rankedSearch(corpus.tests, query, testSearchFields).map(m => m.record);
+      return rankedRecords(corpus.tests, query, testSearchFields, undefined, { glossary: corpus.glossary });
     },
     async get(id) { return testMap.get(id) ?? null; },
     async list() { return corpus.tests; },
@@ -1951,7 +1954,7 @@ export function createFileAdapters(corpus: CorpusFile): {
 
   const check: CheckAdapter = {
     async search(query) {
-      return rankedSearch(corpus.checks, query, checkSearchFields).map(m => m.record);
+      return rankedRecords(corpus.checks, query, checkSearchFields, undefined, { glossary: corpus.glossary });
     },
     async get(id) { return checkMap.get(id) ?? null; },
     async list() { return corpus.checks; },
@@ -1959,7 +1962,7 @@ export function createFileAdapters(corpus: CorpusFile): {
 
   const playbook: PlaybookAdapter = {
     async search(query) {
-      return rankedSearch(corpus.playbooks, query, playbookSearchFields).map(m => m.record);
+      return rankedRecords(corpus.playbooks, query, playbookSearchFields, undefined, { glossary: corpus.glossary });
     },
     async get(id) { return playbookMap.get(id) ?? null; },
     async list() { return corpus.playbooks; },
@@ -2030,6 +2033,9 @@ export function createFileAdapters(corpus: CorpusFile): {
       // rather than serving [] — an empty list here takes list_review_areas
       // AND get_area_overview out of service, and those are the entry path.
       return corpus.taxonomy.length > 0 ? corpus.taxonomy : deriveTaxonomy(corpus.playbooks);
+    },
+    async glossary() {
+      return corpus.glossary;
     },
   };
 

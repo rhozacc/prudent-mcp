@@ -204,7 +204,7 @@ describe("coverage — how many of the query's tokens a record matched", () => {
     expect(hits[0]!.query_tokens).toBe(2);
   });
 
-  it("ranks a record matching every token above one matching fewer at a HIGHER score", () => {
+  it("ranks a record matching every token above one matching fewer, on score", () => {
     // `narrow` matches both tokens once. `broad` matches only "model", but
     // eight times, so the old sum put it first.
     const narrow = check("check://narrow", "model lifecycle", "");
@@ -213,9 +213,9 @@ describe("coverage — how many of the query's tokens a record matched", () => {
 
     expect(hits[0]!.record.id).toBe("check://narrow");
     expect(hits[0]!.coverage).toBe(2);
-    // Pinning that this is coverage doing the work, not score: the loser
-    // genuinely scores higher.
-    expect(hits[1]!.score).toBeGreaterThan(hits[0]!.score);
+    // Updated for BM25F: coverage no longer sorts, because saturation and IDF do
+    // the work it was added for — the winner now also has the higher score.
+    expect(hits[0]!.score).toBeGreaterThan(hits[1]!.score);
   });
 
   it("falls back to score within one coverage tier", () => {
@@ -320,7 +320,8 @@ describe("array-valued search fields", () => {
       { name: "tags", weight: 1, get: (r) => r.tags },
     ];
     const [m] = rankedSearch([{ tags: ["nothing here", "jeffreys prior", "jeffreys again"] }], "jeffreys", fields);
-    expect(m!.score).toBe(2); // one whole-word occurrence per value
+    // Updated for BM25F: a score is no longer a raw occurrence count, only positive.
+    expect(m!.score).toBeGreaterThan(0);
     expect(m!.matched.excerpt).toBe("jeffreys prior");
   });
 });
