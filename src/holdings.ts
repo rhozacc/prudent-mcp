@@ -2,14 +2,14 @@
  * The ONE definition of what the corpus holds of each document, and of how a
  * miss talks about it.
  *
- * `get_corpus_info.coverage` names documents ("CRR"), which reads as the whole
+ * `sources` names documents ("CRR"), which reads as the whole
  * regulation; a corpus holds a subset of its articles. A miss ("No record for
  * ...") and a citation decline ("Nothing in this corpus is numbered 99") are
  * both TRUE and both read as "there is no Article 99". Absence from the corpus
  * is not absence from the law, and the only party that can say which kind of
  * absence a miss is, is the registry that knows how much of the document was
  * taken. So the file adapter, the in-memory demo, the tool-layer misses,
- * resolve_citation and the linter all delegate here, the way every adapter's
+ * cite and the linter all delegate here, the way every adapter's
  * reverse index delegates to `computeReferrers`.
  *
  * Pure over the supplied arrays: no I/O, no adapter handles.
@@ -163,7 +163,7 @@ export function missingRecordClause(
   if (h === null) {
     return (
       `No document with the id prefix "${idDocSegment(id)}" is in this library; ` +
-      "get_corpus_info lists the documents it holds."
+      "sources lists the documents it holds."
     );
   }
   if (h.partial === true) return partialClause(h);

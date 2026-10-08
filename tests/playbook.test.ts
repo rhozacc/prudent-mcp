@@ -7,17 +7,17 @@ import { verifyPlaybook, type Verification } from "../src/playbook-verify.ts";
 import { basisCitation, forceLabel, renderPlaybook } from "../src/render.ts";
 import {
   CitationStyleSchema,
-  CompiledPlaybookSchema,
+  PlaybookSchema,
   LegacyPlaybookSchema,
   PlaybookSchema,
   TopicsSchema,
-  type CompiledPlaybook,
+  type Playbook,
   type Regulation,
   type RegulationId,
   type Source,
 } from "../src/schema.ts";
 
-const demo = (): CompiledPlaybook => structuredClone(CompiledPlaybookSchema.parse(DEMO_COMPILED_PLAYBOOKS["playbook://pd-long-run-average"]));
+const demo = (): Playbook => structuredClone(PlaybookSchema.parse(DEMO_COMPILED_PLAYBOOKS["playbook://pd-long-run-average"]));
 const ctx = (): PlaybookContext => demoPlaybookContext();
 const MEMBERS: RegulationId[] = [
   "regulation://crr/180",
@@ -25,7 +25,7 @@ const MEMBERS: RegulationId[] = [
   "regulation://eba/gl-2017-16/78",
   "regulation://eba/gl-2017-16/s4",
 ];
-const verify = (pb: CompiledPlaybook, c: PlaybookContext = ctx(), members: readonly RegulationId[] = MEMBERS): Verification => verifyPlaybook(pb, c, { members });
+const verify = (pb: Playbook, c: PlaybookContext = ctx(), members: readonly RegulationId[] = MEMBERS): Verification => verifyPlaybook(pb, c, { members });
 const rules = (v: Verification): string[] => v.errors.map((f) => f.rule);
 
 /** The demo context plus provisions of the demo documents the demo playbook does not cite. */
@@ -53,7 +53,7 @@ const source = (style: Source["citation_style"]): Source => ({
 
 describe("the compiled playbook schema", () => {
   test("the demo playbook and topics parse", () => {
-    expect(() => CompiledPlaybookSchema.parse(DEMO_COMPILED_PLAYBOOKS["playbook://pd-long-run-average"])).not.toThrow();
+    expect(() => PlaybookSchema.parse(DEMO_COMPILED_PLAYBOOKS["playbook://pd-long-run-average"])).not.toThrow();
     expect(() => TopicsSchema.parse(DEMO_TOPICS)).not.toThrow();
   });
 
@@ -63,11 +63,11 @@ describe("the compiled playbook schema", () => {
 
   test("a requirement needs a handle and a provision; a quote is bounded", () => {
     const base = demo();
-    expect(CompiledPlaybookSchema.safeParse({ ...base, requirements: [{ ...base.requirements[0]!, id: "req1" }] }).success).toBe(false);
-    expect(CompiledPlaybookSchema.safeParse({ ...base, requirements: [{ ...base.requirements[0]!, provisions: [] }] }).success).toBe(false);
+    expect(PlaybookSchema.safeParse({ ...base, requirements: [{ ...base.requirements[0]!, id: "req1" }] }).success).toBe(false);
+    expect(PlaybookSchema.safeParse({ ...base, requirements: [{ ...base.requirements[0]!, provisions: [] }] }).success).toBe(false);
     const long = { ...base.basis[0]!, provisions: [{ id: "regulation://crr/180/1/a", quote: "x".repeat(301) }] };
-    expect(CompiledPlaybookSchema.safeParse({ ...base, basis: [long] }).success).toBe(false);
-    expect(CompiledPlaybookSchema.safeParse({ ...base, questions: [] }).success).toBe(false);
+    expect(PlaybookSchema.safeParse({ ...base, basis: [long] }).success).toBe(false);
+    expect(PlaybookSchema.safeParse({ ...base, questions: [] }).success).toBe(false);
   });
 
   test("a citation style may carry the document's short name", () => {

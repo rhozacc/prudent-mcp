@@ -771,10 +771,12 @@ export const checkSearchFields: SearchField<Check>[] = [
 ];
 
 export const playbookSearchFields: SearchField<Playbook>[] = [
-  { name: "area", weight: 3, get: (p) => p.area },
-  { name: "subarea", weight: 3, get: (p) => p.subarea },
-  { name: "phase_names", weight: 2, get: (p) => p.phases.map((ph) => ph.name) },
-  { name: "phase_descriptions", weight: 1, get: (p) => p.phases.map((ph) => ph.description) },
+  { name: "title", weight: 3, get: (p) => p.title },
+  { name: "questions", weight: 3, get: (p) => p.questions },
+  { name: "summary", weight: 1.5, get: (p) => p.summary },
+  { name: "requirement_titles", weight: 2, get: (p) => p.requirements.map((r) => r.title) },
+  { name: "requirement_statements", weight: 1, get: (p) => p.requirements.map((r) => r.statement) },
+  { name: "pitfalls", weight: 0.5, get: (p) => p.pitfalls.map((x) => x.text) },
 ];
 
 export const sourceSearchFields: SearchField<Source>[] = [

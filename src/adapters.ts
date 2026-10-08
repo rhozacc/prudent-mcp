@@ -13,6 +13,7 @@
  *   adapters.regulation = new HttpRegulationAdapter("https://corpus.example.com");
  */
 import type {
+  Topics,
   Check,
   CheckId,
   CitationResolution,
@@ -22,7 +23,6 @@ import type {
   Referrers,
   Regulation,
   RegulationId,
-  ReviewArea,
   Source,
   SourceId,
   SourceStatus,
@@ -143,7 +143,12 @@ export interface MetaAdapter {
    * printed the guess as a citation.
    */
   resolveCitation(text: string): Promise<CitationResolution>;
-  taxonomy(): Promise<ReviewArea[]>;
+  /**
+   * OPTIONAL. The areas and topics the playbooks were compiled from, as the factory authored them
+   * (`id`, `title`, `scope`); absent when the corpus carries none, in which case the tool layer
+   * lists the playbooks' own areas.
+   */
+  topics?(): Promise<Topics | undefined>;
   /**
    * OPTIONAL. The corpus's abbreviation table (`"rds"` → `["reference data set"]`),
    * which search expands by OR. The tool layer reads it so the coverage and
@@ -211,7 +216,6 @@ const emptyMeta: MetaAdapter = {
       unmatched_segments: [],
     };
   },
-  async taxonomy() { return []; },
 };
 
 // --- Mutable handles — reassign at startup time to connect a corpus --------

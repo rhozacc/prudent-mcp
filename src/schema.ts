@@ -22,7 +22,7 @@ export type PlaybookId = `playbook://${string}`;
 export type SourceId = `source://${string}`;
 
 /**
- * Any cross-surface reference — useful for things like Phase.references.
+ * Any cross-surface reference.
  * SourceId is deliberately excluded: sources join the content surfaces by
  * framework/document_id, never by URI reference.
  */
@@ -215,28 +215,6 @@ export const CheckSchema = z.object({
 });
 export type Check = z.infer<typeof CheckSchema>;
 
-export const PhaseSchema = z.object({
-  name: z.string(),
-  description: z.string(),
-  references: z.array(anyIdSchema).default([]),  // mix of regulation:// test:// check:// IDs
-});
-export type Phase = z.infer<typeof PhaseSchema>;
-
-export const PlaybookSchema = z.object({
-  id: playbookIdSchema,
-  area: z.string(),
-  subarea: z.string().optional(),
-  phases: z.array(PhaseSchema).default([]),
-  gates: z.array(z.string()).default([]),
-  regulatory_scope: z.array(regulationIdSchema).default([]),
-  last_updated: z.string().date(),
-  // Future fields: prerequisites, deliverables, ...
-});
-export type Playbook = z.infer<typeof PlaybookSchema>;
-/** The 0.x playbook (a per-chapter phase list), under the name it keeps once the compiled playbook takes `PlaybookSchema` in 1.0.0. */
-export const LegacyPlaybookSchema = PlaybookSchema;
-export type LegacyPlaybook = Playbook;
-
 // --- Compiled playbook (1.0) -------------------------------------------------
 //
 // One playbook is the compiled answer to the questions of ONE TOPIC: it crosses
@@ -245,9 +223,8 @@ export type LegacyPlaybook = Playbook;
 // is authored by the factory (one structured model call, then the verifier in
 // `playbook-verify.ts`) and rendered deterministically by `render.ts`.
 //
-// It is `CompiledPlaybookSchema` until 1.0.0 removes the 0.x tools; then it takes
-// the name `PlaybookSchema` and the legacy one is dropped. Until then the two
-// coexist, because nothing in the 0.x server reads the compiled shape.
+// Since 1.0.0 it is THE playbook: `PlaybookSchema`. The 0.x per-chapter playbook
+// (a phase list) and its `Phase` are gone.
 
 const provisionRefSchema = z.object({
   id: regulationIdSchema,
@@ -261,7 +238,7 @@ export type PlaybookForce = z.infer<typeof PlaybookForceSchema>;
 export const PlaybookStatusSchema = z.enum(["draft", "approved", "exemplar"]);
 export type PlaybookStatus = z.infer<typeof PlaybookStatusSchema>;
 
-export const CompiledPlaybookSchema = z.object({
+export const PlaybookSchema = z.object({
   id: playbookIdSchema,                          // playbook://{topic-id}, no document segment
   title: z.string(),
   area: z.string(),                              // area id from the topics file
@@ -325,7 +302,7 @@ export const CompiledPlaybookSchema = z.object({
     approved_at: z.string().optional(),
   }),
 });
-export type CompiledPlaybook = z.infer<typeof CompiledPlaybookSchema>;
+export type Playbook = z.infer<typeof PlaybookSchema>;
 
 // --- Topics (authored in the factory; the playbook ids are built from them) ---
 
@@ -552,14 +529,6 @@ export const CitationResolutionSchema = z.object({
   coverage_note: z.string().optional(),
 });
 export type CitationResolution = z.infer<typeof CitationResolutionSchema>;
-
-export const ReviewAreaSchema = z.object({
-  id: z.string(),                        // e.g. "calibration.lgd"
-  name: z.string(),
-  parent: z.string().optional(),
-  children: z.array(z.string()).default([]),
-});
-export type ReviewArea = z.infer<typeof ReviewAreaSchema>;
 
 // Re-export id schemas if external code wants to validate inputs.
 export {

@@ -44,6 +44,9 @@ function uris(s: string): string[] {
   return [...out];
 }
 
+const plainRecord = (json: unknown): Record<string, unknown> | null =>
+  typeof json === "object" && json !== null && !Array.isArray(json) ? (json as Record<string, unknown>) : null;
+
 const schemeOf = (uri: string): Scheme | null => {
   const s = uri.split("://")[0];
   return (SCHEMES as readonly string[]).includes(s ?? "") ? (s as Scheme) : null;
@@ -1400,26 +1403,35 @@ export async function outputMatchesDeclaredSchema(s: Session): Promise<Invariant
     };
   }
 
+  // Real tools, real bodies: a text-first tool (brief, playbook) carries its machine part in structuredContent, which is what
+  // its published schema describes.
   const probes: Array<[string, Record<string, unknown>]> = [
-    ["get_corpus_info", {}],
-    ["list_review_areas", {}],
-    ["list_sources", {}],
-    ["get_coverage_gaps", {}],
-    ["search_regulation", { query: "default", limit: 2 }],
-    ["search_checks", { query: "default", limit: 2 }],
-    ["search_tests", { query: "default", limit: 2 }],
-    ["search_playbooks", { query: "estimation", limit: 2 }],
-    ["resolve_citation", { text: "Article 178" }],
+    ["brief", { question: "how is the default definition applied to external data", budget: "short" }],
+    ["topics", {}],
+    ["sources", {}],
+    ["search", { query: "default", limit: 2 }],
+    ["search", { query: "estimation", scope: "checks", limit: 2 }],
+    ["search", { query: "test", scope: "tests", limit: 2 }],
+    ["search", { query: "estimation", scope: "playbooks", limit: 2 }],
+    ["cite", { text: "Article 178" }],
   ];
+  // Open a record of each kind the server hands out, so get, related and playbook are checked on real ids.
+  const seed = await s.call("search", { query: "default", limit: 1 });
+  const first = ((plainRecord(seed.json)?.["results"] ?? []) as Array<{ id?: string }>)[0]?.id;
+  if (first !== undefined) probes.push(["get", { ids: first }], ["related", { id: first }]);
+  const tp = await s.call("topics", {});
+  const pid = (((plainRecord(tp.json)?.["areas"] ?? []) as Array<{ playbooks?: Array<{ id?: string }> }>)[0]?.playbooks ?? [])[0]?.id;
+  if (pid !== undefined) probes.push(["playbook", { id: pid }]);
 
   let bound = 0;
   for (const [tool, args] of probes) {
     const want = declared.get(tool);
     if (want === undefined) continue;
     const t = await s.call(tool, args);
-    if (t.isError || t.json === null || typeof t.json !== "object") continue;
+    const body = t.structured ?? t.json;
+    if (t.isError || body === null || body === undefined || typeof body !== "object") continue;
     bound++;
-    const extra = Object.keys(t.json as Record<string, unknown>).filter((k) => !want.has(k));
+    const extra = Object.keys(body as Record<string, unknown>).filter((k) => !want.has(k));
     if (extra.length > 0) {
       findings.push({
         id: `I16/${tool}`,
@@ -1750,94 +1762,6 @@ export async function asOfIsNeverSilentlySubstituted(s: Session): Promise<Invari
       });
     }
 
-    // The other two tools that serve a regulation under as_of must agree. Two
-    // records are enough: the point is that the three are wired to the same
-    // resolution, not that every id is probed three ways.
-    const last = served[served.length - 1];
-    if (last !== undefined && crossChecked < 2) {
-      crossChecked++;
-      const probes: Array<[string, Record<string, unknown>]> = [
-        ["expand_regulation", { id, as_of: last.asOf }],
-        ["get_regulation_tree", { id, as_of: last.asOf, depth: 0 }],
-      ];
-      for (const [tool, args] of probes) {
-        const r = await s.call(tool, args);
-        const body = asRecord(r.json);
-        if (r.isError || body === null) continue;
-        bound++;
-        const note = body["as_of_note"];
-        if (typeof note !== "string" || note.trim() === "") {
-          findings.push({
-            id: `I11/${tool}`,
-            severity: "fatal",
-            summary: `${tool} served the current text of a record with no recorded history under as_of ${last.asOf} and said nothing — every tool that serves a regulation under as_of must say so.`,
-            evidence: [`id ${id}`, `reply keys: ${Object.keys(body).join(", ")}`],
-          });
-        }
-      }
-
-      // The embedded children are resolved under the same date, so each must be
-      // the version get_regulation serves for it — not its latest text under the
-      // date asked about.
-      const full = await s.call("expand_regulation", { id, as_of: last.asOf, detail: "full" });
-      const kids = (asRecord(full.json)?.["children"] ?? []) as Array<{ type?: string; id?: string; record?: unknown }>;
-      for (const kid of kids.filter((k) => k.type === "regulation" && typeof k.id === "string").slice(0, 3)) {
-        bound++;
-        const direct = await s.call("get_regulation", { id: kid.id, as_of: last.asOf });
-        const want = asRecord(direct.json);
-        const got = asRecord(kid.record);
-        const agrees =
-          direct.isError || want === null
-            ? kid.record === null || kid.record === undefined
-            : got !== null && same(got, want);
-        if (!agrees) {
-          findings.push({
-            id: "I11/expand_regulation-children",
-            severity: "fatal",
-            summary: "expand_regulation embedded a child at a different version than get_regulation serves for the same as_of — the child is shown as the text of a date it may not be.",
-            evidence: [`parent ${id}`, `child ${String(kid.id)}`, `as_of ${last.asOf}`, `expand version: ${String(got?.["document_version"])}`, `get_regulation version: ${String(want?.["document_version"])}`],
-          });
-        }
-      }
-    }
-  }
-
-  // A child the corpus LISTS but has no version of for the date resolves to
-  // nothing, and a null record with no label is exactly what a reference to a
-  // record the corpus does not hold looks like. So whenever expand_regulation
-  // embeds such a child, the reply must say there is a gap and for which date.
-  // Observed from outside: a regulation child that comes back with no record
-  // under as_of although get_regulation serves it without one. Unlike the
-  // substitution check above this does not depend on the parent having no
-  // history - the parent can be fully recorded and the child not.
-  const gapNames = (note: unknown, asOf: string): boolean =>
-    typeof note === "string" && note.trim() !== "" && note.includes(asOf);
-  let gapsProbed = 0;
-  for (const id of ids.slice(0, 8)) {
-    for (const asOf of ladder) {
-      if (gapsProbed >= 12) break;
-      const r = await s.call("expand_regulation", { id, as_of: asOf, detail: "full" });
-      const body = asRecord(r.json);
-      if (r.isError || body === null) continue;
-      const kids = (body["children"] ?? []) as Array<{ type?: string; id?: string; record?: unknown }>;
-      const gaps: string[] = [];
-      for (const kid of kids.filter((k) => k.type === "regulation" && typeof k.id === "string" && (k.record ?? null) === null).slice(0, 3)) {
-        const held = await s.call("get_regulation", { id: kid.id });
-        if (!held.isError) gaps.push(String(kid.id));
-      }
-      if (gaps.length === 0) continue;
-      gapsProbed++;
-      bound++;
-      if (!gapNames(body["as_of_note"], asOf)) {
-        findings.push({
-          id: "I11/expand_regulation-gap",
-          severity: "fatal",
-          summary:
-            "expand_regulation embedded a child the corpus holds but has no version of for the date as a bare id, and said nothing - it reads as a dangling reference rather than a gap in the recorded history.",
-          evidence: [`parent ${id}`, `as_of ${asOf}`, `children with no version: ${gaps.join(", ")}`, `reply keys: ${Object.keys(body).join(", ")}`],
-        });
-      }
-    }
   }
 
   if (bound === 0) {
@@ -1928,8 +1852,7 @@ export async function declineOnPartialDocumentSaysSo(s: Session): Promise<Invari
     if (!direct.isError) continue; // it exists after all; nothing to decline
     const probes: Array<[string, Record<string, unknown>]> = [
       ["get_regulation", { id: absent }],
-      ["expand_regulation", { id: absent }],
-      ["get_regulation_tree", { id: absent }],
+      ["related", { id: absent }],
     ];
     for (const [tool, args] of probes) {
       const r = await s.call(tool, args);
@@ -2358,9 +2281,13 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
     bound++;
     const dates = named.get(target.id) ?? [];
 
-    for (const tool of ["get_regulation", "expand_regulation", "get_regulation_tree"] as const) {
+    for (const tool of ["get_regulation", "related"] as const) {
       const r = await s.call(tool, { id: target.id });
-      const note = asRecord(r.json)?.["pending_changes_note"];
+      const body = asRecord(r.json);
+      const note =
+        tool === "related"
+          ? ((body?.["notes"] ?? []) as Array<{ type?: string; text?: string }>).find((n) => n.type === "amendment")?.text
+          : body?.["pending_changes_note"];
       if (r.isError || typeof note !== "string") {
         findings.push({
           id: `I15/${tool}`,
@@ -2547,6 +2474,90 @@ function answerBearingStrings(node: unknown): Array<{ key: string; text: string 
   );
 }
 
+// ============================================================================
+// I18 — every served playbook passes the playbook verifier
+// ============================================================================
+
+/**
+ * A playbook is compiled by a model and checked by a verifier before it ships; this is the same check run from outside,
+ * against the library as the server holds it. A quote the provision does not say, a provision named in prose and not cited,
+ * a member left out, an id that does not resolve: each is a confident wrong statement about regulation in a document a
+ * practitioner reads as authoritative. Needs the corpus the session serves (a file, or the seeded demo's own); with no
+ * playbook there is nothing to hold and the invariant is not applicable.
+ */
+export async function servedPlaybooksVerify(s: Session): Promise<InvariantResult> {
+  const title = "Every served playbook passes the playbook verifier";
+  const findings: Finding[] = [];
+  const { verifyPlaybook } = await import("../src/playbook-verify.ts");
+  const { playbookContext } = await import("../src/playbook-context.ts");
+  let regulations, sources, checks, tests, playbooks;
+  if (s.corpusFile !== undefined) {
+    const c = loadCorpusFile(s.corpusFile);
+    ({ regulation: regulations, sources, checks, tests, playbooks } = c);
+  } else {
+    const demo = await import("../examples/inmemory-demo.ts");
+    const ctx = demo.demoPlaybookContext();
+    regulations = [...ctx.regulations.values()];
+    sources = [...ctx.sources];
+    checks = [...(ctx.checks?.values() ?? [])];
+    tests = [...(ctx.tests?.values() ?? [])];
+    playbooks = Object.values(demo.DEMO_PLAYBOOKS);
+  }
+  if (playbooks.length === 0) return { id: "I18", title, applicable: false, findings };
+  const ctx = playbookContext({ regulations, sources, checks, tests, playbooks });
+  for (const pb of playbooks) {
+    const v = verifyPlaybook(pb, ctx);
+    for (const f of v.errors) {
+      findings.push({
+        id: `I18/${f.rule}`,
+        severity: "fatal",
+        summary: `${pb.id} fails the playbook verifier (${f.rule}) at ${f.where}.`,
+        evidence: [f.message],
+      });
+    }
+  }
+  return { id: "I18", title, applicable: true, findings };
+}
+
+// ============================================================================
+// I19 — a playbook is found by the questions it says it answers
+// ============================================================================
+
+/**
+ * `brief` routes a question to a playbook. Each playbook lists the typical questions it answers (used for routing and shown
+ * to reviewers), so asking `brief` exactly that question must select that playbook. A miss means either the router or the
+ * playbook's own questions are wrong, and either way a practitioner who asks the playbook's own question is sent elsewhere.
+ * Measured on the questions the playbooks themselves carry, so it needs no external bank and runs in CI; how well routing
+ * serves practitioners' real phrasing is the benchmark's measurement, not this one.
+ */
+export async function playbooksRouteToThemselves(s: Session): Promise<InvariantResult> {
+  const title = "A playbook is selected by the questions it lists";
+  const findings: Finding[] = [];
+  let playbooks: Array<{ id: string; questions: string[] }>;
+  if (s.corpusFile !== undefined) playbooks = loadCorpusFile(s.corpusFile).playbooks;
+  else playbooks = Object.values((await import("../examples/inmemory-demo.ts")).DEMO_PLAYBOOKS);
+  if (playbooks.length === 0) return { id: "I19", title, applicable: false, findings };
+  let asked = 0;
+  for (const pb of playbooks) {
+    for (const question of pb.questions) {
+      asked++;
+      const t = await s.call("brief", { question, budget: "short" });
+      const chosen = plainRecord(t.structured)?.["playbook"] as { id?: string } | null | undefined;
+      if (t.isError || chosen?.id !== pb.id) {
+        findings.push({
+          id: "I19/misrouted",
+          severity: "warn",
+          summary: `brief did not select ${pb.id} for one of that playbook's own questions.`,
+          evidence: [`question: ${question}`, `selected: ${chosen?.id ?? "no playbook"}`],
+        });
+      }
+    }
+  }
+  // A router that sends more than a tenth of a playbook's own questions elsewhere is broken, not unlucky.
+  if (findings.length > Math.ceil(asked * 0.1)) for (const f of findings) f.severity = "fatal";
+  return { id: "I19", title, applicable: true, findings };
+}
+
 export const ALL = [
   envelopeIsJson,
   describedIdsResolve,
@@ -2565,4 +2576,6 @@ export const ALL = [
   placeholdersAreMarked,
   pendingChangesAreNeverSilent,
   serverLanguageIsClean,
+  servedPlaybooksVerify,
+  playbooksRouteToThemselves,
 ] as const;

@@ -9,7 +9,6 @@ import type {
   SourceAdapter,
   TestAdapter,
 } from "./adapters.ts";
-import { deriveTaxonomy } from "./areas.ts";
 import { citationPartialClause, computeHoldings, idDocSegment } from "./holdings.ts";
 import { pendingChangeSummaries } from "./pending.ts";
 import { computeReferrers } from "./referrers.ts";
@@ -27,9 +26,9 @@ import {
   CorpusInfoSchema,
   PlaybookSchema,
   RegulationSchema,
-  ReviewAreaSchema,
   SourceSchema,
   TestSchema,
+  TopicsSchema,
   regulationIdSchema,
 } from "./schema.ts";
 import type {
@@ -44,7 +43,6 @@ import type {
   Referrers,
   Regulation,
   RegulationId,
-  ReviewArea,
   Source,
   SourceId,
   Test,
@@ -66,28 +64,12 @@ export const RegulationHistoryEntrySchema = z.object({
 });
 export type RegulationHistoryEntry = z.infer<typeof RegulationHistoryEntrySchema>;
 
-// Areas -> topics, authored in the factory and carried in the corpus file. The
-// server reads nothing from it yet (the 1.0 playbook tools will), so it is
-// validated loosely and passed through: an unknown key on an area or a topic
-// is kept, not stripped.
-export const CorpusTopicSchema = z
-  .object({ id: z.string(), title: z.string(), scope: z.string().optional() })
-  .passthrough();
-export const CorpusTopicsSchema = z
-  .object({
-    areas: z.array(
-      z.object({ id: z.string(), title: z.string(), topics: z.array(CorpusTopicSchema) }).passthrough(),
-    ),
-  })
-  .passthrough();
-
 export const CorpusFileSchema = z.object({
   regulation: z.array(RegulationSchema).default([]),
   tests: z.array(TestSchema).default([]),
   checks: z.array(CheckSchema).default([]),
   playbooks: z.array(PlaybookSchema).default([]),
   sources: z.array(SourceSchema).default([]),
-  taxonomy: z.array(ReviewAreaSchema).default([]),
   // Optional per-regulation version history for as-of resolution. Entries are
   // PAST versions with the date each entered into force; a corpus that wants
   // the CURRENT version selectable under as_of includes one entry whose
@@ -98,7 +80,8 @@ export const CorpusFileSchema = z.object({
   // Abbreviation -> the phrases the texts use for it ("rds": ["reference data
   // set"]). Data, not code, so this public server stays corpus-agnostic.
   glossary: z.record(z.array(z.string())).optional(),
-  topics: CorpusTopicsSchema.optional(),
+  // Areas -> topics, authored in the factory (TopicsSchema): what the playbooks were compiled from.
+  topics: TopicsSchema.optional(),
 });
 
 // `regulation_history` stays optional on the exported TYPE (parse always
@@ -2027,12 +2010,8 @@ export function createFileAdapters(corpus: CorpusFile): {
     async resolveCitation(text: string): Promise<CitationResolution> {
       return resolveCitationDetailed(corpus.regulation, text, computeHoldings(corpus.regulation, corpus.sources));
     },
-    async taxonomy(): Promise<ReviewArea[]> {
-      // An authored taxonomy wins: it can name areas the corpus does not cover
-      // yet, which a derived one cannot. With none, derive from the playbooks
-      // rather than serving [] — an empty list here takes list_review_areas
-      // AND get_area_overview out of service, and those are the entry path.
-      return corpus.taxonomy.length > 0 ? corpus.taxonomy : deriveTaxonomy(corpus.playbooks);
+    async topics() {
+      return corpus.topics;
     },
     async glossary() {
       return corpus.glossary;

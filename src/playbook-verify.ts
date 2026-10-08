@@ -24,7 +24,7 @@ import { locatorOf, citationOf, sourceFor } from "./citation-style.ts";
 import { approxTokens, wordCount, type PlaybookContext } from "./playbook-context.ts";
 import { BANNED_TERMS, identifiersIn } from "./language.ts";
 import { FULL_RENDER_BUDGET, basisCitation, renderPlaybook } from "./render.ts";
-import type { CompiledPlaybook, Regulation, RegulationId } from "./schema.ts";
+import type { Playbook, Regulation, RegulationId } from "./schema.ts";
 
 export type PlaybookRule = "V1" | "V2" | "V3" | "V4" | "V5" | "V6" | "V7" | "V8" | "W";
 
@@ -111,7 +111,7 @@ function locatorsOfIds(ids: Iterable<RegulationId>, ctx: PlaybookContext): strin
 
 // --- the verifier -------------------------------------------------------------------------------------
 
-export function verifyPlaybook(pb: CompiledPlaybook, ctx: PlaybookContext, opts: VerifyOptions = {}): Verification {
+export function verifyPlaybook(pb: Playbook, ctx: PlaybookContext, opts: VerifyOptions = {}): Verification {
   const errors: Finding[] = [];
   const warnings: Finding[] = [];
   const err = (rule: PlaybookRule, where: string, message: string): void => void errors.push({ rule, where, message });

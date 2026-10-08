@@ -215,43 +215,44 @@ describe("an unknown regulation id", () => {
     const content = (r as { content?: Array<{ text?: string }> }).content ?? [];
     return content.map((c) => c.text ?? "").join("");
   };
-  const TOOLS = ["get_regulation", "expand_regulation", "get_regulation_tree"] as const;
+  const TOOLS = ["get", "related"] as const;
 
   const variants: Array<[string, string, RegExp, RegExp]> = [
     ["partial", "regulation://alpha/art-99", /holds only part of Title of alpha-doc \(4 provisions\).*not among the parts held, and may still be in the law/s, /probably mistyped/],
     ["undeclared", "regulation://gam-seg/art-99", /holds 2 provisions of Title of gamma-doc and does not declare that as the whole.*not finding a provision here does not show it does not exist/s, /holds only part|probably mistyped/],
     ["declared full", "regulation://beta/art-99", /declares Title of beta-doc held in full \(1 provision\).*probably mistyped/s, /holds only part|does not declare/],
-    ["not held", "regulation://nowhere/art-1", /No document with the id prefix "nowhere" is in this library.*get_corpus_info/s, /holds only part|probably mistyped|does not declare/],
+    ["not held", "regulation://nowhere/art-1", /No document with the id prefix "nowhere" is in this library.*sources/s, /holds only part|probably mistyped|does not declare/],
   ];
 
   for (const tool of TOOLS) {
     for (const [name, id, wants, unwanted] of variants) {
       it(`${tool}: ${name} document`, async () => {
-        const r = await client.callTool({ name: tool, arguments: { id } });
+        const r = await client.callTool({ name: tool, arguments: tool === "get" ? { ids: id } : { id } });
         expect(r.isError).toBe(true);
         const t = text(r);
         expect(t).toContain(`No provision has the id ${id}.`);
         expect(t).toMatch(wants);
         expect(t).not.toMatch(unwanted);
         // The pre-existing pointer survives every variant.
-        expect(t).toContain("Verify the id with search_regulation or list_review_areas.");
+        expect(t).toContain("Verify the id with search or cite.");
       });
     }
   }
 
   it("a conflicting-declaration document is treated as partial", async () => {
-    const r = await client.callTool({ name: "get_regulation", arguments: { id: "regulation://delta/art-9" } });
+    const r = await client.callTool({ name: "get", arguments: { ids: "regulation://delta/art-9" } });
     expect(text(r)).toMatch(/holds only part of Title of delta-doc/);
   });
 
-  it("get_corpus_info publishes holdings and the stored coverage list side by side", async () => {
-    const r = await client.callTool({ name: "get_corpus_info", arguments: {} });
-    const body = r.structuredContent as { coverage: string[]; holdings: Array<{ document_id: string; partial?: boolean }> };
-    expect(body.coverage).toContain("AL");
-    const gamma = body.holdings.find((h) => h.document_id === "gamma-doc");
-    expect(gamma).toBeDefined();
-    expect("partial" in (gamma ?? {})).toBe(false);
-    expect(body.holdings.find((h) => h.document_id === "beta-doc")?.partial).toBe(false);
+  it("sources says for each document whether it is held whole, in part or undeclared", async () => {
+    const r = await client.callTool({ name: "sources", arguments: {} });
+    const body = r.structuredContent as { documents: Array<{ document_id: string; held: string; provisions?: number }> };
+    const held = (d: string) => body.documents.find((x) => x.document_id === d)?.held;
+    expect(held("alpha-doc")).toBe("part");
+    expect(held("gamma-doc")).toBe("undeclared");
+    expect(held("beta-doc")).toBe("whole");
+    expect(held("delta-doc")).toBe("part");
+    expect(body.documents.find((x) => x.document_id === "alpha-doc")?.provisions).toBe(4);
   });
 });
 

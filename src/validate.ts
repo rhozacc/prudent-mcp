@@ -45,6 +45,7 @@
 import { holdingsWarnings } from "./holdings.ts";
 import { isoDay, openPendingChanges, pendingChangeWarnings } from "./pending.ts";
 import { preAdoptionPlaceholders } from "./placeholders.ts";
+import { playbookProvisions } from "./referrers.ts";
 import type {
   Check,
   Playbook,
@@ -228,9 +229,16 @@ export function validateCorpus(corpus: CorpusInput, now: Date = new Date()): str
       }
     }
   }
+  // A playbook's every id resolves. The wording rules (quotes, citations in prose, coverage) are the playbook verifier's
+  // (src/playbook-verify.ts); a dangling id is structural and stops the corpus here.
   for (const p of playbooks) {
-    for (const r of p.regulatory_scope) if (!regIds.has(r)) errors.push(`${p.id}: regulatory_scope ${r} does not resolve`);
-    for (const ph of p.phases) for (const ref of ph.references) if (!resolves(ref)) errors.push(`${p.id} / "${ph.name}": reference ${ref} does not resolve`);
+    for (const r of playbookProvisions(p)) if (!regIds.has(r)) errors.push(`${p.id}: provision ${r} does not resolve`);
+    for (const e of p.excluded) if (!regIds.has(e.id)) errors.push(`${p.id}: excluded ${e.id} does not resolve`);
+    for (const req of p.requirements) {
+      for (const c of req.checks) if (!checkIds.has(c)) errors.push(`${p.id} / ${req.id}: check ${c} does not resolve`);
+      for (const t of req.tests) if (!testIds.has(t)) errors.push(`${p.id} / ${req.id}: test ${t} does not resolve`);
+    }
+    for (const r of p.related) if (!playbookIds.has(r)) errors.push(`${p.id}: related ${r} does not resolve`);
   }
 
   // 4 — cycles in the regulation parent chain.
@@ -391,7 +399,7 @@ export function corpusInfo(corpus: CorpusInput, now: Date = new Date()): string[
     const documents = new Set(carrying.map((r) => r.document_id)).size;
     lines.push(
       `${carrying.length} regulation record(s) in ${documents} document(s) name an instrument by a pre-adoption ` +
-        "placeholder number; the server flags each one when served (pre_adoption_placeholders)",
+        "placeholder number; the server flags each one when served",
     );
   }
   const today = isoDay(now);
@@ -400,7 +408,7 @@ export function corpusInfo(corpus: CorpusInput, now: Date = new Date()): string[
     const behind = open.filter((o) => o.state === "in_force_not_ingested").length;
     lines.push(
       `${open.length} pending change(s) the corpus has not ingested (${behind} already in force); the server says so ` +
-        "on every record of the document (pending_changes_note)",
+        "on the provisions an amendment names",
     );
   }
   return lines;
