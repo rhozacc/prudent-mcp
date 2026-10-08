@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased (1.0.0)
+## 1.0.0
 
 **Playbook first, eight tools.** The server is rebuilt around one idea: a model answers better from a compiled playbook for the topic than from nineteen tools it has to compose itself. This is a breaking release.
 
