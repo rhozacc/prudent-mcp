@@ -1318,6 +1318,27 @@ function ambiguousResolution(text: string, hits: Regulation[]): CitationResoluti
 }
 
 /**
+ * The citation with an issuer's descriptor removed, when the descriptor only describes a document the citation also names:
+ * an ECB-kind descriptor, neither numbered nor an identifier, beside held documents of that one issuer, and no held
+ * instrument named. Null in every other case, which is resolved as written (the gate below declines what it must).
+ */
+function withoutLooseIssuerDescriptor(regulations: Regulation[], text: string, holdings?: DocumentHolding[]): string | null {
+  const index = documentAliases(regulations, holdings);
+  const described = describedInstruments(text, [...index.values()].map((e) => e.tokens));
+  const unheld = described.found.filter((d) => !holdsKind(regulations, d.held));
+  if (unheld.length === 0) return null;
+  if (!unheld.every((d) => d.issuer !== undefined && !d.identifier && !d.numbered)) return null;
+  const residualTokens = citationTokens(described.residual);
+  if (spineOf(residualTokens.filter((t) => !STRUCTURAL.has(t))).length === 0) return null;
+  if (instrumentSpans(text).some((n) => corpusHolds(regulations, n.key))) return null;
+  const namedDocs = scopeToDocument(residualTokens, index).docs;
+  if (namedDocs === null) return null;
+  const frameworks = new Set(regulations.filter((r) => namedDocs.has(r.document_id)).map((r) => r.framework.toLowerCase()));
+  if (frameworks.size !== 1 || !unheld.every((d) => frameworks.has(d.issuer ?? ""))) return null;
+  return described.residual;
+}
+
+/**
  * Loose citation string to a resolution that can say "I don't know".
  *
  * The previous version could not. It matched normalized citations by
@@ -1369,6 +1390,12 @@ export function resolveCitationDetailed(
   const queryTokens = citationTokens(text);
   if (queryTokens.length === 0) return none();
 
+  // An ECB-kind descriptor ("ECB Guidelines") beside a held document of that issuer is a loose second name for the
+  // document, and the equality passes below compare the WHOLE citation: with the descriptor left in, an alias or a
+  // record's own citation never equals it. So it is set aside before anything is compared, not after.
+  const withoutDescriptor = withoutLooseIssuerDescriptor(regulations, text, holdings);
+  if (withoutDescriptor !== null) return resolveCitationDetailed(regulations, withoutDescriptor, holdings);
+
   // The document a citation names is stripped from BOTH sides before anything
   // is compared: a record's own citation may repeat it ("CRR Article 180"), a
   // query may omit it ("Art. 180"), and its numbers ("2017/16") are not the
@@ -1413,7 +1440,13 @@ export function resolveCitationDetailed(
       exactHits.length > 0 || aliasHits.length > 0 || nqCore === nq
         ? []
         : pool.filter((r) => core(citationTokens(r.citation)) === nqCore);
-    return { index, ...scope, pool, bare, nq, exactHits, aliasHits, coreHits };
+    // The same, against a record's declared aliases: "Credit risk chapter, paragraph 170 of the (EGIM)" is the alias
+    // once the connectives are set aside, exactly as "Article 3 of the" is a record's own citation.
+    const coreAliasHits =
+      exactHits.length > 0 || aliasHits.length > 0 || coreHits.length > 0 || nqCore === nq
+        ? []
+        : pool.filter((r) => (r.citation_aliases ?? []).some((al) => core(citationTokens(al)) === nqCore));
+    return { index, ...scope, pool, bare, nq, exactHits, aliasHits, coreHits, coreAliasHits };
   };
   let scoped = attempt(withInstrumentNames(documentAliases(regulations, holdings), regulations, text));
   if (
@@ -1422,11 +1455,12 @@ export function resolveCitationDetailed(
     scoped.exactHits.length === 0 &&
     scoped.aliasHits.length === 0 &&
     scoped.coreHits.length === 0 &&
+    scoped.coreAliasHits.length === 0 &&
     !accountedFor(text, scoped.rest, scoped.docs, scoped.index, (n) => !corpusHolds(regulations, n.key) && subordinate(n))
   ) {
     scoped = attempt(documentAliases(regulations));
   }
-  const { index, docs, rest, pool, bare, exactHits, aliasHits, coreHits } = scoped;
+  const { index, docs, rest, pool, bare, exactHits, aliasHits, coreHits, coreAliasHits } = scoped;
 
   if (exactHits.length === 1) {
     return { ...none(), match: exactHits[0] ?? null, confidence: "exact" };
@@ -1464,6 +1498,16 @@ export function resolveCitationDetailed(
   // "segment": it is the spine pass's answer, made unambiguous.
   if (coreHits.length === 1) return { ...none(), match: coreHits[0] ?? null, confidence: "segment" };
   if (coreHits.length > 1) return ambiguousResolution(text, coreHits);
+  if (coreAliasHits.length === 1) {
+    const hit = coreAliasHits[0];
+    return {
+      ...none(),
+      match: hit ?? null,
+      confidence: "alias",
+      coverage_note: hit === undefined ? undefined : `Matched an alias. This provision's own citation is "${hit.citation}" — quote that, not "${text}".`,
+    };
+  }
+  if (coreAliasHits.length > 1) return ambiguousResolution(text, coreAliasHits);
 
   // (0) The instrument gate. A wrong instrument is not a near miss, it is a
   // different body of law - but it comes AFTER the two equality passes above. A

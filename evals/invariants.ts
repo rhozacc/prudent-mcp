@@ -1459,6 +1459,13 @@ const citationNumbers = (s: string): string[] =>
   [...s.matchAll(/\d+[a-z]?|\([a-z0-9]{1,3}\)/gi)].map((m) => m[0].replace(/[()]/g, "").toLowerCase());
 
 /**
+ * The provision's own numbers: the number of the instrument it sits in ("EBA/GL/2017/16", "575/2013", "(EU) 2019/2033")
+ * names the document and is not part of the provision's numbering. Official citations lead with it.
+ */
+const provisionNumbers = (s: string): string[] =>
+  citationNumbers(s.replace(/\b[A-Za-z]+(?:\/[A-Za-z]+)*\/\d{4}\/\d+\b/g, " ").replace(/\b\d{1,4}\/\d{4}\b|\b\d{4}\/\d{1,4}\b/g, " "));
+
+/**
  * A corpus stored at one granularity is asked for another, constantly. Every
  * regulator, every bank and every supervisor writes "Article 181(1)(b)"; a
  * corpus holding whole articles has no record at that address. Returning a bare
@@ -1532,11 +1539,11 @@ export async function humanRegisterCitationsResolve(s: Session): Promise<Invaria
     // both. Anything else is a NEIGHBOUR: a different provision that merely
     // looks similar, offered as though it answered the question. That is the
     // fabrication this server exists not to do, one step removed.
-    const want = citationNumbers(probe);
+    const want = provisionNumbers(probe);
     const prefixOf = (a: string[], b: string[]): boolean =>
       a.length > 0 && a.length <= b.length && a.every((n, i) => n === b[i]);
     for (const c of body.candidates ?? []) {
-      const got = citationNumbers(c.citation ?? "");
+      const got = provisionNumbers(c.citation ?? "");
       if (prefixOf(got, want) || prefixOf(want, got)) continue;
       findings.push({
         id: "I9/candidate-unrelated",
