@@ -70,17 +70,22 @@ const fullCorpus = {
   ],
   playbooks: [
     {
-      id: "playbook://scope/review",
+      id: "playbook://scope-review",
+      title: "Scope of the model landscape",
       area: "scope",
-      phases: [
+      summary: "Show that every in-scope entity is covered by the model landscape.",
+      questions: ["Which entities must the model landscape cover?"],
+      basis: [],
+      requirements: [
         {
-          name: "Phase 1",
-          description: "Establish the perimeter.",
-          references: ["regulation://crr/1", "check://scope/entities"],
+          id: "R1",
+          title: "Cover the perimeter",
+          statement: "Establish the perimeter and show every in-scope entity is covered.",
+          provisions: [{ id: "regulation://crr/1" }],
+          checks: ["check://scope/entities"],
         },
       ],
-      regulatory_scope: ["regulation://crr/1"],
-      last_updated: "2026-08-01",
+      provenance: { status: "approved", compiled_at: "2026-08-01T00:00:00Z", inputs_sha: "0".repeat(64) },
     },
   ],
   sources: [
@@ -113,7 +118,6 @@ const fullCorpus = {
       verified: "2020-01-01", // equally old, but never flagged: not current
     },
   ],
-  taxonomy: [{ id: "scope", name: "Scope" }],
   // Stored corpus_info in the pre-sources 4-key shape: no `source` count, no
   // stale_sources. counts.regulation is deliberately wrong (42) to prove the
   // serve-time overlay replaces ONLY counts.source and stale_sources — stored
@@ -133,13 +137,12 @@ describe("loadCorpusFile", () => {
     expect(corpus.checks).toHaveLength(1);
     expect(corpus.playbooks).toHaveLength(1);
     expect(corpus.sources).toHaveLength(3);
-    expect(corpus.taxonomy.map((a) => a.id)).toEqual(["scope"]);
     // zod defaults applied inside records too
     expect(corpus.regulation[1]!.children).toEqual([]);
     expect(corpus.tests[0]!.aliases).toEqual([]);
   });
 
-  it("fills defaults for missing surface keys (sources/taxonomy absent → [])", () => {
+  it("fills defaults for missing surface keys (sources absent → [])", () => {
     const corpus = loadCorpusFile(
       writeCorpus("minimal.json", { regulation: [fullCorpus.regulation[0]] }),
     );
@@ -148,7 +151,6 @@ describe("loadCorpusFile", () => {
     expect(corpus.checks).toEqual([]);
     expect(corpus.playbooks).toEqual([]);
     expect(corpus.sources).toEqual([]);
-    expect(corpus.taxonomy).toEqual([]);
     expect(corpus.corpus_info).toBeUndefined();
   });
 
@@ -184,8 +186,8 @@ describe("createFileAdapters", () => {
     expect(checkHit?.expected_evidence).toEqual(["Entity perimeter list"]);
     expect(await adapters.check.get("check://nope/nope")).toBeNull();
 
-    const playbookHit = await adapters.playbook.get("playbook://scope/review");
-    expect(playbookHit?.phases[0]?.references).toContain("check://scope/entities");
+    const playbookHit = await adapters.playbook.get("playbook://scope-review");
+    expect(playbookHit?.requirements[0]?.checks).toContain("check://scope/entities");
     expect(await adapters.playbook.get("playbook://nope")).toBeNull();
 
     const sourceHit = await adapters.source.get("source://eba/gl-old");
@@ -202,7 +204,7 @@ describe("createFileAdapters", () => {
       "check://scope/entities",
     ]);
     expect((await adapters.playbook.search("establish the perimeter")).map((p) => p.id)).toEqual([
-      "playbook://scope/review",
+      "playbook://scope-review",
     ]);
     expect(await adapters.regulation.search("zzz-no-such-token")).toEqual([]);
   });
@@ -247,11 +249,10 @@ describe("createFileAdapters", () => {
     expect(Number.isNaN(Date.parse(info.last_updated))).toBe(false);
   });
 
-  it("meta.referrers scans playbook phase references, not just regulatory_scope", async () => {
-    // The check appears ONLY inside a phase's references array — the old scan
-    // (regulatory_scope only) returned playbooks: [] here.
+  it("meta.referrers finds the playbooks that cite a provision, not only the ones that list a check", async () => {
+    // A playbook reaches a check through its requirements, which the reverse index does not follow: only provisions are cited.
     const checkRefs = await adapters.meta.referrers("check://scope/entities");
-    expect(checkRefs.playbooks).toEqual(["playbook://scope/review"]);
+    expect(checkRefs.playbooks).toEqual([]);
     // Structural referrer: the regulation that lists the check as a child.
     expect(checkRefs.regulation).toEqual(["regulation://crr/1"]);
     expect(checkRefs.tests).toEqual([]);
@@ -261,7 +262,7 @@ describe("createFileAdapters", () => {
   it("meta.referrers on a regulation covers checks, playbooks, and structure", async () => {
     const refs = await adapters.meta.referrers("regulation://crr/1");
     expect(refs.checks).toEqual(["check://scope/entities"]);
-    expect(refs.playbooks).toEqual(["playbook://scope/review"]); // scope + phase reference
+    expect(refs.playbooks).toEqual(["playbook://scope-review"]); // a requirement cites it
     expect(refs.regulation).toEqual([]);
   });
 });
@@ -677,65 +678,12 @@ describe("resolveCitationDetailed", () => {
   });
 });
 
-describe("taxonomy: authored wins, derived fills in", () => {
-  // The misfire this closes: the shipped corpus carried `taxonomy: []`, the
-  // adapter served it verbatim, and list_review_areas answered {"areas": []} —
-  // which also made get_area_overview unreachable, since no slug could match a
-  // list that had none. Two of nineteen tools inert, and they are the entry
-  // path the server's instructions name first.
-  const playbooks = [
-    {
-      id: "playbook://gl/5-pd-estimation",
-      area: "PD Estimation",
-      phases: [],
-      gates: [],
-      regulatory_scope: [],
-      last_updated: "2026-01-01",
-    },
-    {
-      id: "playbook://egim/1-credit-risk",
-      area: "Credit Risk",
-      subarea: "IRB Approach Governance",
-      phases: [],
-      gates: [],
-      regulatory_scope: [],
-      last_updated: "2026-01-01",
-    },
-  ];
-
-  it("serves an authored taxonomy verbatim — it can name areas the corpus lacks", () => {
-    const corpus = loadCorpusFile(
-      writeCorpus("authored.json", {
-        playbooks,
-        taxonomy: [{ id: "scope", name: "Scope" }],
-      }),
-    );
-    const a = createFileAdapters(corpus);
-    return a.meta.taxonomy().then((t) => {
-      expect(t.map((n) => n.id)).toEqual(["scope"]);
-    });
-  });
-
-  it("derives from the playbooks when the corpus authored none", async () => {
-    const corpus = loadCorpusFile(writeCorpus("derived.json", { playbooks }));
-    expect(corpus.taxonomy).toEqual([]); // absent on disk
-    const t = await createFileAdapters(corpus).meta.taxonomy();
-    expect(t.map((n) => n.id)).toEqual([
-      "pd-estimation",
-      "credit-risk",
-      "credit-risk.irb-approach-governance",
-    ]);
-    expect(t[0]!.name).toBe("PD Estimation");
-  });
-
-  it("derives when the corpus authored an EMPTY taxonomy — the shipped case", async () => {
-    const corpus = loadCorpusFile(writeCorpus("empty-tax.json", { playbooks, taxonomy: [] }));
-    const t = await createFileAdapters(corpus).meta.taxonomy();
-    expect(t.length).toBe(3);
-  });
-
-  it("still serves [] when there is nothing to derive from", async () => {
-    const corpus = loadCorpusFile(writeCorpus("no-playbooks.json", {}));
-    expect(await createFileAdapters(corpus).meta.taxonomy()).toEqual([]);
+describe("topics", () => {
+  it("are served as the corpus file carries them, and are absent when it carries none", async () => {
+    const topics = { version: 1, areas: [{ id: "scope", title: "Scope", topics: [{ id: "scope-review", title: "Scope of the model landscape", scope: "Which entities are covered." }] }] };
+    const withTopics = createFileAdapters(loadCorpusFile(writeCorpus("topics.json", { topics })));
+    expect((await withTopics.meta.topics!())?.areas.map((a) => a.id)).toEqual(["scope"]);
+    const without = createFileAdapters(loadCorpusFile(writeCorpus("no-topics.json", {})));
+    expect(await without.meta.topics!()).toBeUndefined();
   });
 });

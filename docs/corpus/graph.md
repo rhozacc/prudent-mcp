@@ -24,6 +24,7 @@ flowchart LR
     regulation___eba_gl_2017_16_78["EBA GL 2017/16 paragraph 78"]
     regulation___crr_178_1_a["CRR Article 178(1)(a)"]
     regulation___crr_178_1_b["CRR Article 178(1)(b)"]
+    regulation___crr_amending_demo_art_1["Article 1"]
   end
   subgraph Check
     check___calibration_pd_lra_derived("PD long-run average derived from sufficient history")
@@ -37,8 +38,7 @@ flowchart LR
     test___hosmer_lemeshow{{"Hosmer-Lemeshow test"}}
   end
   subgraph Playbook
-    playbook___calibration[["calibration"]]
-    playbook___calibration_pd[["calibration/pd"]]
+    playbook___pd_long_run_average[["Long-run average default rate for PD calibration"]]
   end
   regulation___crr_180 --> regulation___crr_180_1_a
   regulation___crr_180 --> check___calibration_pd_segment_tested
@@ -47,11 +47,9 @@ flowchart LR
   regulation___eba_gl_2017_16_78 --> test___jeffreys
   regulation___eba_gl_2017_16_78 --> test___binomial
   regulation___eba_gl_2017_16_78 --> test___hosmer_lemeshow
-  playbook___calibration_pd -.-> regulation___crr_180_1_a
-  playbook___calibration_pd -.-> regulation___eba_gl_2017_16_78
-  playbook___calibration_pd -.-> check___calibration_pd_lra_derived
-  playbook___calibration_pd -.-> test___jeffreys
-  playbook___calibration_pd -.-> test___binomial
-  playbook___calibration_pd -.-> test___hosmer_lemeshow
-  playbook___calibration_pd -.-> check___calibration_pd_segment_tested
+  playbook___pd_long_run_average -.-> regulation___crr_180_1_a
+  playbook___pd_long_run_average -.-> regulation___eba_gl_2017_16_78
+  playbook___pd_long_run_average -.-> check___calibration_pd_lra_derived
+  playbook___pd_long_run_average -.-> check___calibration_pd_segment_tested
+  playbook___pd_long_run_average -.-> test___binomial
 ```

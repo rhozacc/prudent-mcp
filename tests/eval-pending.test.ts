@@ -168,8 +168,7 @@ function good(
     // Both documents are on every page; the notice says what the named (or unmapped) rows need.
     search_regulation: () => ({ json: { results: rows, notice: mapped ? NOTICE : DOC_NOTICE } }),
     get_regulation: (a) => ({ json: { ...noteFor(a["id"], a), citation: a["id"] === A ? "Acme 1" : "x" } }),
-    expand_regulation: (a) => ({ json: noteFor(a["id"], a) }),
-    get_regulation_tree: (a) => ({ json: noteFor(a["id"], a) }),
+    related: (a) => ({ json: mapped && a["id"] === A ? { id: a["id"], notes: [{ type: "amendment", text: NOTE }] } : { id: a["id"] } }),
     resolve_citation: () => ({ json: { match: { id: A }, ...(mapped ? { pending_changes_note: NOTE } : {}) } }),
     ...overrides,
   });
@@ -189,15 +188,14 @@ describe("eval I15 on servers that get it wrong", () => {
     const r = await pendingChangesAreNeverSilent(
       good({
         get_regulation: (a) => ({ json: { id: a["id"], citation: "Acme 1" } }),
-        expand_regulation: (a) => ({ json: { id: a["id"] } }),
-        get_regulation_tree: (a) => ({ json: { id: a["id"] } }),
+        related: (a) => ({ json: { id: a["id"] } }),
         resolve_citation: () => ({ json: { match: { id: A } } }),
         search_regulation: () => ({ json: { results: [rowOf(A, "Acme 1", "acme-reg")], notice: "Showing 1 of 9 matches." } }),
         get_corpus_info: () => ({ json: {} }),
       }),
     );
     const ids = fatalIds(r);
-    for (const want of ["I15/get_regulation", "I15/expand_regulation", "I15/get_regulation_tree", "I15/resolve_citation", "I15/search", "I15/corpus_info"]) {
+    for (const want of ["I15/get_regulation", "I15/related", "I15/resolve_citation", "I15/search", "I15/corpus_info"]) {
       expect(ids, want).toContain(want);
     }
   });

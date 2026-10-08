@@ -16,6 +16,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
+import { isLegacyTool, legacyCall } from "./legacy.ts";
+
 // ============================================================================
 // Token accounting
 // ============================================================================
@@ -43,6 +45,8 @@ export interface CallTrace {
   isError: boolean;
   /** Parsed body when the content is valid JSON; null when it is not. */
   json: unknown | null;
+  /** The structured content the server sent beside the text, when it sent any (a text-first tool carries its machine part here). */
+  structured?: unknown;
 }
 
 export interface ToolCard {
@@ -167,15 +171,18 @@ export async function openSession(opts: OpenOptions = {}): Promise<Session> {
 
   const traces: CallTrace[] = [];
 
-  const call = async (tool: string, args: Record<string, unknown> = {}): Promise<CallTrace> => {
+  const rawCall = async (tool: string, args: Record<string, unknown> = {}): Promise<CallTrace> => {
     const t0 = performance.now();
     let text = "";
     let isError = false;
+    let structured: unknown;
     try {
       const r = (await client.callTool({ name: tool, arguments: args })) as {
         content?: Array<{ type: string; text?: string }>;
         isError?: boolean;
+        structuredContent?: unknown;
       };
+      structured = r.structuredContent;
       text = (r.content ?? []).map((c) => c.text ?? "").join("");
       isError = r.isError === true;
     } catch (e) {
@@ -199,10 +206,14 @@ export async function openSession(opts: OpenOptions = {}): Promise<Session> {
       ms: Math.round(performance.now() - t0),
       isError,
       json,
+      ...(structured === undefined ? {} : { structured }),
     };
     traces.push(trace);
     return trace;
   };
+  // Probes written in the 0.x vocabulary are answered by the 1.0 tools (evals/legacy.ts); `traces` keeps the real calls.
+  const call = (tool: string, args: Record<string, unknown> = {}): Promise<CallTrace> =>
+    isLegacyTool(tool) ? legacyCall(rawCall, tool, args) : rawCall(tool, args);
 
   return {
     tools,

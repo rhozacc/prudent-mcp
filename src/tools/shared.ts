@@ -19,6 +19,7 @@ import { z } from "zod";
 import { adapters } from "../adapters.ts";
 import { computeHoldings, missingRecordClause } from "../holdings.ts";
 import type { Regulation, RegulationId } from "../schema.ts";
+import { notesShape, type Note } from "./note-types.ts";
 import {
   distinctQueryTokens,
   rankedSearch,
@@ -74,7 +75,7 @@ export function miss(message: string): CallToolResult {
 
 /**
  * The miss for a regulation id the corpus does not hold - ONE sentence for
- * get_regulation, expand_regulation and get_regulation_tree. "No record for X"
+ * get and related. "No record for X"
  * alone is true and reads as "there is no X": the corpus holds some provisions
  * of a document, not all of them, and which kind of absence this is depends on
  * how much of that document was taken (src/holdings.ts). Computed from the
@@ -83,7 +84,7 @@ export function miss(message: string): CallToolResult {
 export async function unknownRegulationMiss(id: string): Promise<CallToolResult> {
   const [regulations, sources] = await Promise.all([adapters.regulation.list(), adapters.source.list()]);
   const why = missingRecordClause(regulations, computeHoldings(regulations, sources), id);
-  return miss(`No provision has the id ${id}. ${why} Verify the id with search_regulation or list_review_areas.`);
+  return miss(`No provision has the id ${id}. ${why} Verify the id with search or cite.`);
 }
 
 // --- Search envelope ---------------------------------------------------------
@@ -116,6 +117,8 @@ export interface SearchEnvelope<T> {
   best_coverage?: number;
   /** Guidance that used to be appended after the JSON, where it broke parsing. */
   notice?: string;
+  /** What the answer must carry: a weak best match, an amendment to a row. Absent when there is nothing to say. */
+  notes?: Note[];
 }
 
 /**
@@ -217,8 +220,7 @@ export function weakMatchNotice(best: number, queryTokens: number): string {
 
 /**
  * Add `query_tokens` and `best_coverage` to a paged envelope and, when the best
- * match is weak (fewer than half the query's terms), say so in `notice` after
- * whatever truncation or shortening notice is already there - never instead of it.
+ * match is weak (fewer than half the query's terms), say so as a `weak_match` note.
  * A single-term query never carries it: with one term there is no "some of the
  * terms" to be short of, and a stem that places records on partial-word matches
  * alone has best coverage 0 (coverage counts whole words) without being weak.
@@ -231,10 +233,7 @@ export function withQueryCoverage<T>(
   const out: SearchEnvelope<T> = { ...envelope, query_tokens: queryTokens };
   if (bestCoverage === undefined) return out;
   out.best_coverage = bestCoverage;
-  if (queryTokens >= 2 && bestCoverage * 2 < queryTokens) {
-    const weak = weakMatchNotice(bestCoverage, queryTokens);
-    out.notice = envelope.notice === undefined ? weak : `${envelope.notice} ${weak}`;
-  }
+  if (queryTokens >= 2 && bestCoverage * 2 < queryTokens) out.notes = [{ type: "weak_match", text: weakMatchNotice(bestCoverage, queryTokens) }];
   return out;
 }
 
@@ -255,7 +254,7 @@ export interface RankedSearchPage<T extends { id: string }, Row extends object> 
    * page (after any shortening), appended after the truncation and weak-match
    * notices and never in place of them.
    */
-  pageNotice?: (pageRows: object[]) => string | undefined;
+  pageNotice?: (pageRows: object[]) => Note[];
   /**
    * The ranking knobs the adapter searched with (glossary, scope). Passed on to
    * the local recompute so its coverage and excerpts describe the same ranking.
@@ -305,31 +304,9 @@ export function rankedSearchResult<T extends { id: string }, Row extends object>
   // Highest of the whole ranked set, taken before paging.
   const best = ranked.reduce<number | undefined>((b, m) => (b === undefined || m.coverage > b ? m.coverage : b), undefined);
   const envelope = withQueryCoverage(paginate(rows, limit, offset), distinctQueryTokens(query), best);
-  const extra = page.pageNotice?.(envelope.results);
-  if (extra === undefined) return searchResult(envelope);
-  return searchResult({ ...envelope, notice: envelope.notice === undefined ? extra : `${envelope.notice} ${extra}` });
-}
-
-/**
- * Size guard for a single non-paged response.
- *
- * `detail: 'full'` on a bundling tool has no natural page to shorten — one call
- * can embed hundreds of complete records, and on a real corpus that reached
- * ~144,000 tokens, which is not a response but an eviction of whatever the
- * caller was working on. So the full form is served when it fits and the
- * compact form when it does not, with a notice saying what happened and which
- * tool fetches the parts. Never a silent truncation: a bundle that quietly
- * dropped records would be read as the whole area.
- */
-export function fitOrCompact<F extends Record<string, unknown>, C extends Record<string, unknown>>(
-  full: F,
-  compact: () => C,
-  notice: (approxTokens: number) => string,
-  budget: number = RESPONSE_CHAR_BUDGET,
-): Record<string, unknown> {
-  const chars = serialize(full).length;
-  if (chars <= budget) return full;
-  return { ...compact(), notice: notice(Math.round(chars / 4)) };
+  const extra = page.pageNotice?.(envelope.results) ?? [];
+  if (extra.length === 0) return searchResult(envelope);
+  return searchResult({ ...envelope, notes: [...(envelope.notes ?? []), ...extra] });
 }
 
 /** The shared input shape for the four search_* tools. */
@@ -410,6 +387,7 @@ export function searchOutputShape(resultItem: z.ZodTypeAny) {
         "Highest coverage of any match across the whole ranked set, not only this page; absent when nothing matched.",
       ),
     notice: z.string().optional().describe("Guidance about this result set, when there is any."),
+    ...notesShape,
   }).passthrough();
 }
 
@@ -440,8 +418,7 @@ export interface ServedRegulation {
 }
 
 /**
- * The one way the regulation tools read a record, so `get_regulation`,
- * `expand_regulation` and every node of `get_regulation_tree` agree on what
+ * The one way the tools read a provision, so `get` and `related` agree on what
  * "served from current text" means.
  */
 export async function resolveRegulation(id: RegulationId, asOf: string | undefined): Promise<ServedRegulation> {
@@ -484,95 +461,6 @@ export function asOfNote(record: Regulation, asOf: string): string {
 }
 
 /**
- * Where a group of records shares one envelope: a tree (every node reached by
- * the walk) or an expansion (the regulation children embedded under one record).
- */
-export type AsOfGroup = "tree" | "children";
-
-/** The other members of a group, by what became of them under the requested date. */
-export interface AsOfGroupCounts {
-  /** Served from their current text, because no version is recorded for the date. */
-  fromCurrent: number;
-  /** Listed by the corpus but with no version for the date, so shown by id alone. */
-  noVersion: number;
-}
-
-/**
- * The same statement for a group, where one envelope covers many records.
- *
- * Nodes other than the root are not given a field each: a tree can reach 200 of
- * them, and the same sentence 200 times is the cost the note exists to avoid.
- * They are counted in the one note instead - both the ones served from current
- * text and the ones with nothing to serve, which come back as a bare id and
- * would otherwise read as a dangling reference. Returns undefined when nothing
- * in the group needs saying - no note, rather than an empty one.
- */
-export function asOfGroupNote(
-  asOf: string,
-  root: { record: Regulation; fromCurrent: boolean },
-  others: AsOfGroupCounts,
-  group: AsOfGroup = "tree",
-): string | undefined {
-  const parts = [currentTextPart(asOf, root, others.fromCurrent, group), noVersionPart(asOf, others.noVersion, group)];
-  const said = parts.filter((p): p is string => p !== undefined);
-  return said.length === 0 ? undefined : said.join(" ");
-}
-
-/** The members, and the root, served from current text. */
-function currentTextPart(
-  asOf: string,
-  root: { record: Regulation; fromCurrent: boolean },
-  n: number,
-  group: AsOfGroup,
-): string | undefined {
-  if (!root.fromCurrent && n === 0) return undefined;
-  if (n === 0) return asOfNote(root.record, asOf);
-  const detail = "(the full form shows each one's version date)";
-  const tree = group === "tree";
-  // "2 other provisions in this tree" / "2 of its children": the same count, said
-  // in the words that fit what the group is.
-  const others = tree ? (n === 1 ? "1 other provision" : `${n} other provisions`) : n === 1 ? "1 of its children" : `${n} of its children`;
-  if (root.fromCurrent) {
-    return (
-      `${asOfNote(root.record, asOf)} The same holds for ${others}${tree ? " in this tree" : ""}: ` +
-      `${n === 1 ? "it was" : "each was"} shown from its current text, which may differ from the text in force on that date ${detail}.`
-    );
-  }
-  const subject = tree
-    ? `${n === 1 ? "1 provision" : `${n} provisions`} in this tree other than the root`
-    : `${n === 1 ? "1 child" : `${n} children`} of this provision`;
-  return (
-    `${subject} ${n === 1 ? "was" : "were"} shown from current text, because this library has no version of ` +
-    `${n === 1 ? "it" : "them"} for the requested date (${asOf}). ` +
-    `${n === 1 ? "It" : "Each"} may differ from the text in force on that date; do not present ` +
-    `${n === 1 ? "it" : "them"} as the historical text ${detail}.`
-  );
-}
-
-/**
- * The members the corpus lists but has no version of for the date. They carry no
- * label and no text, which is exactly what a reference to a record that is not in
- * the corpus looks like, so the note says which of the two this is - and that it
- * is a statement about the corpus's history, never about the law.
- */
-function noVersionPart(asOf: string, m: number, group: AsOfGroup): string | undefined {
-  if (m === 0) return undefined;
-  const one = m === 1;
-  const subject =
-    group === "tree"
-      ? `${one ? "1 provision" : `${m} provisions`} in this tree other than the root`
-      : `${one ? "1 child" : `${m} children`} of this provision`;
-  const shown =
-    group === "tree"
-      ? `${one ? "it appears" : "they appear"} by id only, with no label or text, and the walk goes no further there`
-      : `${one ? "it is" : "they are"} listed by id only, with no label or text`;
-  return (
-    `${subject} ${one ? "has" : "have"} no version held for the requested date (${asOf}), so ${shown}. ` +
-    `That is a gap in what this library holds, not evidence that ${one ? "it" : "they"} did not exist or did not apply on that date.`
-  );
-}
-
-/**
  * The tail every as_of miss shares. A miss is the one answer that carries no
  * text, so it says what the same call does elsewhere: a date the corpus holds no
  * version for is answered with the current text AND an as_of_note, not refused.
@@ -581,19 +469,7 @@ function noVersionPart(asOf: string, m: number, group: AsOfGroup): string | unde
  */
 export const AS_OF_MISS_CONTEXT =
   "Where this library has no version for a date but the document already existed, the current text is " +
-  "returned together with an as_of_note; this date is earlier than any version the library holds.";
-
-/**
- * Attach `as_of_note` to a response body, leading it so the caveat is read
- * before the text it qualifies. With no note the body is returned untouched —
- * the key is absent, never present and empty (absent is not empty).
- */
-export function withAsOfNote<T extends Record<string, unknown>>(
-  body: T,
-  note: string | undefined,
-): T | (T & { as_of_note: string }) {
-  return note === undefined ? body : { as_of_note: note, ...body };
-}
+  "returned together with a note saying so; this date is earlier than any version the library holds.";
 
 // --- Input leniency ----------------------------------------------------------
 

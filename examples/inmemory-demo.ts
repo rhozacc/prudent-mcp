@@ -37,12 +37,10 @@ import {
 import type {
   Check,
   CheckId,
-  CompiledPlaybook,
   Playbook,
   PlaybookId,
   Regulation,
   RegulationId,
-  ReviewArea,
   Source,
   SourceId,
   Test,
@@ -329,81 +327,6 @@ const CHECKS: Record<CheckId, Check> = {
   },
 };
 
-const PLAYBOOKS: Record<PlaybookId, Playbook> = {
-  "playbook://calibration": {
-    id: "playbook://calibration",
-    area: "calibration",
-    regulatory_scope: [],
-    phases: [
-      {
-        name: "Identify component",
-        description:
-          "Determine whether the review concerns PD, LGD, or EAD calibration. " +
-          "Drop into the relevant sub-playbook.",
-        references: [],
-      },
-    ],
-    gates: [],
-    last_updated: "2024-10-01",
-  },
-  "playbook://calibration/pd": {
-    id: "playbook://calibration/pd",
-    area: "calibration",
-    subarea: "pd",
-    regulatory_scope: ["regulation://eba/gl-2017-16/s4", "regulation://crr/180"],
-    phases: [
-      {
-        name: "Validate LRA derivation",
-        description:
-          "Confirm the long-run average period covers a full cycle and that the " +
-          "default-rate time series is reconstructed consistently with the currently " +
-          "applied default definition.",
-        references: [
-          "regulation://crr/180/1/a",
-          "regulation://eba/gl-2017-16/78",
-          "check://calibration/pd/lra-derived",
-        ],
-      },
-      {
-        name: "Test calibration at grade level",
-        description:
-          "Run grade-level calibration tests. Use a binomial-family test (Jeffreys " +
-          "or one-sided binomial) per grade; HL or equivalent at portfolio level. " +
-          "Bank-specific variants are acceptable if they belong to the same family " +
-          "and the acceptance criteria are met.",
-        references: [
-          "test://jeffreys",
-          "test://binomial",
-          "test://hosmer-lemeshow",
-          "check://calibration/pd/segment-tested",
-        ],
-      },
-      {
-        name: "Document interpretation",
-        description:
-          "Reconcile findings against EBA GL expectations and document any " +
-          "deviations from internal calibration policy.",
-        references: ["regulation://eba/gl-2017-16/78"],
-      },
-    ],
-    gates: [
-      "LRA period covers a full economic cycle",
-      "All material grades tested individually",
-      "Deviations explained and approved",
-    ],
-    last_updated: "2024-10-01",
-  },
-};
-
-const REVIEW_AREAS: ReviewArea[] = [
-  { id: "calibration", name: "Calibration", children: ["calibration.pd", "calibration.lgd"] },
-  { id: "calibration.pd", name: "PD Calibration", parent: "calibration", children: [] },
-  { id: "calibration.lgd", name: "LGD Calibration", parent: "calibration", children: [] },
-  { id: "default-definition", name: "Default Definition", children: [] },
-  { id: "discriminatory-power", name: "Discriminatory Power", children: [] },
-];
-
-
 const SOURCES: Record<SourceId, Source> = {
   "source://crr/575-2013": {
     id: "source://crr/575-2013",
@@ -579,13 +502,13 @@ const inMemoryCheck: CheckAdapter = {
 
 const inMemoryPlaybook: PlaybookAdapter = {
   async search(query) {
-    return rankedSearch(Object.values(PLAYBOOKS), query, playbookSearchFields).map((m) => m.record);
+    return rankedSearch(Object.values(DEMO_PLAYBOOKS), query, playbookSearchFields).map((m) => m.record);
   },
   async get(id) {
-    return PLAYBOOKS[id] ?? null;
+    return DEMO_PLAYBOOKS[id] ?? null;
   },
   async list() {
-    return Object.values(PLAYBOOKS);
+    return Object.values(DEMO_PLAYBOOKS);
   },
 };
 
@@ -609,7 +532,7 @@ const inMemoryMeta: MetaAdapter = {
         regulation: Object.keys(REGULATIONS).length,
         test: Object.keys(TESTS).length,
         check: Object.keys(CHECKS).length,
-        playbook: Object.keys(PLAYBOOKS).length,
+        playbook: Object.keys(DEMO_PLAYBOOKS).length,
         source: Object.keys(SOURCES).length,
       },
       coverage: ["CRR", "EBA-GL-2017-16"],
@@ -624,7 +547,7 @@ const inMemoryMeta: MetaAdapter = {
         regulation: Object.values(REGULATIONS),
         tests: Object.values(TESTS),
         checks: Object.values(CHECKS),
-        playbooks: Object.values(PLAYBOOKS),
+        playbooks: Object.values(DEMO_PLAYBOOKS),
       },
       id,
     );
@@ -638,8 +561,11 @@ const inMemoryMeta: MetaAdapter = {
       computeHoldings(Object.values(REGULATIONS), Object.values(SOURCES)),
     );
   },
-  async taxonomy() {
-    return [...REVIEW_AREAS];
+  async topics() {
+    return DEMO_TOPICS;
+  },
+  async glossary() {
+    return DEMO_GLOSSARY;
   },
 };
 
@@ -647,9 +573,10 @@ const inMemoryMeta: MetaAdapter = {
 // Compiled playbooks (1.0): one topic, compiled across documents
 // ============================================================================
 //
-// Not served by the 0.x tools (they read the per-chapter playbooks above); the 1.0
-// surface will serve these. They exist here so the renderer and verifier have a
-// worked example whose output is pinned by a golden test.
+// Served by the playbook tools and pinned by a golden test of the renderer.
+
+/** The abbreviations the demo texts use, expanded by search. */
+export const DEMO_GLOSSARY: Record<string, string[]> = { lra: ["long-run average"] };
 
 export const DEMO_TOPICS: Topics = {
   version: 1,
@@ -670,7 +597,7 @@ export const DEMO_TOPICS: Topics = {
   ],
 };
 
-export const DEMO_COMPILED_PLAYBOOKS: Record<PlaybookId, CompiledPlaybook> = {
+export const DEMO_PLAYBOOKS: Record<PlaybookId, Playbook> = {
   "playbook://pd-long-run-average": {
     id: "playbook://pd-long-run-average",
     title: "Long-run average default rate for PD calibration",
@@ -774,7 +701,7 @@ export const demoPlaybookContext = (): PlaybookContext =>
     sources: Object.values(SOURCES),
     checks: Object.values(CHECKS),
     tests: Object.values(TESTS),
-    playbooks: Object.values(DEMO_COMPILED_PLAYBOOKS),
+    playbooks: Object.values(DEMO_PLAYBOOKS),
   });
 
 // ============================================================================

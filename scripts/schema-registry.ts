@@ -11,14 +11,11 @@ import {
   CitationResolutionSchema,
   ExternalCitationSchema,
   CommentarySchema,
-  CompiledPlaybookSchema,
   CorpusInfoSchema,
   MilestoneSchema,
-  PhaseSchema,
   PlaybookSchema,
   ReferrersSchema,
   RegulationSchema,
-  ReviewAreaSchema,
   SourceSchema,
   TestSchema,
   TopicsSchema,
@@ -34,15 +31,12 @@ export const surfaceSchemas = {
 
 export const supportingSchemas = {
   Commentary: CommentarySchema,
-  Phase: PhaseSchema,
   Milestone: MilestoneSchema,
-  ReviewArea: ReviewAreaSchema,
   CorpusInfo: CorpusInfoSchema,
   Referrers: ReferrersSchema,
   CitationResolution: CitationResolutionSchema,
   ExternalCitation: ExternalCitationSchema,
-  // The 1.0 playbook and the topics it is compiled from. Registered beside the 0.x `Playbook`, which it replaces in 1.0.0.
-  CompiledPlaybook: CompiledPlaybookSchema,
+  // The topics the playbooks are compiled from.
   Topics: TopicsSchema,
 } as const;
 

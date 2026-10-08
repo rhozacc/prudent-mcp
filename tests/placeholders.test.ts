@@ -188,46 +188,41 @@ describe("pre_adoption_placeholders on the regulation tools", () => {
     return { isError: res.isError === true, body: (res.structuredContent ?? {}) as Record<string, unknown> };
   }
 
-  for (const tool of ["get_regulation", "expand_regulation"] as const) {
-    it(`${tool} flags a record whose text names a placeholder`, async () => {
-      const r = await call(tool, { id: flagged.id });
-      expect(r.isError).toBe(false);
-      expect(r.body["pre_adoption_placeholders"]).toEqual(["Regulation (EU) xx/xx [RTS on a synthetic topic]"]);
-      expect(String(r.body["notice"])).toMatch(/not a citation/);
-      expect(r.body["text"]).toBe(flagged.text);
-    });
+  const got = async (id: string, extra: Record<string, unknown> = {}) => {
+    const r = await call("get", { ids: id, ...extra });
+    const notes = (r.body["notes"] ?? []) as Array<{ type: string; text: string; applies_to?: string[] }>;
+    return { ...r, notes, placeholder: notes.find((n) => n.type === "placeholder"), record: (r.body["records"] as Array<Record<string, unknown>> | undefined)?.[0] };
+  };
 
-    it(`${tool} leaves a record with numbered acts exactly as it was`, async () => {
-      const r = await call(tool, { id: numbered.id });
-      expect(r.isError).toBe(false);
-      expect("pre_adoption_placeholders" in r.body).toBe(false);
-      expect("notice" in r.body).toBe(false);
-    });
-  }
+  it("get flags a record whose text names a placeholder, quoting what it names", async () => {
+    const r = await got(flagged.id);
+    expect(r.isError).toBe(false);
+    expect(r.placeholder?.text).toMatch(/not a citation/);
+    expect(r.placeholder?.text).toContain("“Regulation (EU) xx/xx [RTS on a synthetic topic]”");
+    expect(r.record?.["text"]).toBe(flagged.text);
+  });
 
-  it("get_regulation serves the unflagged record byte for byte as the adapter holds it", async () => {
-    const r = await call("get_regulation", { id: numbered.id });
+  it("get leaves a record with numbered acts exactly as it was", async () => {
+    const r = await got(numbered.id);
+    expect(r.isError).toBe(false);
+    expect(r.placeholder).toBeUndefined();
+    expect("notes" in r.body).toBe(false);
+  });
+
+  it("get serves the unflagged record byte for byte as the adapter holds it", async () => {
+    const r = await got(numbered.id);
     const held = await createFileAdapters(corpus).regulation.get(numbered.id as never);
-    expect(r.body).toEqual(JSON.parse(JSON.stringify(held)));
+    expect(r.record).toEqual(JSON.parse(JSON.stringify(held)));
   });
 
-  it("expand_regulation flags the record asked for, not the children it embeds", async () => {
-    const r = await call("expand_regulation", { id: flagged.id, detail: "full" });
-    const children = r.body["children"] as Array<Record<string, unknown>>;
-    expect(r.body["pre_adoption_placeholders"]).toBeDefined();
-    expect(children.some((c) => c["id"] === child.id)).toBe(true);
-    for (const c of children) expect("pre_adoption_placeholders" in c).toBe(false);
+  it("the placeholder note sits beside a version note without either replacing the other", async () => {
+    const r = await got(flagged.id, { as_of: "2024-12-31" });
+    expect(r.notes.map((n) => n.type).sort()).toEqual(["placeholder", "version"]);
+    expect(r.placeholder?.text).not.toMatch(/as_of/);
   });
 
-  it("the flag sits beside an as_of_note without either replacing the other", async () => {
-    const r = await call("get_regulation", { id: flagged.id, as_of: "2024-12-31" });
-    expect(typeof r.body["as_of_note"]).toBe("string");
-    expect(r.body["pre_adoption_placeholders"]).toBeDefined();
-    expect(String(r.body["notice"])).not.toMatch(/as_of/);
-  });
-
-  it("detail: 'full' search rows are the canonical record and carry no flag", async () => {
-    const r = await call("search_regulation", { query: "estimating", detail: "full" });
+  it("search rows carry no flag: the note is one get away", async () => {
+    const r = await call("search", { query: "estimating", detail: "full" });
     const rows = r.body["results"] as Array<Record<string, unknown>>;
     expect(rows.map((x) => x["id"])).toContain(flagged.id);
     for (const row of rows) {
@@ -332,13 +327,10 @@ describe("eval I14", () => {
   }
   const bodyFor = (id: string) => (id === flagged.id ? flagged : numbered);
 
-  it("fails a server that serves the placeholder unmarked, on both tools", async () => {
+  it("fails a server that serves the placeholder unmarked", async () => {
     const r = await placeholdersAreMarked(stub((_t, id) => ({ ...bodyFor(id) })));
     expect(r.applicable).toBe(true);
-    expect(r.findings.filter((f) => f.severity === "fatal").map((f) => f.id).sort()).toEqual([
-      "I14/expand_regulation",
-      "I14/get_regulation",
-    ]);
+    expect(r.findings.filter((f) => f.severity === "fatal").map((f) => f.id).sort()).toEqual(["I14/get_regulation"]);
   });
 
   it("fails a server whose flag carries no notice that it is not a citation", async () => {

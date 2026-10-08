@@ -9,6 +9,7 @@
  */
 import { adapters } from "../adapters.ts";
 import { amendmentIndex, isMapped, isTargeted, provisionPendingNote } from "../amendments.ts";
+import { citationOf, sourceFor } from "../citation-style.ts";
 import {
   MAX_PENDING_NAMED,
   isoDay,
@@ -17,6 +18,7 @@ import {
   type OpenPendingChange,
 } from "../pending.ts";
 import type { Regulation, Source } from "../schema.ts";
+import type { Note } from "./note-types.ts";
 
 type Doc = { framework: string; document_id: string };
 /** A provision, as the notes see it: which document it is of, and which provision it is. */
@@ -37,18 +39,6 @@ export async function pendingNoteFor(record: Provision, asOf?: string, now: Date
 }
 
 /**
- * Attach `pending_changes_note` to a response body, ahead of the record fields so
- * the caveat is read before the text it qualifies. With no note the body is
- * returned untouched: the key is absent, never present and empty.
- */
-export function withPendingNote<T extends Record<string, unknown>>(
-  body: T,
-  note: string | undefined,
-): T | (T & { pending_changes_note: string }) {
-  return note === undefined ? body : { pending_changes_note: note, ...body };
-}
-
-/**
  * A page notice for a set of records, from the documents they belong to. Read once
  * before the page is built (`sources` and `today` are fixed for the request), and
  * applied to the rows that actually ended up on the page.
@@ -62,7 +52,7 @@ export function withPendingNote<T extends Record<string, unknown>>(
 export async function pendingPageNotice(
   records: (Provision & Pick<Regulation, "citation">)[],
   now: Date = new Date(),
-): Promise<(pageRows: object[]) => string | undefined> {
+): Promise<(pageRows: object[]) => Note[]> {
   const today = isoDay(now);
   const [sources, regulations]: [Source[], Regulation[]] = await Promise.all([
     adapters.source.list(),
@@ -92,7 +82,7 @@ export async function pendingPageNotice(
       const first = o[0];
       if (first === undefined) continue;
       if (isMapped(rec, o, index)) {
-        if (isTargeted(rec, regulations, sources, today)) named.push(rec.citation);
+        if (isTargeted(rec, regulations, sources, today)) named.push(citationOf(rec, sourceFor(rec, sources)));
         continue;
       }
       const key = `${rec.framework}\u0000${rec.document_id}`;
@@ -100,8 +90,12 @@ export async function pendingPageNotice(
       seen.add(key);
       docs.push({ title: first.source.title, open: o });
     }
-    const parts = [pendingSearchNotice(docs), namedNotice(named)].filter((p): p is string => p !== undefined);
-    return parts.length === 0 ? undefined : parts.join(" ");
+    const notes: Note[] = [];
+    const unmapped = pendingSearchNotice(docs);
+    if (unmapped !== undefined) notes.push({ type: "amendment", text: unmapped });
+    const mapped = namedNotice(named);
+    if (mapped !== undefined) notes.push({ type: "amendment", text: mapped, applies_to: named.slice(0, MAX_PENDING_NAMED) });
+    return notes;
   };
 }
 

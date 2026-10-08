@@ -275,13 +275,14 @@ describe("the remembered ranking", () => {
   });
 });
 
-describe("search_regulation over the wire", () => {
+describe("search over the wire", () => {
   let client: Client | undefined;
   let saved: typeof adapters;
 
   const bg = reg("bg", "Respondents discussed how representativeness should be shown.", { role: "background" });
   const op = reg("op", "Institutions shall show representativeness of the reference data set.", { role: "operative" });
-  const corpus = CorpusFileSchema.parse({ regulation: [bg, op], glossary: { rds: ["reference data set"] } });
+  const op2 = reg("op2", "Representativeness of the calibration data shall be shown by grade.", { role: "operative" });
+  const corpus = CorpusFileSchema.parse({ regulation: [bg, op, op2], glossary: { rds: ["reference data set"] } });
   const files = createFileAdapters(corpus);
 
   // An adapter written outside this repo: ranks with the shared function but
@@ -318,7 +319,7 @@ describe("search_regulation over the wire", () => {
   });
 
   async function call(args: Record<string, unknown>) {
-    const res = await client!.callTool({ name: "search_regulation", arguments: args });
+    const res = await client!.callTool({ name: "search", arguments: args });
     return (res.structuredContent ?? {}) as Record<string, any>;
   }
 
@@ -328,12 +329,10 @@ describe("search_regulation over the wire", () => {
         Object.assign(adapters, impl);
       });
 
-      it("leaves background out by default and includes it with scope: all", async () => {
-        const def = await call({ query: "representativeness" });
-        expect(def.results.map((r: any) => r.id)).toEqual(["regulation://gl/op"]);
-        const all = await call({ query: "representativeness", scope: "all" });
-        expect(all.results.map((r: any) => r.id).sort()).toEqual(["regulation://gl/bg", "regulation://gl/op"]);
-        expect(all.total_matches).toBe(2);
+      it("never serves background provisions", async () => {
+        const res = await call({ query: "representativeness" });
+        expect(res.results.map((r: any) => r.id).sort()).toEqual(["regulation://gl/op", "regulation://gl/op2"]);
+        expect(res.total_matches).toBe(2);
       });
 
       it("expands an abbreviation and still gives the row its coverage and excerpt", async () => {
@@ -345,7 +344,7 @@ describe("search_regulation over the wire", () => {
       });
 
       it("counts every match but builds only the requested page", async () => {
-        const res = await call({ query: "representativeness", scope: "all", limit: 1, offset: 1 });
+        const res = await call({ query: "representativeness", limit: 1, offset: 1 });
         expect(res.total_matches).toBe(2);
         expect(res.returned).toBe(1);
         expect(res.truncated).toBe(false);

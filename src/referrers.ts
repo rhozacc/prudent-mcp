@@ -10,7 +10,7 @@
  *   - regulation: `parent` or `children`
  *   - test:       `regulatory_basis` or `parent`
  *   - check:      `derived_from` or `parent`
- *   - playbook:   `regulatory_scope` or any `phases[].references` entry
+ *   - playbook:   cites the provision anywhere (`playbookProvisions`)
  *
  * `primary` splits out the checks/tests naming `id` in their optional
  * `primary_basis` — the provision they restate, as against the span they were
@@ -23,7 +23,6 @@
  * keeps the index truthful on corpora the linter hasn't blessed.
  */
 import type {
-  AnyId,
   Check,
   Playbook,
   Referrers,
@@ -32,6 +31,19 @@ import type {
   RegulationId,
   Test,
 } from "./schema.ts";
+
+/**
+ * Every provision a playbook cites, anywhere: its basis, its requirements, its methods and its pitfalls. Provisions it
+ * lists as `excluded` are members it chose not to cite and are not included.
+ */
+export function playbookProvisions(p: Playbook): Set<RegulationId> {
+  const ids = new Set<RegulationId>();
+  for (const b of p.basis) for (const r of b.provisions) ids.add(r.id);
+  for (const r of p.requirements) for (const x of r.provisions) ids.add(x.id);
+  for (const m of p.methods) for (const id of m.provisions) ids.add(id);
+  for (const pit of p.pitfalls) for (const id of pit.provisions) ids.add(id);
+  return ids;
+}
 
 export interface ReferrersInput {
   regulation: Regulation[];
@@ -45,7 +57,6 @@ export function computeReferrers(input: ReferrersInput, id: string): Referrers {
   // well-formed URI simply never matches, so the casts are safe.
   const asRegulation = id as RegulationId;
   const asChild = id as RegulationChildId;
-  const asAny = id as AnyId;
 
   return {
     regulation: input.regulation
@@ -57,13 +68,7 @@ export function computeReferrers(input: ReferrersInput, id: string): Referrers {
     checks: input.checks
       .filter((c) => c.derived_from.includes(asRegulation) || c.parent === asRegulation)
       .map((c) => c.id),
-    playbooks: input.playbooks
-      .filter(
-        (p) =>
-          p.regulatory_scope.includes(asRegulation) ||
-          p.phases.some((ph) => ph.references.includes(asAny)),
-      )
-      .map((p) => p.id),
+    playbooks: input.playbooks.filter((p) => playbookProvisions(p).has(asRegulation)).map((p) => p.id),
     primary: {
       tests: input.tests
         .filter((t) => t.primary_basis?.includes(asRegulation) === true)

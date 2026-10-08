@@ -106,16 +106,17 @@ describe("0.11 fields round-trip", () => {
     expect(() => SourceSchema.parse(source({ citation_style: { kind: "oj" } }))).toThrow();
   });
 
-  it("CorpusFile keeps glossary and topics, and passes unknown topic keys through", () => {
+  it("CorpusFile keeps glossary and topics (validated, with the authoring-only keys dropped)", () => {
     const parsed = CorpusFileSchema.parse({
       regulation: [rec("regulation://gl-a/paragraph-1")],
       glossary: { rds: ["reference data set"], moc: ["margin of conservatism", "margin of conservatism (MoC)"] },
       topics: {
+        version: 1,
         areas: [
           {
             id: "data",
             title: "Data",
-            topics: [{ id: "representativeness", title: "Representativeness", scope: "x", anchors: ["a"] }],
+            topics: [{ id: "representativeness", title: "Representativeness", scope: "x", anchors: ["a"], outside: ["Some Act"] }],
           },
         ],
       },
@@ -129,6 +130,7 @@ describe("0.11 fields round-trip", () => {
       title: "Representativeness",
       scope: "x",
       anchors: ["a"],
+      questions: [],
     });
   });
 

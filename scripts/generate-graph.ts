@@ -11,6 +11,7 @@
  * Solid arrows are Regulation.children; dotted arrows are playbook phase
  * references.
  */
+import { playbookProvisions } from "../src/referrers.ts";
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -52,18 +53,17 @@ async function main(): Promise<void> {
   subgraph("Test", tests.map((t) => `    ${nodeId(t.id)}{{"${label(t.name)}"}}`));
   subgraph(
     "Playbook",
-    playbooks.map((p) => `    ${nodeId(p.id)}[["${label(p.subarea ? `${p.area}/${p.subarea}` : p.area)}"]]`),
+    playbooks.map((p) => `    ${nodeId(p.id)}[["${label(p.title)}"]]`),
   );
 
-  // Edges, deduplicated (a playbook may reference the same record in two phases).
+  // Edges, deduplicated (a playbook may cite the same provision in two requirements).
   const edges = new Set<string>();
   // Solid: Regulation.children (structure + operationalization).
   for (const r of regs) for (const child of r.children) edges.add(`  ${nodeId(r.id)} --> ${nodeId(child)}`);
-  // Dotted: playbook phase references reaching across surfaces.
+  // Dotted: what a playbook cites (provisions) and uses (checks, tests) in its requirements.
   for (const p of playbooks) {
-    for (const ph of p.phases) {
-      for (const ref of ph.references) edges.add(`  ${nodeId(p.id)} -.-> ${nodeId(ref)}`);
-    }
+    for (const id of playbookProvisions(p)) edges.add(`  ${nodeId(p.id)} -.-> ${nodeId(id)}`);
+    for (const r of p.requirements) for (const ref of [...r.checks, ...r.tests]) edges.add(`  ${nodeId(p.id)} -.-> ${nodeId(ref)}`);
   }
   lines.push(...edges);
 

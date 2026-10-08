@@ -6,7 +6,7 @@
 import type {
   Check,
   CheckId,
-  CompiledPlaybook,
+  Playbook,
   PlaybookId,
   PlaybookStatus,
   Regulation,
@@ -30,7 +30,7 @@ export interface PlaybookContextParts {
   sources: readonly Source[];
   checks?: readonly Check[];
   tests?: readonly Test[];
-  playbooks?: readonly Pick<CompiledPlaybook, "id" | "title" | "provenance">[];
+  playbooks?: readonly Pick<Playbook, "id" | "title" | "provenance">[];
 }
 
 export function playbookContext(parts: PlaybookContextParts): PlaybookContext {

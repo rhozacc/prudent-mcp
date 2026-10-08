@@ -14,7 +14,7 @@
  */
 import { citationOf, locatorOf, sourceFor } from "./citation-style.ts";
 import { approxTokens, type PlaybookContext } from "./playbook-context.ts";
-import type { CompiledPlaybook, PlaybookForce, Regulation, RegulationId } from "./schema.ts";
+import type { Playbook, PlaybookForce, Regulation, RegulationId } from "./schema.ts";
 
 /** A full playbook render is held to this many tokens (the verifier's V6 uses the same figure). */
 export const FULL_RENDER_BUDGET = 7000;
@@ -73,7 +73,7 @@ function extendsLocator(authored: string, derived: string): boolean {
 }
 
 /** The citation printed for a basis entry: from its provisions, keeping the compiler's pinpoint only where it extends them. */
-export function basisCitation(entry: CompiledPlaybook["basis"][number], ctx: PlaybookContext): string {
+export function basisCitation(entry: Playbook["basis"][number], ctx: PlaybookContext): string {
   const derived = citationsOf(entry.provisions.map((p) => p.id), ctx);
   if (derived.length === 0) return entry.citation;
   if (derived.some((d) => extendsLocator(entry.citation, d))) return entry.citation;
@@ -92,7 +92,7 @@ function provisionQuotes(
   });
 }
 
-function header(pb: CompiledPlaybook, ctx: PlaybookContext): string {
+function header(pb: Playbook, ctx: PlaybookContext): string {
   const out = [`# ${pb.title}`, "", pb.summary, "", "## What it rests on", ""];
   for (const b of pb.basis) {
     const lead = b.provisions[0];
@@ -103,7 +103,7 @@ function header(pb: CompiledPlaybook, ctx: PlaybookContext): string {
   return out.join("\n");
 }
 
-function requirementBlock(pb: CompiledPlaybook, handle: string, ctx: PlaybookContext, compact: boolean): string {
+function requirementBlock(pb: Playbook, handle: string, ctx: PlaybookContext, compact: boolean): string {
   const r = pb.requirements.find((x) => x.id === handle)!;
   const sources = citationsOf(r.provisions.map((p) => p.id), ctx);
   const out = [`### ${r.id}. ${r.title}`];
@@ -123,7 +123,7 @@ function requirementBlock(pb: CompiledPlaybook, handle: string, ctx: PlaybookCon
   return out.join("\n");
 }
 
-function tail(pb: CompiledPlaybook, ctx: PlaybookContext): string {
+function tail(pb: Playbook, ctx: PlaybookContext): string {
   const out: string[] = [];
   if (pb.methods.length > 0) {
     out.push("## Methods", "");
@@ -162,7 +162,7 @@ function cutAtBoundary(text: string, max: number): string {
   return head.slice(0, space > 0 ? space : max);
 }
 
-function renderSection(pb: CompiledPlaybook, handle: string, ctx: PlaybookContext, budget: number): Rendered | null {
+function renderSection(pb: Playbook, handle: string, ctx: PlaybookContext, budget: number): Rendered | null {
   const r = pb.requirements.find((x) => x.id === handle);
   if (r === undefined) return null;
   const out = [`# ${r.id}. ${r.title}`, `From: ${pb.title}`, "", r.statement, ""];
@@ -196,7 +196,7 @@ function renderSection(pb: CompiledPlaybook, handle: string, ctx: PlaybookContex
  * names no requirement). Without, the whole playbook; when it would exceed the budget the later requirements are
  * shown in short form, each saying how to ask for it in full.
  */
-export function renderPlaybook(pb: CompiledPlaybook, ctx: PlaybookContext, opts: RenderOptions = {}): Rendered | null {
+export function renderPlaybook(pb: Playbook, ctx: PlaybookContext, opts: RenderOptions = {}): Rendered | null {
   if (opts.section !== undefined) return renderSection(pb, opts.section, ctx, opts.budget ?? SECTION_RENDER_BUDGET);
   const budget = opts.budget ?? FULL_RENDER_BUDGET;
   const head = header(pb, ctx);

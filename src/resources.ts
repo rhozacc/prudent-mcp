@@ -13,6 +13,8 @@ import type { CompleteResourceTemplateCallback } from "@modelcontextprotocol/sdk
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 
 import { adapters } from "./adapters.ts";
+import { renderPlaybook } from "./render.ts";
+import { servedPlaybookContext } from "./tools/playbook-context.ts";
 import type {
   CheckId,
   PlaybookId,
@@ -65,12 +67,12 @@ export function registerResources(server: McpServer): void {
       title: "Regulation",
       description:
         "regulation://{framework}/{article}[/{paragraph}[/{point}]] — " +
-        "regulation://{document}/{provision} — ids come from search_regulation",
+        "regulation://{document}/{provision} — ids come from search",
     },
     async (uri, { path }) => {
       const id = `regulation://${String(path)}` as RegulationId;
       const reg = await adapters.regulation.get(id);
-      if (reg === null) notFound(uri.href, "search_regulation");
+      if (reg === null) notFound(uri.href, "search");
       return asJsonContents(uri.href, reg);
     },
   );
@@ -93,12 +95,12 @@ export function registerResources(server: McpServer): void {
     }),
     {
       title: "Test",
-      description: "test://{document}/{slug} — ids come from search_tests",
+      description: "test://{document}/{slug} — ids come from search",
     },
     async (uri, { path }) => {
       const fullId = `test://${String(path)}` as TestId;
       const t = await adapters.test.get(fullId);
-      if (t === null) notFound(uri.href, "search_tests");
+      if (t === null) notFound(uri.href, "search");
       return asJsonContents(uri.href, t);
     },
   );
@@ -115,12 +117,12 @@ export function registerResources(server: McpServer): void {
       title: "Check",
       description:
         "check://{area}/{topic}[/{specific}] — " +
-        "check://{document}/{slug} — ids come from search_checks",
+        "check://{document}/{slug} — ids come from search",
     },
     async (uri, { path }) => {
       const fullId = `check://${String(path)}` as CheckId;
       const c = await adapters.check.get(fullId);
-      if (c === null) notFound(uri.href, "search_checks");
+      if (c === null) notFound(uri.href, "search");
       return asJsonContents(uri.href, c);
     },
   );
@@ -135,13 +137,14 @@ export function registerResources(server: McpServer): void {
     }),
     {
       title: "Playbook",
-      description: "playbook://{document}/{slug} — ids come from search_playbooks",
+      description: "playbook://{topic} — ids come from topics and brief",
     },
     async (uri, { path }) => {
       const id = `playbook://${String(path)}` as PlaybookId;
       const p = await adapters.playbook.get(id);
-      if (p === null) notFound(uri.href, "search_playbooks");
-      return asJsonContents(uri.href, p);
+      if (p === null) notFound(uri.href, "topics");
+      const rendered = renderPlaybook(p, await servedPlaybookContext());
+      return { contents: [{ uri: uri.href, mimeType: "text/markdown", text: rendered?.text ?? "" }] };
     },
   );
 
@@ -156,12 +159,12 @@ export function registerResources(server: McpServer): void {
     {
       title: "Source",
       description:
-        "source://{framework}/{document-id} — ids come from list_sources",
+        "source://{framework}/{document-id} — ids come from sources",
     },
     async (uri, { path }) => {
       const id = `source://${String(path)}` as SourceId;
       const s = await adapters.source.get(id);
-      if (s === null) notFound(uri.href, "list_sources");
+      if (s === null) notFound(uri.href, "sources");
       return asJsonContents(uri.href, s);
     },
   );

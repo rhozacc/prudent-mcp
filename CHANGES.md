@@ -1,6 +1,17 @@
 # Changes
 
-## Unreleased (0.11)
+## 1.0.0
+
+**Playbook first, eight tools.** The server is rebuilt around one idea: a model answers better from a compiled playbook for the topic than from nineteen tools it has to compose itself. This is a breaking release.
+
+- **Tools: 19 → 8.** `brief` (the first call: routes a question to its playbook, renders it within a budget, appends the provisions the playbook does not cite, neighbouring playbooks and notes), `playbook` (one rendered, or one requirement with the full text of its provisions), `topics`, `search` (provisions by default; checks, tests and playbooks by `scope`; `document` narrows), `get` (up to 20 entries of any kind, `as_of` for provisions), `cite` (the same resolver and gates, renamed), `related` (heading path, siblings, what it cites and what cites it, checks and tests, playbooks, amendments), `sources`. `get_coverage_gaps` leaves the server. The three prompts become `walk_through`. Standing surface about 1.9k tokens (0.10: about 6.1k); instructions about 300 tokens (0.10: about 1,300).
+- **One `notes` list.** `as_of_note`, `pending_changes_note`, `pre_adoption_placeholders` + `notice` and `coverage_note` are `notes: [{ type: amendment | version | outside_library | placeholder | weak_match, text, applies_to? }]`, written to be repeated to the user and absent (not empty) when there is nothing to say. The edge-of-corpus rules that filled the 0.x instructions moved here, to the response they concern.
+- **Playbooks are compiled, per topic.** `PlaybookSchema` is the compiled shape (basis labelled by force, requirements with provisions and verbatim quotes, methods labelled practice or regulatory, pitfalls, outside-library list, excluded members, provenance). The 0.x per-chapter phase list, `Phase`, `ReviewArea`, `taxonomy`, `areas.ts` are gone. The corpus file carries `topics` and the approved playbooks under `playbooks`.
+- **`brief` routing** (`src/brief.ts`): BM25F over each playbook's title, questions, summary and requirements, plus a reciprocal-rank vote of the provisions the question finds that a playbook cites. A playbook is chosen only above a floor; when none is, `brief` says so and returns the best passages. A close second is named, not hidden.
+- **Evals.** I18 (every served playbook passes the verifier), I19 (a playbook is selected by its own questions). The 0.x probes are answered by the 1.0 tools through `evals/legacy.ts`, itself tested; the invariants' judgements are unchanged.
+- **Removed from search:** `scope: all` (background provisions are not served).
+
+## 0.11 (merged before 1.0)
 
 **Amendment points (additive).** `Amendment.point` (optional, `"(d)"`) confines an amendment to one point of its target. Amending instruments routinely say "Point (d) in paragraph 23 is replaced" and "Point (a) in paragraph 39 is deleted"; without a point the note could only say the provision was replaced or deleted, which says more than the amendment does. With one the note reads "replaces point (d) of this provision" or "deletes point (a) of this provision ... That point is deleted, with no new wording." An amendment with no point reads exactly as before.
 

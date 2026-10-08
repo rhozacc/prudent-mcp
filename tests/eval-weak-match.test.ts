@@ -23,7 +23,18 @@ const corpus = {
   ],
   checks: [{ id: "check://area/topic", name: "Synthetic", expectation: "Synthetic model data.", last_updated: day }],
   tests: [{ id: "test://acme/t", name: "Synthetic", purpose: "Synthetic validation estimation.", last_updated: day }],
-  playbooks: [{ id: "playbook://area/p", area: "Synthetic area", last_updated: day }],
+  playbooks: [
+    {
+      id: "playbook://p",
+      title: "Synthetic playbook",
+      area: "area",
+      summary: "Synthetic summary.",
+      questions: ["A synthetic question?"],
+      basis: [],
+      requirements: [{ id: "R1", title: "Requirement", statement: "Do it.", provisions: [{ id: "regulation://acme/a" }] }],
+      provenance: { status: "approved", compiled_at: "2026-01-01T00:00:00Z", inputs_sha: "0".repeat(64) },
+    },
+  ],
 };
 
 async function run(name: string, content: unknown) {
