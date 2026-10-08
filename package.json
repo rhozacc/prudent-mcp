@@ -1,6 +1,6 @@
 {
   "name": "prudent-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP server exposing the prudent IRB validation knowledge base",
   "type": "module",
   "module": "src/server.ts",

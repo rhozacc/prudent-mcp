@@ -216,6 +216,25 @@ describe("descriptive instrument gate: an issuer's descriptor beside a held docu
     }
   });
 
+  it("sets the descriptor aside before the equality passes, so an alias still resolves, with or without a connective", () => {
+    // The official citation the server hands out is an alias ("Credit risk chapter, paragraph 5"); a descriptor or an
+    // "of the" in front of it must not turn the alias into a miss.
+    const withAlias = (): Regulation[] => [
+      ...ecb(),
+      { ...reg("regulation://egim/chapter-2-5", "Chapter 2 (Credit risk), paragraph 5", "ecb-guide-internal-models", "ecb"), citation_aliases: ["Credit risk chapter, paragraph 5"] },
+    ];
+    for (const text of [
+      "ecb-guide-internal-models Credit risk chapter, paragraph 5",
+      "ECB Guideline ecb-guide-internal-models Credit risk chapter, paragraph 5",
+      "Credit risk chapter, paragraph 5 of the ECB Guidelines (ecb-guide-internal-models)",
+      "Credit risk chapter, paragraph 5 of the (ecb-guide-internal-models)",
+    ]) {
+      const r = resolveCitationDetailed(withAlias(), text);
+      expect(r.match?.id, text).toBe("regulation://egim/chapter-2-5");
+      expect(r.confidence, text).toBe("alias");
+    }
+  });
+
   it("resolves the document named, not the one the issuer's word could also fit", () => {
     const r = resolveCitationDetailed(ecb(), "ECB Guidelines (egim) Chapter 4, paragraph 5");
     expect(r.match?.id).toBe("regulation://egim/chapter-4-5");

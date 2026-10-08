@@ -1,5 +1,9 @@
 # Changes
 
+## 1.0.1
+
+**`cite` resolves the citation the library hands out, with or without an issuer's descriptor.** An ECB-kind descriptor ("ECB Guideline") beside a held document of that issuer is set aside before the equality passes, so an alias no longer turns into a miss because of it, and the alias pass tolerates the same connectives ("of the") the provision's own citation does. The context-quality probe for numbering (I9) ignores the instrument's own number, which official citations now lead with.
+
 ## 1.0.0
 
 **Playbook first, eight tools.** The server is rebuilt around one idea: a model answers better from a compiled playbook for the topic than from nineteen tools it has to compose itself. This is a breaking release.
