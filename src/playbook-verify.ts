@@ -284,11 +284,19 @@ const token = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, " ")
 function heldInstrument(name: string, ctx: PlaybookContext): string | null {
   const padded = ` ${token(name)} `;
   const acts = new Set(actKeys(name));
+  // A name that points at particular articles ("Articles 47a and 47b CRR") is a claim about those provisions, and a
+  // document held in part lacks most of its articles: it is held only when one of the articles named is.
+  const articles = [...name.matchAll(/\b(?:articles?|arts?\.)\s+((?:\d+[a-z]?(?:\(\d+\))?(?:\s*(?:,|and|or|to|-)\s*)?)+)/gi)].flatMap((m) => [...(m[1] ?? "").matchAll(/\d+[a-z]?/gi)].map((n) => n[0].toLowerCase()));
+  const holdsArticle = (documentId: string): boolean =>
+    [...ctx.regulations.values()].some(
+      (r) => r.document_id === documentId && articles.some((n) => new RegExp(`\\barticle\\s+${n}(?![0-9a-z])`, "i").test(r.citation)),
+    );
   for (const s of ctx.sources) {
     if (s.status !== "current") continue;
     const labels = [s.citation_style?.short_name, s.document_id].filter((x): x is string => x !== undefined && token(x) !== "");
-    if (labels.some((l) => padded.includes(` ${token(l)} `))) return s.title;
-    if ([s.title, s.citation_style?.short_name ?? ""].some((t) => actKeys(t).some((k) => acts.has(k)))) return s.title;
+    const named = labels.some((l) => padded.includes(` ${token(l)} `)) || [s.title, s.citation_style?.short_name ?? ""].some((t) => actKeys(t).some((k) => acts.has(k)));
+    if (!named) continue;
+    if (articles.length === 0 || holdsArticle(s.document_id)) return s.title;
   }
   return null;
 }

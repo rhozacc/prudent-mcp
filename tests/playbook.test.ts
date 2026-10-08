@@ -346,6 +346,17 @@ describe("verifyPlaybook", () => {
     byNumber.outside_library.push({ name: "Regulation (EU) No 575/2013", why: "x" });
     expect(rules(verify(byNumber))).toEqual(["V8"]);
 
+    // Particular articles of a held instrument: a claim about those provisions, held only when one of them is.
+    const absentArticle = demo();
+    absentArticle.outside_library.push({ name: "Articles 47a and 47b CRR (forbearance measures)", why: "x" });
+    expect(verify(absentArticle).errors).toEqual([]);
+    const heldArticle = demo();
+    heldArticle.outside_library.push({ name: "Article 180 CRR", why: "x" });
+    expect(rules(verify(heldArticle))).toEqual(["V8"]);
+    const oneOfTwo = demo();
+    oneOfTwo.outside_library.push({ name: "Articles 47a and 180 CRR", why: "x" });
+    expect(rules(verify(oneOfTwo))).toEqual(["V8"]);
+
     // a different act with a different number is not held; a word that merely contains a short name is not a hit
     const fine = demo();
     fine.outside_library.push({ name: "Commission Delegated Regulation (EU) 2022/439", why: "x" }, { name: "The crrfoo guidance", why: "x" });

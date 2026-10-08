@@ -1,5 +1,9 @@
 # Changes
 
+## 1.0.2
+
+**The verifier's V8 reads the articles a name points at.** An `outside_library` entry that names particular articles of a held instrument ("Articles 47a and 47b CRR") is a claim about those provisions, and a document held in part lacks most of its articles: V8 now fires only when one of the articles named is held. A name with no article is judged as before.
+
 ## 1.0.1
 
 **`cite` resolves the citation the library hands out, with or without an issuer's descriptor.** An ECB-kind descriptor ("ECB Guideline") beside a held document of that issuer is set aside before the equality passes, so an alias no longer turns into a miss because of it, and the alias pass tolerates the same connectives ("of the") the provision's own citation does. The context-quality probe for numbering (I9) ignores the instrument's own number, which official citations now lead with.
