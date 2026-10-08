@@ -37,7 +37,7 @@ export function createServer(): McpServer {
         "Prudent: EU regulation and supervisory practice for internal ratings-based (IRB) credit risk (the CRR, EBA guidelines and the " +
         "ECB guide to internal models), with a playbook per topic.\n" +
         "For any substantive question, call brief first: it returns the playbook that answers it and the provisions that matter. " +
-        "Expand with playbook; open specific provisions with search, get or cite; use related for neighbouring provisions and " +
+        "Expand with playbook (topics lists them); open specific provisions with search, get or cite; use related for neighbouring provisions and " +
         "sources for what the library covers and what is changing.\n" +
         "When you answer: cite provisions by their official citation (e.g. \"EBA/GL/2017/16 para 28\", \"Art. 179(1)(d) CRR\"), never by " +
         "internal identifiers, and do not describe the tools. Keep law, EBA guidelines, ECB supervisory expectations and market practice " +

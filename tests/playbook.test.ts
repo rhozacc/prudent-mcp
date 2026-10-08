@@ -1,14 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { DEMO_COMPILED_PLAYBOOKS, DEMO_TOPICS, demoPlaybookContext } from "../examples/inmemory-demo.ts";
+import { DEMO_PLAYBOOKS, DEMO_TOPICS, demoPlaybookContext } from "../examples/inmemory-demo.ts";
 import { citationOf, locatorOf } from "../src/citation-style.ts";
 import { playbookContext, type PlaybookContext } from "../src/playbook-context.ts";
 import { verifyPlaybook, type Verification } from "../src/playbook-verify.ts";
 import { basisCitation, forceLabel, renderPlaybook } from "../src/render.ts";
 import {
   CitationStyleSchema,
-  PlaybookSchema,
-  LegacyPlaybookSchema,
   PlaybookSchema,
   TopicsSchema,
   type Playbook,
@@ -17,7 +15,7 @@ import {
   type Source,
 } from "../src/schema.ts";
 
-const demo = (): Playbook => structuredClone(PlaybookSchema.parse(DEMO_COMPILED_PLAYBOOKS["playbook://pd-long-run-average"]));
+const demo = (): Playbook => structuredClone(PlaybookSchema.parse(DEMO_PLAYBOOKS["playbook://pd-long-run-average"]));
 const ctx = (): PlaybookContext => demoPlaybookContext();
 const MEMBERS: RegulationId[] = [
   "regulation://crr/180",
@@ -53,12 +51,12 @@ const source = (style: Source["citation_style"]): Source => ({
 
 describe("the compiled playbook schema", () => {
   test("the demo playbook and topics parse", () => {
-    expect(() => PlaybookSchema.parse(DEMO_COMPILED_PLAYBOOKS["playbook://pd-long-run-average"])).not.toThrow();
+    expect(() => PlaybookSchema.parse(DEMO_PLAYBOOKS["playbook://pd-long-run-average"])).not.toThrow();
     expect(() => TopicsSchema.parse(DEMO_TOPICS)).not.toThrow();
   });
 
-  test("the 0.x playbook keeps working under both names until 1.0.0", () => {
-    expect(LegacyPlaybookSchema).toBe(PlaybookSchema);
+  test("the 0.x per-chapter shape is not a playbook any more", () => {
+    expect(PlaybookSchema.safeParse({ id: "playbook://x", area: "calibration", phases: [], gates: [], regulatory_scope: [], last_updated: "2024-01-01" }).success).toBe(false);
   });
 
   test("a requirement needs a handle and a provision; a quote is bounded", () => {

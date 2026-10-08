@@ -53,7 +53,7 @@ describe("eval I3 on a synthetic corpus", () => {
       const r = await citationResolutionIsHonest(session);
       expect(r.findings.filter((f) => f.severity === "fatal")).toEqual([]);
       expect(r.applicable).toBe(true);
-      const asked = session.traces.filter((t) => t.tool === "resolve_citation").map((t) => String(t.args["text"]));
+      const asked = session.traces.filter((t) => t.tool === "cite").map((t) => String(t.args["text"]));
       for (const probe of [
         "Article 1 of Directive 2099/77/EU",
         "Article 1 of Regulation 2099/933",

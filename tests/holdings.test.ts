@@ -415,9 +415,8 @@ describe("eval I12", () => {
     const r = await declineOnPartialDocumentSaysSo(stub);
     expect(r.applicable).toBe(true);
     expect(r.findings.map((f) => f.id).sort()).toEqual([
-      "I12/expand_regulation",
       "I12/get_regulation",
-      "I12/get_regulation_tree",
+      "I12/related",
       "I12/resolve_citation",
     ]);
     expect(r.findings.every((f) => f.severity === "fatal")).toBe(true);

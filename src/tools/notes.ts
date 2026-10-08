@@ -43,7 +43,11 @@ export async function provisionNotes(record: Regulation, opts: { asOf?: string |
   const amendment = await pendingNoteFor(record, opts.asOf);
   if (amendment !== undefined) notes.push({ type: "amendment", text: amendment, applies_to: [cite] });
   const found = preAdoptionPlaceholders(record.text);
-  if (found !== null) notes.push({ type: "placeholder", text: placeholderNotice(found), applies_to: [cite] });
+  if (found !== null) {
+    // The spans are quoted: a reader needs to know WHICH reference is unresolved, and a quotation is the author's words.
+    const named = found.spans.map((x) => `“${x}”`).join("; ");
+    notes.push({ type: "placeholder", text: `${placeholderNotice(found)} The placeholder${found.spans.length > 1 ? "s are" : " is"}: ${named}.`, applies_to: [cite] });
+  }
   return notes;
 }
 

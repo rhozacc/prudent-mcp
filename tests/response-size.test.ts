@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test";
 
 import {
   RESPONSE_CHAR_BUDGET,
-  fitOrCompact,
   paginate,
   serialize,
 } from "../src/tools/shared.ts";
@@ -56,20 +55,6 @@ describe("paginate — the response size ceiling", () => {
     const many = Array.from({ length: 200 }, (_, i) => row(i));
     const env = paginate(many, 200, 0);
     expect(serialize(env.results).length).toBeLessThanOrEqual(RESPONSE_CHAR_BUDGET);
-  });
-});
-
-describe("fitOrCompact — bundles that do not fit", () => {
-  it("serves the full form when it fits, untouched", () => {
-    const full = { a: 1, b: "small" };
-    expect(fitOrCompact(full, () => ({ a: 1 }), () => "n/a")).toEqual(full);
-  });
-
-  it("falls back to the compact form with a notice, never a silent truncation", () => {
-    const full = { rows: Array.from({ length: 50 }, () => "z".repeat(1_000)) };
-    const out = fitOrCompact(full, () => ({ rows: ["summary"] }), (t) => `too big: ${t} tokens`);
-    expect(out["rows"]).toEqual(["summary"]);
-    expect(String(out["notice"])).toContain("too big:");
   });
 });
 

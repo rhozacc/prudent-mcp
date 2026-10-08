@@ -24,16 +24,6 @@ async function main() {
   const info = await adapters.meta.info();
   console.log(fmt(info));
 
-  // ── Review areas ─────────────────────────────────────────────────────────
-  console.log(H1("REVIEW AREAS"));
-  const areas = await adapters.meta.taxonomy();
-  for (const area of areas) {
-    const indent = area.parent ? "    " : "  ";
-    const tag = area.parent ? `↳ ${area.id}` : area.id;
-    console.log(`${indent}${tag}  —  ${area.name}`);
-    if (area.children.length) console.log(`${indent}  children: ${area.children.join(", ")}`);
-  }
-
   // ── Regulations ───────────────────────────────────────────────────────────
   console.log(H1("REGULATIONS"));
   const regs = await adapters.regulation.list();
@@ -81,16 +71,15 @@ async function main() {
   console.log(H1("PLAYBOOKS"));
   const playbooks = await adapters.playbook.list();
   for (const p of playbooks) {
-    const label = p.subarea ? `${p.area} / ${p.subarea}` : p.area;
-    console.log(H2(`${label}  [${p.id}]`));
-    for (const [i, ph] of p.phases.entries()) {
-      console.log(`\n  Phase ${i + 1}: ${ph.name}`);
-      console.log(`    ${ph.description}`);
-      if (ph.references.length) console.log(`    refs: ${ph.references.join(", ")}`);
+    console.log(H2(`${p.title}  [${p.id}]  (${p.area}, ${p.provenance.status})`));
+    console.log(`  ${p.summary}`);
+    for (const r of p.requirements) {
+      console.log(`\n  ${r.id}. ${r.title}`);
+      console.log(`    cites: ${r.provisions.map((x) => x.id).join(", ")}`);
     }
-    if (p.gates.length) {
-      console.log("\n  gates:");
-      for (const g of p.gates) console.log(`    ✓ ${g}`);
+    if (p.pitfalls.length) {
+      console.log("\n  pitfalls:");
+      for (const x of p.pitfalls) console.log(`    ! ${x.text}`);
     }
   }
 

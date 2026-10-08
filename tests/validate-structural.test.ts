@@ -50,10 +50,15 @@ function testRecord(overrides: Partial<Test> & Pick<Test, "id">): Test {
   });
 }
 
-function playbook(overrides: Partial<Playbook> & Pick<Playbook, "id">): Playbook {
+function playbook(overrides: Partial<Playbook> & Pick<Playbook, "id">, cites: string[] = []): Playbook {
   return PlaybookSchema.parse({
+    title: "A playbook",
     area: "calibration",
-    last_updated: "2026-08-01",
+    summary: "What to show.",
+    questions: ["A question?"],
+    basis: [],
+    requirements: [{ id: "R1", title: "A requirement", statement: "Do it.", provisions: (cites.length > 0 ? cites : ["regulation://crr/180"]).map((id) => ({ id })) }],
+    provenance: { status: "approved", compiled_at: "2026-08-01T00:00:00Z", inputs_sha: "0".repeat(64) },
     ...overrides,
   });
 }
@@ -262,20 +267,11 @@ describe("validateCorpus — rule 3: dangling references", () => {
       ],
       playbooks: [
         playbook({
-          id: "playbook://calibration/pd",
-          regulatory_scope: ["regulation://crr/180"],
-          phases: [
-            {
-              name: "Phase 1",
-              description: "Walk the references.",
-              references: [
-                "regulation://crr/180/1",
-                "check://calibration/pd/x",
-                "test://jeffreys",
-                "playbook://calibration/pd",
-              ],
-            },
+          id: "playbook://calibration-pd",
+          requirements: [
+            { id: "R1", title: "Walk the references", statement: "Do.", provisions: [{ id: "regulation://crr/180/1" }], evidence: [], checks: ["check://calibration/pd/x"], tests: ["test://jeffreys"] },
           ],
+          related: ["playbook://calibration-pd"],
         }),
       ],
     });
@@ -339,51 +335,31 @@ describe("validateCorpus — rule 3: dangling references", () => {
     expect(errors).toContain("test://jeffreys: parent regulation://crr/ghost does not resolve");
   });
 
-  it("rejects a dangling playbook.regulatory_scope entry", () => {
+  it("rejects a playbook that cites a provision that does not resolve", () => {
     const errors = validateCorpus({
       ...empty,
-      playbooks: [
-        playbook({ id: "playbook://calibration/pd", regulatory_scope: ["regulation://crr/ghost"] }),
-      ],
+      playbooks: [playbook({ id: "playbook://calibration-pd" }, ["regulation://crr/ghost"])],
     });
-    expect(errors).toContain(
-      "playbook://calibration/pd: regulatory_scope regulation://crr/ghost does not resolve",
-    );
+    expect(errors).toContain("playbook://calibration-pd: provision regulation://crr/ghost does not resolve");
   });
 
-  it("rejects dangling phase references on every surface", () => {
+  it("rejects dangling excluded, check, test and related ids on a playbook", () => {
     const errors = validateCorpus({
       ...empty,
+      regulation: [reg({ id: "regulation://crr/180" })],
       playbooks: [
         playbook({
-          id: "playbook://calibration/pd",
-          phases: [
-            {
-              name: "Phase 1",
-              description: "All ghosts.",
-              references: [
-                "regulation://crr/ghost",
-                "check://ghost/x",
-                "test://ghost",
-                "playbook://ghost",
-              ],
-            },
-          ],
+          id: "playbook://calibration-pd",
+          excluded: [{ id: "regulation://crr/ghost", reason: "x" }],
+          requirements: [{ id: "R1", title: "T", statement: "S", provisions: [{ id: "regulation://crr/180" }], evidence: [], checks: ["check://ghost/x"], tests: ["test://ghost"] }],
+          related: ["playbook://ghost"],
         }),
       ],
     });
-    expect(errors).toContain(
-      'playbook://calibration/pd / "Phase 1": reference regulation://crr/ghost does not resolve',
-    );
-    expect(errors).toContain(
-      'playbook://calibration/pd / "Phase 1": reference check://ghost/x does not resolve',
-    );
-    expect(errors).toContain(
-      'playbook://calibration/pd / "Phase 1": reference test://ghost does not resolve',
-    );
-    expect(errors).toContain(
-      'playbook://calibration/pd / "Phase 1": reference playbook://ghost does not resolve',
-    );
+    expect(errors).toContain("playbook://calibration-pd: excluded regulation://crr/ghost does not resolve");
+    expect(errors).toContain("playbook://calibration-pd / R1: check check://ghost/x does not resolve");
+    expect(errors).toContain("playbook://calibration-pd / R1: test test://ghost does not resolve");
+    expect(errors).toContain("playbook://calibration-pd: related playbook://ghost does not resolve");
   });
 
   it("rejects a playbook:// id in regulation children as an invalid child surface", () => {
@@ -393,14 +369,14 @@ describe("validateCorpus — rule 3: dangling references", () => {
     // playbook child hits the invalid-surface branch, a missing one is reported
     // as a dangling child instead.
     const r = reg({ id: "regulation://crr/180" });
-    r.children.push("playbook://calibration/pd" as unknown as RegulationChildId);
+    r.children.push("playbook://calibration-pd" as unknown as RegulationChildId);
     const errors = validateCorpus({
       ...empty,
       regulation: [r],
-      playbooks: [playbook({ id: "playbook://calibration/pd" })],
+      playbooks: [playbook({ id: "playbook://calibration-pd" })],
     });
     expect(errors).toContain(
-      "regulation://crr/180: child playbook://calibration/pd is not a valid child surface (regulation/test/check only)",
+      "regulation://crr/180: child playbook://calibration-pd is not a valid child surface (regulation/test/check only)",
     );
   });
 });

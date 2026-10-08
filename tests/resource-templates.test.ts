@@ -63,12 +63,14 @@ const corpus = {
   ],
   playbooks: [
     {
-      id: "playbook://gl-2019-03/3-lgd-estimation",
-      area: "LGD Estimation",
-      phases: [],
-      gates: [],
-      regulatory_scope: ["regulation://gl-2019-03/article-13"],
-      last_updated: "2026-09-01",
+      id: "playbook://downturn-lgd",
+      title: "Downturn LGD",
+      area: "lgd",
+      summary: "Calibrate to the downturn.",
+      questions: ["How is downturn LGD calibrated?"],
+      basis: [],
+      requirements: [{ id: "R1", title: "Calibrate", statement: "Calibrate at the long-run average level at least.", provisions: [{ id: "regulation://gl-2019-03/article-13" }] }],
+      provenance: { status: "approved", compiled_at: "2026-09-01T00:00:00Z", inputs_sha: "0".repeat(64) },
     },
   ],
   sources: [
@@ -90,7 +92,7 @@ const CASES = [
   ["regulation://gl-2019-03/article-13", "regulation"],
   ["test://gl-2019-03/downturn-lgd-vs-reference-value-comparison", "test"],
   ["check://gl-2019-03/GL-4-downturn-lgd-calibration-level", "check"],
-  ["playbook://gl-2019-03/3-lgd-estimation", "playbook"],
+  ["playbook://downturn-lgd", "playbook"],
   ["source://eba/gl-2019-03", "source"],
 ] as const;
 
@@ -130,8 +132,10 @@ describe("resource templates match real, multi-segment ids", () => {
       // Before the fix this REJECTED for test:// alone, with the SDK unable to
       // match the uri against any registered template.
       const res = await client.readResource({ uri });
-      const body = JSON.parse((res.contents[0] as { text: string }).text);
-      expect(body.id).toBe(uri);
+      const text = (res.contents[0] as { text: string }).text;
+      // A playbook is read as rendered text; every other entry as its JSON.
+      if (surface === "playbook") expect(text).toContain("# Downturn LGD");
+      else expect(JSON.parse(text).id).toBe(uri);
     });
   }
 

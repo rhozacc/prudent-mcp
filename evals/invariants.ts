@@ -2050,7 +2050,7 @@ export async function placeholdersAreMarked(s: Session): Promise<InvariantResult
   for (const rid of [...candidates.slice(0, 12), ...sampled.slice(0, 40)]) {
     if (checked.has(rid)) continue;
     checked.add(rid);
-    for (const tool of ["get_regulation", "expand_regulation"] as const) {
+    for (const tool of ["get_regulation"] as const) {
       const r = await s.call(tool, { id: rid });
       const body = asRecord(r.json);
       if (r.isError || body === null || typeof body["text"] !== "string") continue;

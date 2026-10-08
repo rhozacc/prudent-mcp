@@ -771,7 +771,7 @@ describe("eval I3/own-citation", () => {
       expect(r.applicable).toBe(true);
       expect(r.findings.filter((f) => f.severity === "fatal")).toEqual([]);
       // The probes really were the descriptor-bearing citations, not only the plain one.
-      const asked = session.traces.filter((t) => t.tool === "resolve_citation").map((t) => String(t.args["text"]));
+      const asked = session.traces.filter((t) => t.tool === "cite").map((t) => String(t.args["text"]));
       expect(asked).toContain("RTS Article 5");
       expect(asked).toContain("ECB Guideline paragraph 7");
     } finally {
@@ -841,7 +841,7 @@ describe("eval I3/issuer-descriptor", () => {
       const r = await issuerDescriptorIsLoose(session);
       expect(r.applicable).toBe(true);
       expect(r.findings.filter((f) => f.severity === "fatal")).toEqual([]);
-      const asked = session.traces.filter((t) => t.tool === "resolve_citation").map((t) => String(t.args["text"]));
+      const asked = session.traces.filter((t) => t.tool === "cite").map((t) => String(t.args["text"]));
       expect(asked).toContain("ECB Guideline ecb-guide-x Chapter 3, paragraph 5");
     } finally {
       await session.close();
