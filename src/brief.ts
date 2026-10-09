@@ -6,14 +6,16 @@
  * - TEXT: BM25F over each playbook's title, typical questions, summary and requirements (the same ranking module as every
  *   other search), with the library's abbreviation table applied.
  * - VOTE: the provisions the question finds, in rank order. Each provision that a playbook cites gives that playbook
- *   1/rank, so a playbook whose provisions are the ones a practitioner's wording lands on wins even when its own prose
+ *   1/rank, shared among the playbooks that cite it (a provision three playbooks cite says less about which of them is meant), so a playbook whose provisions are the ones a practitioner's wording lands on wins even when its own prose
  *   uses other words ("RDS" in the question, "reference data set" in the text).
  *
  * A playbook is chosen only when it clears an absolute floor; when none does, the caller says so and offers passages
  * instead (a confident wrong playbook is worse than none). When the runner-up is within a margin of the leader the leader
- * is still chosen but the answer names the other, because two neighbouring topics can both bear on one question. The constants are tuned on
- * a practitioner question bank held outside this repository and are named here with the bank's version so they are
- * changed on evidence, not by feel.
+ * is still chosen and the answer renders the other beside it, because two neighbouring topics can both bear on one question.
+ * The constants were set on the playbooks' own questions (every playbook lists the questions it answers, so there are hundreds
+ * and they move with the library), and the practitioner bank (`ROUTING_BANK_VERSION`, held outside this repository) was read
+ * as a check, not tuned on: fitting the constants to its 18 questions would leave nothing to measure routing with. Change them
+ * on evidence from both, and keep I19 passing.
  *
  * Pure: ranked inputs in, a decision out.
  */
@@ -28,7 +30,7 @@ export const ROUTING = {
   /** Provision hits that vote. */
   voteDepth: 40,
   /** Weight of the text signal against the vote (the vote gets the rest). */
-  textWeight: 0.5,
+  textWeight: 0.7,
   /** The combined score a playbook must reach to be chosen at all, 0-1. */
   floor: 0.35,
   /** The leader is "ambiguous" when it leads the runner-up by less than this share of its own score. */
@@ -65,8 +67,12 @@ export function routePlaybooks(args: {
   /** Provision ids the question found, best first. */
   rankedProvisions: readonly string[];
   glossary?: Glossary | undefined;
+  /** Override the constants (tuning only). `specificity: false` turns the weighting of the vote off. */
+  params?: Partial<{ [K in keyof typeof ROUTING]: number }> & { specificity?: boolean };
 }): Routing {
   const { question, playbooks } = args;
+  const R = { ...ROUTING, ...(args.params ?? {}) };
+  const specific = args.params?.specificity !== false;
   if (playbooks.length === 0) return { routes: [], chosen: null, ambiguous: false, reason: "no_playbooks", neighbours: [] };
 
   const matches = rankedSearch([...playbooks], question, playbookSearchFields, undefined, args.glossary === undefined ? undefined : { glossary: args.glossary });
@@ -76,8 +82,11 @@ export function routePlaybooks(args: {
 
   const cites = new Map(playbooks.map((p) => [p.id, playbookProvisions(p)] as const));
   const vote = new Map<string, number>();
-  args.rankedProvisions.slice(0, ROUTING.voteDepth).forEach((id, i) => {
-    for (const p of playbooks) if (cites.get(p.id)!.has(id as RegulationId)) vote.set(p.id, (vote.get(p.id) ?? 0) + 1 / (i + 1));
+  const citedBy = new Map<string, number>();
+  for (const p of playbooks) for (const id of cites.get(p.id)!) citedBy.set(id, (citedBy.get(id) ?? 0) + 1);
+  args.rankedProvisions.slice(0, R.voteDepth).forEach((id, i) => {
+    const w = specific ? 1 / Math.max(1, citedBy.get(id) ?? 1) : 1;
+    for (const p of playbooks) if (cites.get(p.id)!.has(id as RegulationId)) vote.set(p.id, (vote.get(p.id) ?? 0) + w / (i + 1));
   });
   // The best a playbook could do is own every one of the first few hits: the vote is read against that fixed yardstick,
   // not against the best playbook, so a topic nobody cites cannot look strong by being the least weak.
@@ -87,15 +96,15 @@ export function routePlaybooks(args: {
     .map((playbook) => {
       const text = textOf.get(playbook.id) ?? 0;
       const v = Math.min(1, (vote.get(playbook.id) ?? 0) / yardstick);
-      return { playbook, text, vote: v, score: ROUTING.textWeight * text + (1 - ROUTING.textWeight) * v };
+      return { playbook, text, vote: v, score: R.textWeight * text + (1 - R.textWeight) * v };
     })
     .filter((r) => r.score > 0)
     .sort((a, b) => b.score - a.score || (a.playbook.id < b.playbook.id ? -1 : 1));
 
   const lead = routes[0];
   if (lead === undefined) return { routes, chosen: null, ambiguous: false, reason: "no_match", neighbours: [] };
-  if (lead.score < ROUTING.floor) return { routes, chosen: null, ambiguous: false, reason: "below_floor", neighbours: [] };
+  if (lead.score < R.floor) return { routes, chosen: null, ambiguous: false, reason: "below_floor", neighbours: [] };
   const second = routes[1];
-  const ambiguous = second !== undefined && lead.score - second.score < ROUTING.margin * lead.score;
-  return { routes, chosen: lead, ambiguous, neighbours: routes.slice(1).filter((r) => r.score >= ROUTING.neighbour * lead.score).slice(0, 2) };
+  const ambiguous = second !== undefined && lead.score - second.score < R.margin * lead.score;
+  return { routes, chosen: lead, ambiguous, neighbours: routes.slice(1).filter((r) => r.score >= R.neighbour * lead.score).slice(0, 2) };
 }

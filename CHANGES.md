@@ -1,5 +1,9 @@
 # Changes
 
+## 1.0.3
+
+**`brief` routes among many playbooks.** With 39 compiled playbooks the first-choice playbook was the one a practitioner's question belongs to only about half the time (neighbouring topics share their words and their provisions), and the provisions a model needed reached it less often than with 15. Three changes, set on the playbooks' own questions: the text signal weighs more (0.7); a provision's vote is shared among the playbooks that cite it, so a provision only one playbook holds says more than one three hold; and when the second playbook is nearly as good a fit it is rendered beside the first (about a fifth of the budget) instead of only named. `brief` returns `close_second` for it. I19 now asks whether a playbook's own question puts that playbook in front of the reader, first or as the close second.
+
 ## 1.0.2
 
 **The verifier's V8 reads the articles a name points at.** An `outside_library` entry that names particular articles of a held instrument ("Articles 47a and 47b CRR") is a claim about those provisions, and a document held in part lacks most of its articles: V8 now fires only when one of the articles named is held. A name with no article is judged as before.
