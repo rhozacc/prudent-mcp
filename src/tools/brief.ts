@@ -24,6 +24,9 @@ import { READ_ONLY_HINTS, miss, searchGlossary, weakMatchNotice } from "./shared
 const BUDGETS = { short: 2500, standard: 5000, long: 9000 } as const;
 /** Share of the budget the playbook itself may take; the rest is for what it does not carry and the notes. */
 const PLAYBOOK_SHARE = 0.72;
+/** When a second playbook is nearly as good a fit as the first, it is rendered too, and the shares become these. */
+const LEAD_SHARE_WITH_SECOND = 0.5;
+const SECOND_SHARE = 0.22;
 const ALSO_RELEVANT = { short: 3, standard: 5, long: 5 } as const;
 const PASSAGES = 8;
 
@@ -47,6 +50,7 @@ export function registerBriefTool(server: McpServer): void {
           playbook: z.object({ id: z.string(), title: z.string(), status: z.string() }).nullable(),
           confidence: z.object({ score: z.number(), text: z.number(), vote: z.number(), ambiguous: z.boolean() }).optional(),
           also_relevant: z.array(z.object({ id: z.string(), citation: z.string() })),
+          close_second: z.object({ id: z.string(), title: z.string() }).nullable(),
           other_playbooks: z.array(z.object({ id: z.string(), title: z.string() })),
           ...notesShape,
         })
@@ -68,6 +72,7 @@ export function registerBriefTool(server: McpServer): void {
       const notes: Note[] = [];
       const parts: string[] = [];
       const chosen: Route | null = routing.chosen;
+      const closeSecond: Route | undefined = chosen !== null && routing.ambiguous ? routing.routes[1] : undefined;
       const cited = chosen === null ? new Set<string>() : new Set<string>([...playbookProvisions(chosen.playbook), ...chosen.playbook.excluded.map((e) => e.id)]);
 
       // Provisions the question lands on that the playbook does not carry (or, with no playbook, the best passages).
@@ -80,18 +85,19 @@ export function registerBriefTool(server: McpServer): void {
         });
 
       if (chosen !== null) {
-        const rendered = renderPlaybook(chosen.playbook, ctx, { budget: Math.round(total * PLAYBOOK_SHARE) });
+        const second = closeSecond;
+        const rendered = renderPlaybook(chosen.playbook, ctx, { budget: Math.round(total * (second === undefined ? PLAYBOOK_SHARE : LEAD_SHARE_WITH_SECOND)) });
         parts.push(rendered?.text ?? "");
+        const renderedSecond = second === undefined ? null : renderPlaybook(second.playbook, ctx, { budget: Math.round(total * SECOND_SHARE) });
+        if (renderedSecond !== null) parts.push(["## A close second", renderedSecond.text].join("\n"));
         notes.push(...(await playbookNotes(chosen.playbook, ctx)));
         if (as_of !== undefined) {
           notes.push({ type: "version", text: `This playbook is written from the current text of each source. It is not evidence of what applied on ${as_of}; open the provisions with their date to read that text.` });
         }
         if (extra.length > 0) parts.push(["## Also relevant (not in the playbook)", ...lines(extra)].join("\n"));
-        const others = routing.neighbours.map((r) => r.playbook);
+        const others = routing.neighbours.map((r) => r.playbook).filter((p) => p.id !== second?.playbook.id);
         if (others.length > 0) {
-          parts.push(
-            [routing.ambiguous ? "## A close second" : "## Other playbooks", ...others.map((p) => `- ${p.title} (playbook "${slugOf(p.id)}")`)].join("\n"),
-          );
+          parts.push(["## Other playbooks", ...others.map((p) => `- ${p.title} (playbook "${slugOf(p.id)}")`)].join("\n"));
         }
       } else {
         const tokens = distinctQueryTokens(question);
@@ -119,7 +125,8 @@ export function registerBriefTool(server: McpServer): void {
           playbook: chosen === null ? null : { id: chosen.playbook.id, title: chosen.playbook.title, status: chosen.playbook.provenance.status },
           ...(chosen === null ? {} : { confidence: { score: round(chosen.score), text: round(chosen.text), vote: round(chosen.vote), ambiguous: routing.ambiguous } }),
           also_relevant: await Promise.all(extra.map(async (r) => ({ id: r.id, citation: cite(r) }))),
-          other_playbooks: routing.neighbours.map((r) => ({ id: r.playbook.id, title: r.playbook.title })),
+          close_second: closeSecond === undefined ? null : { id: closeSecond.playbook.id, title: closeSecond.playbook.title },
+          other_playbooks: routing.neighbours.filter((r) => r.playbook.id !== closeSecond?.playbook.id).map((r) => ({ id: r.playbook.id, title: r.playbook.title })),
           ...(merged.length > 0 ? { notes: merged } : {}),
         },
       };

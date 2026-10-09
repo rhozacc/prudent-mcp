@@ -2545,23 +2545,38 @@ export async function playbooksRouteToThemselves(s: Session): Promise<InvariantR
   else playbooks = Object.values((await import("../examples/inmemory-demo.ts")).DEMO_PLAYBOOKS);
   if (playbooks.length === 0) return { id: "I19", title, applicable: false, findings };
   let asked = 0;
+  let notFirst = 0;
   for (const pb of playbooks) {
     for (const question of pb.questions) {
       asked++;
       const t = await s.call("brief", { question, budget: "short" });
-      const chosen = plainRecord(t.structured)?.["playbook"] as { id?: string } | null | undefined;
-      if (t.isError || chosen?.id !== pb.id) {
-        findings.push({
-          id: "I19/misrouted",
-          severity: "warn",
-          summary: `brief did not select ${pb.id} for one of that playbook's own questions.`,
-          evidence: [`question: ${question}`, `selected: ${chosen?.id ?? "no playbook"}`],
-        });
+      const body = plainRecord(t.structured);
+      const chosen = body?.["playbook"] as { id?: string } | null | undefined;
+      const second = body?.["close_second"] as { id?: string } | null | undefined;
+      if (!t.isError && chosen?.id === pb.id) continue;
+      // Neighbouring topics share questions, and a close second is rendered in the same answer: it is in front of the reader.
+      if (!t.isError && second?.id === pb.id) {
+        notFirst++;
+        continue;
       }
+      findings.push({
+        id: "I19/misrouted",
+        severity: "warn",
+        summary: `brief put neither ${pb.id} first nor as the close second for one of that playbook's own questions.`,
+        evidence: [`question: ${question}`, `selected: ${chosen?.id ?? "no playbook"}`, `close second: ${second?.id ?? "none"}`],
+      });
     }
   }
-  // A router that sends more than a tenth of a playbook's own questions elsewhere is broken, not unlucky.
+  // A router that keeps a tenth of a playbook's own questions away from it is broken, not unlucky.
   if (findings.length > Math.ceil(asked * 0.1)) for (const f of findings) f.severity = "fatal";
+  if (findings.length === 0 && notFirst > 0) {
+    findings.push({
+      id: "I19/close-second",
+      severity: "info",
+      summary: `${notFirst} of ${asked} playbook questions were answered with their playbook as the close second, not first.`,
+      evidence: [],
+    });
+  }
   return { id: "I19", title, applicable: true, findings };
 }
 

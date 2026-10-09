@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
   "manifest_version": "0.4",
   "name": "prudent-mcp",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "IRB credit risk regulatory knowledge base — regulation, tests, checks, playbooks, and source registry for Claude.",
   "license": "AGPL-3.0-only",
   "author": {
