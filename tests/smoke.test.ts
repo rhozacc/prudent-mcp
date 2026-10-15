@@ -131,6 +131,16 @@ describe("MCP wire contracts (in-memory transport)", () => {
     expect(Array.isArray(r.body["also_relevant"])).toBe(true);
   });
 
+  it("brief and playbook put the text in the structured result too, so a client that reads only that still gets the playbook", async () => {
+    const brief = await call("brief", { question: "How do I estimate the long-run average default rate for a PD model?" });
+    expect(brief.body["text"]).toBe(brief.text);
+    expect(brief.body["text"]).toContain("## Pitfalls");
+    const whole = await call("playbook", { id: "pd-long-run-average" });
+    expect(whole.body["text"]).toBe(whole.text);
+    const section = await call("playbook", { id: "pd-long-run-average", section: "R1" });
+    expect(section.body["text"]).toContain("Institutions shall estimate PDs by obligor grade");
+  });
+
   it("brief says plainly when no playbook answers, and returns passages", async () => {
     const r = await call("brief", { question: "what is the weather in Paris" });
     expect(r.isError).toBe(false);
