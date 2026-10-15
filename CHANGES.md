@@ -1,5 +1,9 @@
 # Changes
 
+## 1.1.0
+
+**The playbook reaches the model.** `brief` and `playbook` returned the rendered playbook as text content and only ids, titles and requirement names as `structuredContent`. A client that shows the model the structured result once a tool declares an output schema, as Claude Code does, handed it the titles and never the playbook: in the 1.0 benchmark run not one answer had seen a requirement's statement, a quote or a pitfall, and the three answers that were confidently wrong each made a mistake the playbook's own pitfalls warn against (one says it cited the CRR "from memory"). Both tools now carry the same text in `structuredContent.text`, declared in their output schemas, so the model gets the playbook whichever part its client reads. Nothing is removed: the other fields are unchanged.
+
 ## 1.0.3
 
 **`brief` routes among many playbooks.** With 39 compiled playbooks the first-choice playbook was the one a practitioner's question belongs to only about half the time (neighbouring topics share their words and their provisions), and the provisions a model needed reached it less often than with 15. Three changes, set on the playbooks' own questions: the text signal weighs more (0.7); a provision's vote is shared among the playbooks that cite it, so a provision only one playbook holds says more than one three hold; and when the second playbook is nearly as good a fit it is rendered beside the first (about a fifth of the budget) instead of only named. `brief` returns `close_second` for it. I19 now asks whether a playbook's own question puts that playbook in front of the reader, first or as the close second.

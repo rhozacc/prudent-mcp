@@ -53,7 +53,7 @@ export function registerPlaybookTool(server: McpServer): void {
         section: z.string().regex(/^R\d+$/).optional().describe("A requirement handle: R1, R2, …"),
       },
       outputSchema: z
-        .object({ id: z.string(), title: z.string(), status: z.string(), requirements: z.array(z.object({ id: z.string(), title: z.string() })), abridged: z.array(z.string()).optional(), ...notesShape })
+        .object({ text: z.string().describe("The playbook, or the one requirement, as text."), id: z.string(), title: z.string(), status: z.string(), requirements: z.array(z.object({ id: z.string(), title: z.string() })), abridged: z.array(z.string()).optional(), ...notesShape })
         .passthrough(),
       annotations: READ_ONLY_HINTS,
     },
@@ -72,7 +72,9 @@ export function registerPlaybookTool(server: McpServer): void {
       const text = [rendered.text, notesText(notes)].filter((t) => t !== "").join("\n\n");
       return {
         content: [{ type: "text", text }],
+        // The text is in the structured result too, for clients that show the model only structured content.
         structuredContent: {
+          text,
           id: pb.id,
           title: pb.title,
           status: pb.provenance.status,

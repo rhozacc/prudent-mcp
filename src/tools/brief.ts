@@ -47,6 +47,7 @@ export function registerBriefTool(server: McpServer): void {
       },
       outputSchema: z
         .object({
+          text: z.string().describe("The answer to read: the playbook as text, what else matters, and the notes."),
           playbook: z.object({ id: z.string(), title: z.string(), status: z.string() }).nullable(),
           confidence: z.object({ score: z.number(), text: z.number(), vote: z.number(), ambiguous: z.boolean() }).optional(),
           also_relevant: z.array(z.object({ id: z.string(), citation: z.string() })),
@@ -121,7 +122,10 @@ export function registerBriefTool(server: McpServer): void {
       if (text.trim() === "") return miss("Nothing to return for that question.");
       return {
         content: [{ type: "text", text }],
+        // The text goes in the structured result too: a client that shows the model only structured content (several do,
+        // once a tool declares an output schema) would otherwise hand it ids and titles and never the playbook.
         structuredContent: {
+          text,
           playbook: chosen === null ? null : { id: chosen.playbook.id, title: chosen.playbook.title, status: chosen.playbook.provenance.status },
           ...(chosen === null ? {} : { confidence: { score: round(chosen.score), text: round(chosen.text), vote: round(chosen.vote), ambiguous: routing.ambiguous } }),
           also_relevant: await Promise.all(extra.map(async (r) => ({ id: r.id, citation: cite(r) }))),
