@@ -1,0 +1,33 @@
+{
+  "name": "prudent",
+  "displayName": "Prudent",
+  "version": "1.1.0",
+  "description": "EU regulation and supervisory practice for internal ratings-based (IRB) credit risk, as a read-only MCP server: provisions, tests, checks and a compiled playbook per topic. The server is open source; point it at a corpus file you are licensed to use, or it starts empty.",
+  "author": {
+    "name": "Econlab",
+    "url": "https://github.com/rhozacc"
+  },
+  "homepage": "https://rhozacc.github.io/prudent-mcp/",
+  "repository": "https://github.com/rhozacc/prudent-mcp",
+  "license": "AGPL-3.0-only",
+  "keywords": [
+    "mcp",
+    "credit-risk",
+    "irb",
+    "crr",
+    "eba",
+    "regulation",
+    "model-validation"
+  ],
+  "icon": "./icon.png",
+  "documentationUrl": "https://rhozacc.github.io/prudent-mcp/",
+  "supportUrl": "https://github.com/rhozacc/prudent-mcp/issues",
+  "userConfig": {
+    "corpusFile": {
+      "type": "file",
+      "title": "Corpus file",
+      "description": "Path to your Prudent corpus JSON file. Leave empty to start with no content (demo mode).",
+      "required": false
+    }
+  }
+}

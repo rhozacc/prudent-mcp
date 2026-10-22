@@ -1,5 +1,9 @@
 # Changes
 
+## Unreleased
+
+**A Claude Code plugin.** `plugin/` is the server packaged for Claude Code's plugin directory: `.claude-plugin/plugin.json`, a `.mcp.json` that runs `node ${CLAUDE_PLUGIN_ROOT}/server/index.mjs`, and that file, the server bundled with its two MIT dependencies (the directory's check does not follow what a package manager runs, so a `bun run` command would be held for a reviewer). A plugin is installed from git with no build step, so the bundle is committed: `bun run build:plugin` rebuilds it, and `bun test` fails when it is not the build of the current source or its version is not the package's. The plugin's one setting is the corpus file. The server entry now treats an unfilled `${…}` placeholder in `CORPUS_FILE`, which a host that substitutes settings can hand it when the user left one empty, as "no corpus" rather than as a path to load.
+
 ## 1.1.0
 
 **The playbook reaches the model.** `brief` and `playbook` returned the rendered playbook as text content and only ids, titles and requirement names as `structuredContent`. A client that shows the model the structured result once a tool declares an output schema, as Claude Code does, handed it the titles and never the playbook: in the 1.0 benchmark run not one answer had seen a requirement's statement, a quote or a pitfall, and the three answers that were confidently wrong each made a mistake the playbook's own pitfalls warn against (one says it cited the CRR "from memory"). Both tools now carry the same text in `structuredContent.text`, declared in their output schemas, so the model gets the playbook whichever part its client reads. Nothing is removed: the other fields are unchanged.

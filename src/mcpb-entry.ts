@@ -18,7 +18,10 @@ import { createFileAdapters, loadCorpusFile } from "./file-adapter.ts";
 import { createServer } from "./server.ts";
 import { corpusWarnings, validateCorpusFile } from "./validate.ts";
 
-const corpusFile = process.env["CORPUS_FILE"];
+// A host that substitutes user settings into the environment can hand us an unfilled placeholder
+// (`${user_config.corpusFile}`) when the user left the setting empty. That is "no corpus", not a path.
+const rawCorpusFile = process.env["CORPUS_FILE"];
+const corpusFile = rawCorpusFile !== undefined && /^\$\{[^}]*\}$/.test(rawCorpusFile.trim()) ? undefined : rawCorpusFile;
 
 if (corpusFile) {
   try {

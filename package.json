@@ -32,6 +32,7 @@
     "validate": "bun run scripts/validate-corpus.ts",
     "graph": "bun run scripts/generate-graph.ts",
     "build:mcpb": "bun run scripts/build-mcpb.ts",
+    "build:plugin": "bun run scripts/build-plugin.ts",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",

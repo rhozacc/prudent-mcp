@@ -5,10 +5,10 @@
  *
  *   bun run build:mcpb
  */
-import { build } from "esbuild";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
+import { bundleServer } from "./bundle-server.ts";
 
 const OUT_DIR = "dist/mcpb";
 const SERVER_DIR = join(OUT_DIR, "server");
@@ -16,23 +16,7 @@ const SERVER_DIR = join(OUT_DIR, "server");
 mkdirSync(SERVER_DIR, { recursive: true });
 
 console.log("Bundling server…");
-await build({
-  entryPoints: ["src/mcpb-entry.ts"],
-  bundle: true,
-  platform: "node",
-  format: "esm",
-  outfile: join(SERVER_DIR, "index.mjs"),
-  target: "node18",
-  // zod and @modelcontextprotocol/sdk are pure-JS — bundle them in.
-  // node:* built-ins are automatically externalized by esbuild.
-  //
-  // Bundling statically links two MIT dependencies into this file, and MIT
-  // requires their notices to travel with the copy. Neither ships a legal banner
-  // comment today, so this preserves nothing right now — THIRD-PARTY-NOTICES.md
-  // below is what actually discharges the obligation. Set anyway, so a future
-  // dependency that does carry one keeps it instead of having it stripped.
-  legalComments: "eof",
-});
+await bundleServer(join(SERVER_DIR, "index.mjs"));
 
 copyFileSync("manifest.json", join(OUT_DIR, "manifest.json"));
 copyFileSync("prudent-logo.png", join(OUT_DIR, "icon.png"));
