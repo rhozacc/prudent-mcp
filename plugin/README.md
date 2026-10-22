@@ -25,3 +25,13 @@ it is not the build of the current source. Do not edit it by hand.
 
 The server reads the corpus file you name, locally, and sends nothing anywhere: it has no network code, no
 telemetry and no write tools. What a client does with the tool results is up to the client.
+
+## For reviewers: what the bundled file does and does not do
+
+A scan of `server/index.mjs` reports a "credential" finding. It is a pattern match, and this is what the file contains:
+
+- **The one environment variable it reads is `CORPUS_FILE`**, a path to a JSON file the user names in the plugin's *Corpus file* setting. It is read with `readFileSync` and parsed. It is not a credential and nothing sends it anywhere.
+- **It has no network code.** Its only imports of Node built-ins are `node:process` (stdio) and `node:fs` (`readFileSync`). It has no `http`, `https`, `net`, `tls`, `dgram` or `child_process`, and no `fetch`, `WebSocket` or `XMLHttpRequest`. `tests/plugin.test.ts` fails if that changes.
+- **The text `http://[${payload.value}]` in the file** is the bundled zod library's IPv6 string check, which builds a URL object in order to parse an address. Nothing requests it. The server never uses that check.
+- **The file is large (about 650 KB) because it bundles its dependencies:** zod and the MCP SDK, both MIT (notices in `THIRD-PARTY-NOTICES.md`), and this repository's own source. It is not minified, and `bun run build:plugin` rebuilds it byte for byte from `src/`.
+- **It is launched with `node`**, not through a package manager, and nothing is downloaded at install time.

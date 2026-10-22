@@ -70,6 +70,13 @@ describe("plugin bundle", () => {
     expect(readFileSync("src/server.ts", "utf8")).not.toMatch(/elicit/i);
   });
 
+  test("has no network or process code: its only built-ins are process and fs (the README tells reviewers so)", () => {
+    const bundle = read("plugin/server/index.mjs");
+    const builtins = new Set([...bundle.matchAll(/\bfrom\s+"(node:[a-z_/]+)"/g)].map((m) => m[1]));
+    expect([...builtins].sort()).toEqual(["node:fs", "node:process"]);
+    expect(bundle).not.toMatch(/\bfetch\(|new WebSocket|XMLHttpRequest|child_process|node:(https?|net|tls|dgram)/);
+  });
+
   test("carries the licence and the third-party notices of what it links", () => {
     expect(read("plugin/LICENSE")).toBe(read("LICENSE"));
     expect(read("plugin/THIRD-PARTY-NOTICES.md")).toBe(read("THIRD-PARTY-NOTICES.md"));
