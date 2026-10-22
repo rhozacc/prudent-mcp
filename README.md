@@ -50,6 +50,9 @@ No toolchain required.
 claude mcp add prudent --env CORPUS_FILE=/abs/path/corpus.json -- bun run /abs/path/prudent-mcp/src/mcpb-entry.ts
 ```
 
+Or install it as a plugin (the folder `plugin/` of this repository, which carries the server as one bundled file
+and runs it with `node`, so it needs no Bun): enable it and set the optional *Corpus file* when asked.
+
 Leave `CORPUS_FILE` off to start empty. The same config shape works for Cursor and any other
 MCP-compliant host — see [Clients](https://rhozacc.github.io/prudent-mcp/guide/clients).
 
