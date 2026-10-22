@@ -19,7 +19,6 @@
     "regulation",
     "model-validation"
   ],
-  "icon": "./icon.png",
   "documentationUrl": "https://rhozacc.github.io/prudent-mcp/",
   "supportUrl": "https://github.com/rhozacc/prudent-mcp/issues",
   "userConfig": {
