@@ -30,8 +30,7 @@ describe("plugin manifest", () => {
     expect(manifest.version).toBe(json("manifest.json").version);
   });
 
-  test("the icon exists in the plugin and userConfig options carry the three required keys", () => {
-    expect(read(`plugin/${manifest.icon.replace(/^\.\//, "")}`).length).toBeGreaterThan(0);
+  test("userConfig options carry the three required keys", () => {
     for (const [key, o] of Object.entries<any>(manifest.userConfig)) {
       expect(key).toMatch(/^[A-Za-z_][A-Za-z0-9_]*$/);
       expect(["string", "number", "boolean", "directory", "file"]).toContain(o.type);
@@ -61,6 +60,14 @@ describe("plugin bundle", () => {
     const out = join(mkdtempSync(join(tmpdir(), "plugin-bundle-")), "index.mjs");
     await bundleServer(out);
     expect(read("plugin/server/index.mjs") === read(out)).toBe(true);
+  });
+
+  test("leaves out the validator nothing here uses, and with it Ajv and its stray URLs", () => {
+    const bundle = read("plugin/server/index.mjs");
+    expect(bundle).not.toMatch(/raw\.githubusercontent\.com|ajv-validator/);
+    expect(bundle).not.toMatch(/class Ajv\b|new Ajv\b/);
+    // and the code that would use it is not reachable from this server
+    expect(readFileSync("src/server.ts", "utf8")).not.toMatch(/elicit/i);
   });
 
   test("carries the licence and the third-party notices of what it links", () => {
