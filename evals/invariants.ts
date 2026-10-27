@@ -1672,7 +1672,7 @@ export async function declinesAreNeverEmpty(s: Session): Promise<InvariantResult
  * So whenever the text served under as_of IS the current text, the reply must
  * say it is not the text of that date. Observed from outside: take a record,
  * read it with no date, then read it under a ladder of dates; every reply that
- * is a hit identical to the undated one must carry an `as_of_note`.
+ * is a hit identical to the undated one must carry a `version` note.
  *
  * The invariant binds only on a record that has no recorded history, and it has
  * two ways to know. When the session was opened on a corpus file, the ids named
@@ -1689,18 +1689,10 @@ export async function declinesAreNeverEmpty(s: Session): Promise<InvariantResult
  * records of documents published after the earliest ladder date are not probed
  * here; the adapter tests cover the registry-dated boundary.
  *
- * `expand_regulation` also resolves the record's regulation children under the
- * same date, so on a record that has children the embedded children are checked
- * to be the versions `get_regulation` serves for that date.
- *
  * A note that is present but names neither the date asked about nor the version
  * served is a warning: it satisfies "has a note" while telling the caller nothing
- * (the same shape as I10's generic decline).
- *
- * The other half of the same belief: a child the corpus holds but has no version
- * of for the date comes back as a bare id, which reads as a reference to nothing.
- * Wherever `expand_regulation` embeds one, its reply must carry a note naming the
- * date (`I11/expand_regulation-gap`).
+ * (the same shape as I10's generic decline). The note read is the `version` note
+ * of the `get` reply.
  */
 /**
  * The ids the corpus file records history for. Structural metadata only: which
@@ -1722,11 +1714,6 @@ export async function asOfIsNeverSilentlySubstituted(s: Session): Promise<Invari
   const findings: Finding[] = [];
   const title = "as_of is never silently substituted";
 
-  type Row = { id?: string; document_id?: string };
-  const rowsOf = (json: unknown): Row[] =>
-    ((json as { results?: Row[] } | null)?.results ?? []).filter((r) => typeof r.id === "string");
-  const asRecord = (json: unknown): Record<string, unknown> | null =>
-    json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : null;
   const same = (a: Record<string, unknown>, b: Record<string, unknown>): boolean =>
     a["id"] === b["id"] && a["document_version"] === b["document_version"] && a["text"] === b["text"];
 
@@ -1735,10 +1722,10 @@ export async function asOfIsNeverSilentlySubstituted(s: Session): Promise<Invari
   const perDocument = new Map<string, number>();
   const ids: string[] = [];
   for (const q of ["default", "estimation", "risk", "data", "model", "validation"]) {
-    const t = await s.call("search_regulation", { query: q, limit: 10 });
-    for (const row of rowsOf(t.json)) {
-      const doc = row.document_id ?? "";
-      if (row.id === undefined || ids.includes(row.id) || (perDocument.get(doc) ?? 0) >= 2) continue;
+    const t = await s.call("search", { query: q, limit: 10 });
+    for (const row of searchRows(t.json)) {
+      const doc = typeof row["document_id"] === "string" ? row["document_id"] : "";
+      if (ids.includes(row.id) || (perDocument.get(doc) ?? 0) >= 2) continue;
       perDocument.set(doc, (perDocument.get(doc) ?? 0) + 1);
       ids.push(row.id);
     }
@@ -1762,49 +1749,48 @@ export async function asOfIsNeverSilentlySubstituted(s: Session): Promise<Invari
   for (const id of ids) {
     if (probed >= 8) break;
     if (withHistory.has(id)) continue; // the corpus records a version of it; see the docstring
-    const current = await s.call("get_regulation", { id });
-    const cur = asRecord(current.json);
+    const current = await s.call("get", { ids: id });
+    const cur = firstRecord(current.json);
     if (current.isError || cur === null) continue;
 
-    const served: Array<{ asOf: string; body: Record<string, unknown> }> = [];
+    const served: Array<{ asOf: string; body: Record<string, unknown>; note: string | undefined }> = [];
     let hasHistory = false;
     for (const asOf of ladder) {
-      const r = await s.call("get_regulation", { id, as_of: asOf });
-      const body = asRecord(r.json);
+      const r = await s.call("get", { ids: id, as_of: asOf });
+      const body = firstRecord(r.json);
       if (r.isError || body === null || !same(body, cur)) {
         hasHistory = true;
         break;
       }
-      served.push({ asOf, body });
+      served.push({ asOf, body, note: noteText(r.json, "version") });
     }
     if (hasHistory) continue;
     probed++;
 
     const silent: string[] = [];
-    for (const { asOf, body } of served) {
+    for (const { asOf, body, note } of served) {
       bound++;
-      const note = body["as_of_note"];
-      if (typeof note !== "string" || note.trim() === "") {
+      if (note === undefined || note.trim() === "") {
         silent.push(asOf);
       } else if (!dateAndVersionNamed(note, asOf, body["document_version"])) {
         findings.push({
           id: "I11/note-generic",
           severity: "warn",
-          summary: "as_of_note does not name the date that was asked about and the version that was served — it says a note exists and nothing about this reply.",
+          summary: "The version note does not name the date that was asked about and the version that was served — it says a note exists and nothing about this reply.",
           evidence: [`id ${id}`, `as_of ${asOf}`, `note: ${note.slice(0, 200)}`],
         });
       }
     }
     if (silent.length > 0) {
       findings.push({
-        id: "I11/get_regulation",
+        id: "I11/get",
         severity: "fatal",
-        summary: "get_regulation served the current text of a record with no recorded history under as_of and said nothing — it reads as the text in force on the date asked for.",
+        summary: "get served the current text of a record with no recorded history under as_of and said nothing — it reads as the text in force on the date asked for.",
         evidence: [
           `id ${id}`,
           `as_of dates answered without a note: ${silent.join(", ")}`,
           `document_version served: ${String(cur["document_version"])}`,
-          `reply keys: ${Object.keys(served[0]?.body ?? {}).join(", ")}`,
+          `record keys: ${Object.keys(served[0]?.body ?? {}).join(", ")}`,
         ],
       });
     }
@@ -1840,11 +1826,11 @@ export async function asOfIsNeverSilentlySubstituted(s: Session): Promise<Invari
  * as "there is no Article 99" - absence from the corpus taken for absence from
  * the law, which is the one error a validator cannot afford.
  *
- * So for every document the registry declares partial (the `holdings` the server
- * itself publishes), an id in that document that does not exist must come back
+ * So for every document the registry declares partial (`held: "part"` in what
+ * `sources` lists), an id in that document that does not exist must come back
  * as a miss that says the document is held in part, on every tool that serves a
- * regulation by id, and a citation naming the document that the corpus cannot
- * place must say so in its note. The probes are built from the server's own
+ * regulation by id (`get`, `related`), and a citation naming the document that
+ * `cite` cannot place must say so in its outside_library note. The probes are built from the server's own
  * output: a sampled record gives the id prefix the document lives under, and an
  * absent provision is made up under it (and checked to really be absent).
  *
@@ -1857,16 +1843,10 @@ export async function declineOnPartialDocumentSaysSo(s: Session): Promise<Invari
   const id = "I12";
   const title = "A decline on a partly held document says so";
 
-  type Holding = { document_id?: unknown; title?: unknown; partial?: unknown };
-  const info = await s.call("get_corpus_info", {});
-  const holdings = ((info.json as { holdings?: Holding[] } | null)?.holdings ?? []).filter(
-    (h): h is Holding & { document_id: string } => typeof h.document_id === "string" && h.partial === true,
-  );
+  const holdings = (await documentsOf(s)).documents.filter((d) => d.held === "part");
   if (holdings.length === 0) return { id, title, applicable: false, findings };
 
   const SAYS_PARTIAL = /\b(?:only part|in part|partly|partial(?:ly)?)\b/i;
-  type Row = { id?: string; document_id?: string };
-  const rowsOf = (json: unknown): Row[] => ((json as { results?: Row[] } | null)?.results ?? []) as Row[];
 
   // One sampled record per partial document: the id prefix it lives under.
   const prefixOf = new Map<string, string>();
@@ -1875,9 +1855,9 @@ export async function declineOnPartialDocumentSaysSo(s: Session): Promise<Invari
     const words = typeof h.title === "string" ? h.title.split(/[^A-Za-z0-9]+/).filter((w) => w.length > 3) : [];
     for (const q of [...queries, ...words.slice(0, 4)]) {
       if (prefixOf.has(h.document_id)) break;
-      const t = await s.call("search_regulation", { query: q, limit: 50 });
-      const row = rowsOf(t.json).find((r) => r.document_id === h.document_id && typeof r.id === "string");
-      const segment = row?.id?.replace(/^regulation:\/\//, "").split("/")[0];
+      const t = await s.call("search", { query: q, limit: 50 });
+      const row = searchRows(t.json).find((r) => r["document_id"] === h.document_id);
+      const segment = row?.id.replace(/^regulation:\/\//, "").split("/")[0];
       if (segment !== undefined && segment !== "") prefixOf.set(h.document_id, segment);
     }
   }
@@ -1889,16 +1869,16 @@ export async function declineOnPartialDocumentSaysSo(s: Session): Promise<Invari
       findings.push({
         id: "I12/unsampled",
         severity: "warn",
-        summary: "A document declared partial could not be sampled through search_regulation, so its misses were not probed.",
+        summary: "A document declared partial could not be sampled through search, so its misses were not probed.",
         evidence: [`document ${h.document_id}`],
       });
       continue;
     }
     const absent = `regulation://${segment}/i12-absent-provision`;
-    const direct = await s.call("get_regulation", { id: absent });
+    const direct = await s.call("get", { ids: absent });
     if (!direct.isError) continue; // it exists after all; nothing to decline
     const probes: Array<[string, Record<string, unknown>]> = [
-      ["get_regulation", { id: absent }],
+      ["get", { ids: absent }],
       ["related", { id: absent }],
     ];
     for (const [tool, args] of probes) {
@@ -1916,16 +1896,16 @@ export async function declineOnPartialDocumentSaysSo(s: Session): Promise<Invari
 
     // The same boundary through the citation resolver: a provision number that
     // exists nowhere, scoped to the document by its own id.
-    const cite = await s.call("resolve_citation", { text: `${h.document_id} 99999` });
-    const body = cite.json as { match?: unknown; coverage_note?: unknown } | null;
-    const note = typeof body?.coverage_note === "string" ? body.coverage_note : "";
+    const cite = await s.call("cite", { text: `${h.document_id} 99999` });
+    const body = cite.json as { match?: unknown } | null;
+    const note = noteText(cite.json, "outside_library") ?? "";
     if (body !== null && body.match === null && /Nothing in this library is numbered/.test(note)) {
       bound++;
       if (!SAYS_PARTIAL.test(note)) {
         findings.push({
-          id: "I12/resolve_citation",
+          id: "I12/cite",
           severity: "fatal",
-          summary: "resolve_citation could not place a provision of a document the registry declares partly held and its note does not say the document is held in part.",
+          summary: "cite could not place a provision of a document the registry declares partly held and its note does not say the document is held in part.",
           evidence: [`document ${h.document_id}`, `note: ${note.slice(0, 200)}`],
         });
       }
@@ -1950,8 +1930,8 @@ export async function declineOnPartialDocumentSaysSo(s: Session): Promise<Invari
  * match nothing) plus one common word the surface does hold. No record can
  * cover more than one of the four terms, so the envelope must say there are four
  * meaningful terms, must not claim a best coverage above one, must not decorate a
- * row with more than one, and must carry a notice that the topic may not be in
- * this corpus. It does not ask what the server's coverage IS on a real query -
+ * row with more than one, and must carry a `weak_match` note that the topic may
+ * not be in this corpus. It does not ask what the server's coverage IS on a real query -
  * only that it never overstates a match whose truth is fixed by construction.
  *
  * Applicable only where a surface holds a record matching one of the seed words;
@@ -1963,22 +1943,23 @@ export async function weakBestMatchIsDeclared(s: Session): Promise<InvariantResu
   const findings: Finding[] = [];
   const INVENTED = ["zqxvjk", "wkvzqp", "qjxzwm"];
   const SEEDS = ["default", "risk", "model", "data", "validation", "estimation", "test", "check", "area"];
-  const TOOLS = ["search_regulation", "search_checks", "search_tests", "search_playbooks"];
-  type Body = { total_matches?: unknown; query_tokens?: unknown; best_coverage?: unknown; notice?: unknown; results?: unknown };
+  const SCOPES = ["provisions", "checks", "tests", "playbooks"];
+  type Body = { total_matches?: unknown; query_tokens?: unknown; best_coverage?: unknown; results?: unknown };
   const bodyOf = (t: { json: unknown }): Body => (t.json ?? {}) as Body;
 
   let bound = 0;
-  for (const tool of TOOLS) {
+  for (const scope of SCOPES) {
+    const tool = `search/${scope}`;
     // The invented words alone must match nothing, or the premise is false and
     // nothing can be concluded from this surface.
-    const alone = await s.call(tool, { query: INVENTED.join(" "), limit: 1 });
+    const alone = await s.call("search", { query: INVENTED.join(" "), scope, limit: 1 });
     if (alone.isError || bodyOf(alone).total_matches !== 0) continue;
 
     let query: string | undefined;
     let probe: Awaited<ReturnType<Session["call"]>> | undefined;
     for (const word of SEEDS) {
       const q = `${INVENTED.join(" ")} ${word}`;
-      const t = await s.call(tool, { query: q, limit: 20 });
+      const t = await s.call("search", { query: q, scope, limit: 20 });
       if (!t.isError && typeof bodyOf(t).total_matches === "number" && (bodyOf(t).total_matches as number) > 0) {
         query = q;
         probe = t;
@@ -1997,22 +1978,21 @@ export async function weakBestMatchIsDeclared(s: Session): Promise<InvariantResu
     const overstated = rows.filter((r) => typeof r["coverage"] === "number" && (r["coverage"] as number) > 1);
     if (overstated.length > 0) problems.push(`${overstated.length} row(s) claim a coverage above 1`);
     if (rows.length > 0 && rows.every((r) => !("coverage" in r))) problems.push("rows carry no coverage");
-    const notice = typeof b.notice === "string" ? b.notice : "";
+    const notice = noteText(probe.json, "weak_match") ?? "";
     // The meaning, not the sentence: the topic may not be held, and that is a
     // statement about what is held, not about the law.
     if (!/may not be (?:in|held)/i.test(notice) || !/not about the law/i.test(notice)) {
-      problems.push("the notice does not say the topic may not be held here, and that not finding it is not a statement about the law");
+      problems.push("there is no weak_match note saying the topic may not be held here, and that not finding it is not a statement about the law");
     }
     // A single-term query has no "some of the terms" to be short of: a whole word
     // and a stem (placed only on partial-word matches, coverage 0) alike must not
     // be told the topic may not be in the corpus.
     for (const word of SEEDS.flatMap((w) => [w, w.slice(0, Math.max(3, w.length - 2))])) {
-      const one = await s.call(tool, { query: word, limit: 5 });
+      const one = await s.call("search", { query: word, scope, limit: 5 });
       if (one.isError) continue;
       const ob = bodyOf(one);
-      const n = typeof ob.notice === "string" ? ob.notice : "";
-      if (typeof ob.total_matches === "number" && ob.total_matches > 0 && /meaningful terms|partial-word/i.test(n)) {
-        problems.push(`the single-term query ${JSON.stringify(word)} (${String(ob.total_matches)} matches) carries a weak-match notice`);
+      if (typeof ob.total_matches === "number" && ob.total_matches > 0 && noteText(one.json, "weak_match") !== undefined) {
+        problems.push(`the single-term query ${JSON.stringify(word)} (${String(ob.total_matches)} matches) carries a weak_match note`);
       }
     }
     if (problems.length > 0) {
@@ -2020,7 +2000,7 @@ export async function weakBestMatchIsDeclared(s: Session): Promise<InvariantResu
         id: `I13/${tool}`,
         severity: "fatal",
         summary: `${tool} returned a page whose best hit matches 1 of 4 query terms without declaring it - a client reads the top of the list as an answer.`,
-        evidence: [`query ${JSON.stringify(query)}`, `total_matches ${String(b.total_matches)}`, ...problems, `notice: ${notice.slice(0, 200) || "(none)"}`],
+        evidence: [`query ${JSON.stringify(query)}`, `total_matches ${String(b.total_matches)}`, ...problems, `weak_match note: ${notice.slice(0, 200) || "(none)"}`],
       });
     }
   }
@@ -2036,10 +2016,11 @@ export async function weakBestMatchIsDeclared(s: Session): Promise<InvariantResu
  * xx/xx [...]". Served verbatim that reads as a citation, but it cites nothing,
  * and the instructions' rule ("say such references are unresolved") only works
  * if the model notices the shape unprompted. So a record whose served text names
- * an instrument by a placeholder number must come back flagged, on both tools
- * that serve a record by id: `pre_adoption_placeholders` (the spans) and a
- * `notice` saying the placeholder is not a citation. Search rows are not asked
- * to carry it - `detail: 'full'` rows are the canonical record schema.
+ * an instrument by a placeholder number must come back flagged by `get`: a
+ * `placeholder` note saying the placeholder is not a citation and quoting the
+ * span or spans (at most three, none longer than 120 characters). Search rows
+ * are not asked to carry it - `detail: 'full'` rows are the canonical record
+ * schema.
  *
  * The candidates are found WITHOUT trusting the server's own scan, which would
  * make the invariant agree with itself: a deliberately looser pattern (an
@@ -2064,11 +2045,6 @@ export async function placeholdersAreMarked(s: Session): Promise<InvariantResult
     String.raw`\b(?:regulation|directive|decision|guideline)\b[^;\n]{0,40}?(?:${STAND_IN}\s*\/\s*(?:${STAND_IN}|\d{1,4})|\d{1,4}\s*\/\s*${STAND_IN})`,
     "i",
   );
-  const asRecord = (json: unknown): Record<string, unknown> | null =>
-    json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : null;
-  type Row = { id?: string };
-  const rowsOf = (json: unknown): Row[] =>
-    ((json as { results?: Row[] } | null)?.results ?? []).filter((r) => typeof r.id === "string");
 
   // Candidate ids: records of the corpus file whose text the loose pattern
   // matches, plus whatever search surfaces for the obvious queries.
@@ -2085,9 +2061,9 @@ export async function placeholdersAreMarked(s: Session): Promise<InvariantResult
   }
   const sampled: string[] = [];
   for (const q of ["xx/xx", "regulation xx", "placeholder", "default", "risk", "estimation", "data", "model"]) {
-    const t = await s.call("search_regulation", { query: q, limit: 10 });
-    for (const row of rowsOf(t.json)) {
-      if (row.id !== undefined && !sampled.includes(row.id)) sampled.push(row.id);
+    const t = await s.call("search", { query: q, limit: 10 });
+    for (const row of searchRows(t.json)) {
+      if (!sampled.includes(row.id)) sampled.push(row.id);
     }
   }
 
@@ -2097,40 +2073,41 @@ export async function placeholdersAreMarked(s: Session): Promise<InvariantResult
   for (const rid of [...candidates.slice(0, 12), ...sampled.slice(0, 40)]) {
     if (checked.has(rid)) continue;
     checked.add(rid);
-    for (const tool of ["get_regulation"] as const) {
-      const r = await s.call(tool, { id: rid });
-      const body = asRecord(r.json);
-      if (r.isError || body === null || typeof body["text"] !== "string") continue;
-      const has = LOOSE.test(body["text"]);
-      const spans = body["pre_adoption_placeholders"];
-      if (!has) {
-        if ("pre_adoption_placeholders" in body && falseFlags++ < 3) {
-          findings.push({
-            id: `I14/false-flag/${tool}`,
-            severity: "fatal",
-            summary: `${tool} flagged a record whose text names no instrument by a placeholder number - a real citation is being called not-a-citation.`,
-            evidence: [`id ${rid}`, `spans ${JSON.stringify(spans)}`],
-          });
-        }
-        continue;
-      }
-      bound++;
-      const problems: string[] = [];
-      if (!Array.isArray(spans) || spans.length === 0) problems.push("pre_adoption_placeholders is missing or empty");
-      else {
-        if (spans.length > 3) problems.push(`${spans.length} spans, at most 3 are allowed`);
-        if (spans.some((x) => typeof x !== "string" || x.length > 120)) problems.push("a span is not a string of at most 120 characters");
-      }
-      const notice = typeof body["notice"] === "string" ? body["notice"] : "";
-      if (!/not a citation/i.test(notice)) problems.push("notice does not say the placeholder is not a citation");
-      if (problems.length > 0) {
+    const tool = "get" as const;
+    const r = await s.call(tool, { ids: rid });
+    const body = firstRecord(r.json);
+    if (r.isError || body === null || typeof body["text"] !== "string") continue;
+    const has = LOOSE.test(body["text"]);
+    const note = noteText(r.json, "placeholder");
+    // The spans are the quoted words of the note: “…” after the sentence that names them.
+    const spans = note === undefined ? [] : [...note.matchAll(/“([^”]*)”/g)].map((m) => m[1] ?? "");
+    if (!has) {
+      if (note !== undefined && falseFlags++ < 3) {
         findings.push({
-          id: `I14/${tool}`,
+          id: `I14/false-flag/${tool}`,
           severity: "fatal",
-          summary: `${tool} served a record whose text names an instrument by a pre-adoption placeholder without marking it - the placeholder reads as a citation.`,
-          evidence: [`id ${rid}`, ...problems, `notice: ${notice.slice(0, 200) || "(none)"}`],
+          summary: `${tool} flagged a record whose text names no instrument by a placeholder number - a real citation is being called not-a-citation.`,
+          evidence: [`id ${rid}`, `spans ${JSON.stringify(spans)}`],
         });
       }
+      continue;
+    }
+    bound++;
+    const problems: string[] = [];
+    if (note === undefined) problems.push("there is no placeholder note");
+    else {
+      if (spans.length === 0) problems.push("the placeholder note quotes no span");
+      if (spans.length > 3) problems.push(`${spans.length} spans, at most 3 are allowed`);
+      if (spans.some((x) => x.length > 120)) problems.push("a span is longer than 120 characters");
+      if (!/not a citation/i.test(note)) problems.push("the note does not say the placeholder is not a citation");
+    }
+    if (problems.length > 0) {
+      findings.push({
+        id: `I14/${tool}`,
+        severity: "fatal",
+        summary: `${tool} served a record whose text names an instrument by a pre-adoption placeholder without marking it - the placeholder reads as a citation.`,
+        evidence: [`id ${rid}`, ...problems, `note: ${note?.slice(0, 200) ?? "(none)"}`],
+      });
     }
   }
   return { id, title, applicable: bound > 0, findings };
@@ -2148,20 +2125,20 @@ export async function placeholdersAreMarked(s: Session): Promise<InvariantResult
  *
  * What a caller must be told, and where, depends on whether anything says WHICH
  * provisions the change touches (`affects_ids` on the change, served by
- * `get_source`; `amends` on the amending instrument's provisions, read from the
+ * `sources` with an id; `amends` on the amending instrument's provisions, read from the
  * corpus file when the session has one):
  *
- * - A provision that is named must carry a `pending_changes_note` on every tool
- *   that serves a regulation by id (and on a citation that resolves to it): the
+ * - A provision that is named must carry an `amendment` note on every tool
+ *   that serves a regulation by id (`get`, `related`, and `cite` when it resolves to it): the
  *   date when it is ahead, that the text may be out of date when it has come into
  *   force. A sibling of the same document that nothing names must carry none, and
  *   so must the named one under an `as_of` before it applies — a warning that is
  *   always present is not read, and a note on a provision the change does not
  *   touch says something false about it.
  * - A document whose open changes name no provision is said at document level
- *   only: `get_corpus_info` lists the change, a search page that returns the
- *   document says so in its notice, and no provision of it carries a note.
- * - A search page that returns a named provision says so in its notice.
+ *   only: `sources` lists the change, a search page that returns the
+ *   document says so in an amendment note, and no provision of it carries one.
+ * - A search page that returns a named provision says so in an amendment note.
  * - The converse for a document with nothing open: no note.
  *
  * The served `state` of each change is checked against the date arithmetic the
@@ -2178,18 +2155,17 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
 
   type Change = { title?: string; reference?: string; status?: string; effective_from?: string; ingested?: boolean; state?: string };
   type Src = { id: string; status?: string; document_id?: string; framework?: string; title?: string; pending_changes?: Change[] };
-  type Row = { id?: string; citation?: string; document_id?: string };
-  const asRecord = (json: unknown): Record<string, unknown> | null =>
-    json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : null;
-  const rowsOf = (json: unknown): Row[] => ((asRecord(json)?.["results"] ?? []) as Row[]).filter((r) => typeof r.id === "string");
+  type Row = { id: string; citation?: string; document_id?: string };
+  const asRecord = asObject;
+  const rowsOf = (json: unknown): Row[] => searchRows(json) as Row[];
 
-  const listed = await s.call("list_sources", {});
-  const sourceIds = ((asRecord(listed.json)?.["sources"] ?? []) as Array<{ id?: unknown }>).flatMap((x) =>
+  const listed = await s.call("sources", {});
+  const sourceIds = ((asRecord(listed.json)?.["documents"] ?? []) as Array<{ id?: unknown }>).flatMap((x) =>
     typeof x.id === "string" ? [x.id] : [],
   );
   const sources: Src[] = [];
   for (const sid of sourceIds) {
-    const t = await s.call("get_source", { id: sid });
+    const t = await s.call("sources", { id: sid });
     const j = asRecord(t.json) as Src | null;
     if (j !== null && typeof j.id === "string") sources.push(j);
   }
@@ -2204,7 +2180,7 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
         findings.push({
           id: "I15/state",
           severity: "fatal",
-          summary: "get_source served a pending change whose state does not follow from its ingested flag and effective date.",
+          summary: "sources served a pending change whose state does not follow from its ingested flag and effective date.",
           evidence: [`source ${src.id}`, `change ${String(c.title)}`, `served ${String(c.state)}, expected ${expectedState(c)} on ${today}`],
         });
       }
@@ -2216,17 +2192,16 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
   const withOpen = current.filter((x) => openOf(x).length > 0);
   if (withOpen.length === 0) return { id, title, applicable: false, findings };
 
-  // The corpus-wide list.
-  const info = await s.call("get_corpus_info", {});
-  const listedInfo = (asRecord(info.json)?.["pending_changes"] ?? null) as Array<{ source?: string; title?: string }> | null;
+  // The library-wide list of changes, which `sources` gives beside the documents.
+  const listedInfo = (asRecord(listed.json)?.["changes"] ?? null) as Array<{ source?: string; title?: string }> | null;
   for (const src of withOpen) {
     for (const c of openOf(src)) {
       if (listedInfo === null || !listedInfo.some((e) => e.source === src.id && e.title === c.title)) {
         findings.push({
-          id: "I15/corpus_info",
+          id: "I15/sources",
           severity: "fatal",
-          summary: "get_corpus_info does not list a pending change the registry records as not ingested.",
-          evidence: [`source ${src.id}`, `change ${String(c.title)}`, `pending_changes ${listedInfo === null ? "(absent)" : "present"}`],
+          summary: "sources does not list a pending change the registry records as not ingested.",
+          evidence: [`source ${src.id}`, `change ${String(c.title)}`, `changes ${listedInfo === null ? "(absent)" : "present"}`],
         });
       }
     }
@@ -2237,10 +2212,11 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
   const rowsOfDocument = async (documentId: string, extra: string[] = []): Promise<Array<{ row: Row; notice: string | undefined }>> => {
     const out: Array<{ row: Row; notice: string | undefined }> = [];
     for (const q of [...extra, ...queries]) {
-      const t = await s.call("search_regulation", { query: q, limit: 100 });
-      const notice = asRecord(t.json)?.["notice"];
+      const t = await s.call("search", { query: q, limit: 100 });
+      // `notice` below is the page's amendment note: what the page says about a change its text does not include.
+      const notice = noteText(t.json, "amendment");
       for (const row of rowsOf(t.json).filter((r) => r.document_id === documentId)) {
-        out.push({ row, notice: typeof notice === "string" ? notice : undefined });
+        out.push({ row, notice });
       }
       if (out.length >= 12) break;
     }
@@ -2298,16 +2274,16 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
         findings.push({
           id: "I15/search",
           severity: "fatal",
-          summary: "A search page returned a provision of a document with a change its text does not yet include and its notice does not say so.",
-          evidence: [`document ${src.document_id}`, `notice: ${found.notice?.slice(0, 200) ?? "(none)"}`],
+          summary: "A search page returned a provision of a document with a change its text does not yet include and carried no amendment note saying so.",
+          evidence: [`document ${src.document_id}`, `amendment note: ${found.notice?.slice(0, 200) ?? "(none)"}`],
         });
       }
-      const r = await s.call("get_regulation", { id: found.row.id as string });
-      if (!r.isError && typeof asRecord(r.json)?.["pending_changes_note"] === "string") {
+      const r = await s.call("get", { ids: found.row.id });
+      if (!r.isError && noteText(r.json, "amendment") !== undefined) {
         findings.push({
           id: "I15/unmapped-note",
           severity: "fatal",
-          summary: "get_regulation carried a pending_changes_note on a provision of a document whose open changes name no provision: a warning on every provision of a document is not read.",
+          summary: "get carried an amendment note on a provision of a document whose open changes name no provision: a warning on every provision of a document is not read.",
           evidence: [`id ${String(found.row.id)}`, `document ${src.document_id}`],
         });
       }
@@ -2317,8 +2293,8 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
     // A named provision: found by id, so it need not be among the first a search returns.
     let target: { id: string; citation?: string } | null = null;
     for (const nid of named.keys()) {
-      const t = await s.call("get_regulation", { id: nid });
-      const j = asRecord(t.json);
+      const t = await s.call("get", { ids: nid });
+      const j = firstRecord(t.json);
       if (!t.isError && j !== null) {
         target = { id: nid, ...(typeof j["citation"] === "string" ? { citation: j["citation"] } : {}) };
         break;
@@ -2328,14 +2304,10 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
     bound++;
     const dates = named.get(target.id) ?? [];
 
-    for (const tool of ["get_regulation", "related"] as const) {
-      const r = await s.call(tool, { id: target.id });
-      const body = asRecord(r.json);
-      const note =
-        tool === "related"
-          ? ((body?.["notes"] ?? []) as Array<{ type?: string; text?: string }>).find((n) => n.type === "amendment")?.text
-          : body?.["pending_changes_note"];
-      if (r.isError || typeof note !== "string") {
+    for (const tool of ["get", "related"] as const) {
+      const r = await s.call(tool, tool === "get" ? { ids: target.id } : { id: target.id });
+      const note = noteText(r.json, "amendment");
+      if (r.isError || note === undefined) {
         findings.push({
           id: `I15/${tool}`,
           severity: "fatal",
@@ -2349,7 +2321,7 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
         findings.push({
           id: `I15/${tool}/note`,
           severity: "fatal",
-          summary: `${tool}'s pending_changes_note does not say enough: it ${problems.join("; ")}.`,
+          summary: `${tool}'s amendment note does not say enough: it ${problems.join("; ")}.`,
           evidence: [`id ${target.id}`, `note: ${note.slice(0, 240)}`],
         });
       }
@@ -2357,40 +2329,40 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
 
     // The same provision reached through a citation.
     if (target.citation !== undefined) {
-      const cite = await s.call("resolve_citation", { text: target.citation });
+      const cite = await s.call("cite", { text: target.citation });
       const body = asRecord(cite.json);
       const match = asRecord(body?.["match"]);
-      if (match !== null && match["id"] === target.id && typeof body?.["pending_changes_note"] !== "string") {
+      if (match !== null && match["id"] === target.id && noteText(cite.json, "amendment") === undefined) {
         findings.push({
-          id: "I15/resolve_citation",
+          id: "I15/cite",
           severity: "fatal",
-          summary: "resolve_citation matched a provision a pending change names and said nothing about it.",
+          summary: "cite matched a provision a pending change names and said nothing about it.",
           evidence: [`id ${target.id}`, `citation ${target.citation}`],
         });
       }
       // And a search page that returns it says so.
-      const page = await s.call("search_regulation", { query: target.citation, limit: 100 });
+      const page = await s.call("search", { query: target.citation, limit: 100 });
       const rows = rowsOf(page.json);
-      const pageNotice = asRecord(page.json)?.["notice"];
-      if (rows.some((r) => r.id === target.id) && !saysChange(typeof pageNotice === "string" ? pageNotice : undefined)) {
+      const pageNotice = noteText(page.json, "amendment");
+      if (rows.some((r) => r.id === target.id) && !saysChange(pageNotice)) {
         findings.push({
           id: "I15/search",
           severity: "fatal",
-          summary: "A search page returned a provision a pending change names and its notice does not say so.",
-          evidence: [`id ${target.id}`, `notice: ${typeof pageNotice === "string" ? pageNotice.slice(0, 200) : "(none)"}`],
+          summary: "A search page returned a provision a pending change names and carried no amendment note saying so.",
+          evidence: [`id ${target.id}`, `amendment note: ${pageNotice === undefined ? "(none)" : pageNotice.slice(0, 200)}`],
         });
       }
     }
 
     // A sibling of the same document that nothing names carries no note.
-    const sibling = (await rowsOfDocument(src.document_id)).find((x) => typeof x.row.id === "string" && !named.has(x.row.id));
+    const sibling = (await rowsOfDocument(src.document_id)).find((x) => !named.has(x.row.id));
     if (sibling !== undefined) {
-      const r = await s.call("get_regulation", { id: sibling.row.id as string });
-      if (!r.isError && typeof asRecord(r.json)?.["pending_changes_note"] === "string") {
+      const r = await s.call("get", { ids: sibling.row.id });
+      if (!r.isError && noteText(r.json, "amendment") !== undefined) {
         findings.push({
           id: "I15/over-flag",
           severity: "fatal",
-          summary: "get_regulation carried a pending_changes_note on a provision no pending change names, because its document has one: the warning is on provisions it does not concern.",
+          summary: "get carried an amendment note on a provision no pending change names, because its document has one: the warning is on provisions it does not concern.",
           evidence: [`id ${String(sibling.row.id)}`, `document ${src.document_id}`, `named: ${target.id}`],
         });
       }
@@ -2401,12 +2373,12 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
     if (given.length > 0 && given.length === dates.length) {
       const earliest = [...given].sort()[0] as string;
       const asOf = day(earliest, -1);
-      const before = await s.call("get_regulation", { id: target.id, as_of: asOf });
-      if (!before.isError && typeof asRecord(before.json)?.["pending_changes_note"] === "string") {
+      const before = await s.call("get", { ids: target.id, as_of: asOf });
+      if (!before.isError && noteText(before.json, "amendment") !== undefined) {
         findings.push({
           id: "I15/as_of",
           severity: "fatal",
-          summary: "get_regulation under an as_of earlier than every change that names the provision carried a pending_changes_note: the text served for that date is not behind a change that had not applied.",
+          summary: "get under an as_of earlier than every change that names the provision carried an amendment note: the text served for that date is not behind a change that had not applied.",
           evidence: [`id ${target.id}`, `as_of ${asOf}`, `earliest change ${earliest}`],
         });
       }
@@ -2418,13 +2390,13 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
   for (const src of quiet.slice(0, 2)) {
     const found = await sample(src.document_id as string);
     if (found === null) continue;
-    const r = await s.call("get_regulation", { id: found.row.id as string });
+    const r = await s.call("get", { ids: found.row.id });
     bound++;
-    if (!r.isError && asRecord(r.json)?.["pending_changes_note"] !== undefined) {
+    if (!r.isError && noteText(r.json, "amendment") !== undefined) {
       findings.push({
         id: "I15/false-flag",
         severity: "fatal",
-        summary: "get_regulation carried a pending_changes_note on a record of a document with no open pending change: a warning that is always present is not read.",
+        summary: "get carried an amendment note on a record of a document with no open pending change: a warning that is always present is not read.",
         evidence: [`id ${String(found.row.id)}`, `document ${String(src.document_id)}`],
       });
     }

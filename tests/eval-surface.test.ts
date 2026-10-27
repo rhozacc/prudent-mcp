@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
 
 import type { CallTrace, Session } from "../evals/harness.ts";
-import { costWithinBudget, declinesAreNeverEmpty, humanRegisterCitationsResolve, idsRoundTrip, missesAreActionable, totalsAreTruthful } from "../evals/invariants.ts";
+import { asOfIsNeverSilentlySubstituted, costWithinBudget, declinesAreNeverEmpty, humanRegisterCitationsResolve, idsRoundTrip, missesAreActionable, totalsAreTruthful } from "../evals/invariants.ts";
 
-// ── I4–I7, I9 and I10 on stand-in sessions that speak the 1.0 tools ──────────────────────────────────────────────────────────────
+// ── I4–I7, I9–I11 on stand-in sessions that speak the 1.0 tools ──────────────────────────────────────────────────────────────
 //
 // Each invariant has to be able to fail, so each is run against a server that is wrong in the one way it exists to catch.
 
@@ -147,6 +147,40 @@ describe("I9 and I10 read the outside_library note of cite", () => {
 
   it("I10 does not judge a citation that resolved", async () => {
     const r = await declinesAreNeverEmpty(session(() => ({ json: { match: { id: "regulation://a/1" } } })));
+    expect(r.applicable).toBe(false);
+  });
+});
+
+describe("I11 reads the version note of get", () => {
+  const record = { id: "regulation://a/1", document_version: "2024-05-01", text: "Synthetic text." };
+  const server = (note: (asOf: string) => string | undefined) => (tool: string, args: Record<string, unknown>): Reply => {
+    if (tool === "search") return { json: { results: [{ id: record.id, document_id: "a" }] } };
+    const asOf = args["as_of"];
+    const text = typeof asOf === "string" ? note(asOf) : undefined;
+    return { json: { ...(text === undefined ? {} : { notes: [{ type: "version", text }] }), records: [record] } };
+  };
+
+  it("is fatal when the current text is served under a past date with no note", async () => {
+    const r = await asOfIsNeverSilentlySubstituted(session(server(() => undefined)));
+    expect(r.applicable).toBe(true);
+    expect(r.findings.map((f) => [f.id, f.severity])).toEqual([["I11/get", "fatal"]]);
+  });
+
+  it("passes a note that names the date asked about and the version served", async () => {
+    const r = await asOfIsNeverSilentlySubstituted(session(server((d) => `No version for ${d}; this is the text of 2024-05-01.`)));
+    expect(r.findings).toEqual([]);
+  });
+
+  it("warns on a note that names neither", async () => {
+    const r = await asOfIsNeverSilentlySubstituted(session(server(() => "Some text is shown.")));
+    expect(r.findings.every((f) => f.id === "I11/note-generic" && f.severity === "warn")).toBe(true);
+    expect(r.findings.length).toBeGreaterThan(0);
+  });
+
+  it("is not applicable when the library has a version for a date (the reply differs)", async () => {
+    const r = await asOfIsNeverSilentlySubstituted(
+      session((tool, args) => (tool === "get" && args["as_of"] !== undefined ? { json: { records: [{ ...record, text: "Older text." }] } } : server(() => undefined)(tool, args))),
+    );
     expect(r.applicable).toBe(false);
   });
 });

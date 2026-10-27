@@ -404,20 +404,20 @@ describe("eval I12", () => {
     const trace = (text: string, isError: boolean, json: unknown = null) => ({ tool: "", args: {}, text, chars: text.length, tokens: 0, ms: 0, isError, json });
     const stub = {
       async call(tool: string) {
-        if (tool === "get_corpus_info") return trace("{}", false, { holdings: [{ document_id: "d", title: "Doc", partial: true }] });
-        if (tool === "search_regulation") return trace("{}", false, { results: [{ id: "regulation://d/a-1", document_id: "d" }] });
-        if (tool === "resolve_citation") {
-          return trace("{}", false, { match: null, coverage_note: "Nothing in this library is numbered 99999 in the document named." });
+        if (tool === "sources") return trace("{}", false, { documents: [{ id: "source://x/d", document_id: "d", framework: "x", title: "Doc", held: "part" }] });
+        if (tool === "search") return trace("{}", false, { results: [{ id: "regulation://d/a-1", document_id: "d" }] });
+        if (tool === "cite") {
+          return trace("{}", false, { match: null, notes: [{ type: "outside_library", text: "Nothing in this library is numbered 99999 in the document named." }] });
         }
-        return trace("No provision has that id. Verify the id with search_regulation.", true);
+        return trace("No provision has that id. Verify the id with search.", true);
       },
     } as unknown as Parameters<typeof declineOnPartialDocumentSaysSo>[0];
     const r = await declineOnPartialDocumentSaysSo(stub);
     expect(r.applicable).toBe(true);
     expect(r.findings.map((f) => f.id).sort()).toEqual([
-      "I12/get_regulation",
+      "I12/cite",
+      "I12/get",
       "I12/related",
-      "I12/resolve_citation",
     ]);
     expect(r.findings.every((f) => f.severity === "fatal")).toBe(true);
   });
