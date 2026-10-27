@@ -107,7 +107,7 @@ jobs:
       # dashboard also polls daily, so the worst case of this step failing is
       # that the bump PR arrives in the morning instead of in a minute.
       # Every repo that pins this server by tag goes here. prudent-corpus
-      # joined prudent-dashboard as a consumer once it split out of it — see
+      # joined prudent-console (then prudent-dashboard) as a consumer once it split out of it — see
       # prudent-corpus#1 — and pins prudent-mcp for the same reason
       # (scripts/build-corpus.ts, scripts/link.ts import file-adapter and
       # validate). CONSUMER_DISPATCH_TOKEN must carry Contents: read and write
@@ -126,7 +126,7 @@ jobs:
             exit 0
           fi
           payload="$(jq -n --arg tag "$TAG" '{event_type: "mcp-released", client_payload: {tag: $tag}}')"
-          for consumer in rhozacc/prudent-dashboard rhozacc/prudent-corpus; do
+          for consumer in rhozacc/prudent-console rhozacc/prudent-corpus; do
             echo "$payload" | gh api "repos/$consumer/dispatches" --input - \
               && echo "Dispatched to $consumer." \
               || echo "::warning::Could not dispatch to $consumer — it picks $TAG up on its own schedule instead."
