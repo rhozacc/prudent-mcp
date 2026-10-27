@@ -10334,6 +10334,922 @@ function holdingsWarnings(regulations, sources) {
   return sources.filter((s) => s.coverage !== void 0 && !held.has(`${s.framework}\0${s.document_id}`)).map((s) => `${s.id}: declares coverage "${s.coverage}" but the corpus holds no regulation records of ${s.document_id}`);
 }
 
+// src/citation/instruments.ts
+var INSTRUMENT_PATTERNS = [
+  {
+    key: "crr",
+    re: /\bcrr\b|\bcapital\s+requirements\s+regulation\b|regulation\s*\(eu\)\s*(no\.?\s*)?575\s*\/\s*2013|\b575\s*\/\s*2013\b/i,
+    acts: ["regulation-2013-575"]
+  },
+  {
+    key: "crd",
+    re: /\bcrd\s*(iv|v)?\b|\bcapital\s+requirements\s+directive\b|directive\s*2013\s*\/\s*36/i,
+    acts: ["directive-2013-36"]
+  }
+];
+var isYearNumber = (s) => /^(?:19(?:5[89]|[6-9]\d)|20\d\d)$/.test(s);
+var ACT_TAG = String.raw`(?:eu|ec|eec|euratom)`;
+var ACT_FORMULA = String.raw`(?:\s+of\s+the\s+european\s+parliament\s+and\s+(?:of\s+)?(?:the\s+)?council` + String.raw`(?:\s+of\s+\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4})?)?`;
+var NUMBERED_ACT = new RegExp(
+  // Each run of white space follows a token of its own, so a long run can be split
+  // between the quantifiers in only one way.
+  String.raw`\b(regulation|directive|decision|guideline)s?\s*` + String.raw`(?:(\(${ACT_TAG}\)|${ACT_TAG}\b)\s*)?(?:no\.?\s*)?` + String.raw`(\d{1,4})\s*\/\s*(\d{1,4})\b` + String.raw`(\s*\/\s*${ACT_TAG}\b)?` + ACT_FORMULA,
+  "gi"
+);
+var NUMBER_FIRST_ACT = new RegExp(
+  // One run of white space at a time, so a long run cannot be split between
+  // quantifiers in more than one way.
+  String.raw`(?<![\d/])(?:no\.?\s*)?(\d{1,4})\s*\/\s*(\d{1,4})\b\s*` + String.raw`(\/\s*${ACT_TAG}\b\s*)?(\(${ACT_TAG}\)\s*)?` + String.raw`(regulation|directive|decision)s?\b` + String.raw`(?!\s*(?:(?:\(${ACT_TAG}\)|${ACT_TAG}\b)\s*)?(?:no\.?\s*)?\d{1,4}\s*\/\s*\d{1,4}\b)` + ACT_FORMULA,
+  "gi"
+);
+function yearAndSerial(kind, first, second) {
+  const yearFirst = kind === "directive" || kind === "decision";
+  if (isYearNumber(first) && !isYearNumber(second)) return [first, second];
+  if (isYearNumber(second) && !isYearNumber(first)) return [second, first];
+  if (isYearNumber(first) && isYearNumber(second)) {
+    return yearFirst || Number(first) >= 2015 ? [first, second] : [second, first];
+  }
+  return yearFirst ? [first, second] : [second, first];
+}
+function numberedActs(text) {
+  const acts = [];
+  const add = (kind, first, second, institution, start, end) => {
+    const tagged = institution !== void 0;
+    if (!tagged && (kind === "guideline" || !isYearNumber(first) && !isYearNumber(second))) return;
+    const [year, serial] = yearAndSerial(kind, first, second);
+    const written = (institution ?? "").replace(/[()\s/]/g, "").toLowerCase();
+    const tag = written === "" ? void 0 : written === "euratom" ? "Euratom" : written.toUpperCase();
+    acts.push({ key: `${kind}-${year}-${serial}`, ...tag === void 0 ? {} : { tag }, start, end });
+  };
+  for (const m of text.matchAll(NUMBERED_ACT)) {
+    const kind = m[1]?.toLowerCase();
+    if (kind === void 0 || m[3] === void 0 || m[4] === void 0) continue;
+    add(kind, m[3], m[4], m[2] ?? m[5], m.index, m.index + m[0].length);
+  }
+  const kindFirst = acts.length;
+  for (const m of text.matchAll(NUMBER_FIRST_ACT)) {
+    const kind = m[5]?.toLowerCase();
+    const end = m.index + m[0].length;
+    if (kind === void 0 || m[1] === void 0 || m[2] === void 0) continue;
+    if (acts.slice(0, kindFirst).some((a) => m.index < a.end && a.start < end)) continue;
+    add(kind, m[1], m[2], m[3] ?? m[4], m.index, end);
+  }
+  return acts.sort((a, b) => a.start - b.start);
+}
+var numberedActKeys = (text) => numberedActs(text).map((a) => a.key);
+var canonicalInstrument = (key) => INSTRUMENT_PATTERNS.find((p) => p.acts.includes(key))?.key ?? key;
+function instrumentSpans(text) {
+  const acts = numberedActs(text);
+  const spans = [];
+  for (const { key, re } of INSTRUMENT_PATTERNS) {
+    for (const m of text.matchAll(new RegExp(re.source, "gi"))) {
+      const start = m.index;
+      const end = start + m[0].length;
+      if (acts.some((a) => a.start <= start && end <= a.end && canonicalInstrument(a.key) !== key)) continue;
+      spans.push({ key, span: m[0], start, end });
+    }
+  }
+  for (const act of acts) {
+    spans.push({
+      key: canonicalInstrument(act.key),
+      ...act.tag === void 0 ? {} : { tag: act.tag },
+      span: text.slice(act.start, act.end),
+      start: act.start,
+      end: act.end
+    });
+  }
+  return spans;
+}
+var EMPOWERMENTS = {
+  "regulation-2021-930": {
+    kind: "a regulatory technical standard \u2014 a Commission delegated act, not a legislative one",
+    empoweredBy: "Article 181(3)(a) and Article 182(4)(a) of the CRR",
+    visibleAt: "regulation://crr/article-181"
+  },
+  "regulation-2010-1093": {
+    kind: "the Regulation establishing the EBA; its Article 16 is the basis on which every EBA guideline in this library is issued, and the source of their comply-or-explain effect",
+    visibleAt: "regulation://crr/article-181"
+  }
+};
+var mentionCache = /* @__PURE__ */ new WeakMap();
+function instrumentMentions(regulations) {
+  const cached2 = mentionCache.get(regulations);
+  if (cached2 !== void 0) return cached2;
+  const index = /* @__PURE__ */ new Map();
+  for (const r of regulations) {
+    const seen = new Set(numberedActKeys(r.text).map(canonicalInstrument));
+    for (const key of seen) {
+      const at = index.get(key);
+      if (at === void 0) index.set(key, [r.id]);
+      else at.push(r.id);
+    }
+  }
+  mentionCache.set(regulations, index);
+  return index;
+}
+function heldNeedles(instrument) {
+  const named = INSTRUMENT_PATTERNS.find((p) => p.key === instrument);
+  return [instrument, ...named?.acts ?? []].flatMap((key) => {
+    const m = /^([a-z]+)-(\d{2,4})-(\d+)$/.exec(key);
+    return m === null ? [key.replace(/[^a-z0-9]/g, "")] : [`${m[1]}${m[2]}${m[3]}`, `${m[1]}${m[3]}${m[2]}`];
+  });
+}
+var heldDocumentsCache = /* @__PURE__ */ new WeakMap();
+function heldInstrumentDocuments(regulations, instrument) {
+  const byInstrument = heldDocumentsCache.get(regulations) ?? /* @__PURE__ */ new Map();
+  heldDocumentsCache.set(regulations, byInstrument);
+  const known = byInstrument.get(instrument);
+  if (known !== void 0) return known;
+  const needles = heldNeedles(instrument);
+  const docs = /* @__PURE__ */ new Set();
+  for (const r of regulations) {
+    const hay = `${r.framework}${r.document_id}${idDocSegment(r.id)}`.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (needles.some((n) => hay.includes(n))) docs.add(r.document_id);
+  }
+  byInstrument.set(instrument, docs);
+  return docs;
+}
+var corpusHolds = (regulations, instrument) => heldInstrumentDocuments(regulations, instrument).size > 0;
+
+// src/citation/tokens.ts
+var CITATION_EXPANSIONS = {
+  art: "article",
+  arts: "articles",
+  par: "paragraph",
+  para: "paragraph",
+  paras: "paragraphs",
+  gl: "guidelines"
+};
+function citationTokens(text) {
+  return text.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 0).map((t) => CITATION_EXPANSIONS[t] ?? t);
+}
+var STRUCTURAL = /* @__PURE__ */ new Set([
+  "article",
+  "articles",
+  "paragraph",
+  "paragraphs",
+  "point",
+  "points",
+  "section",
+  "sections",
+  "chapter",
+  "chapters",
+  "annex",
+  "annexes",
+  "subparagraph",
+  "letter",
+  "recital",
+  "part",
+  "title",
+  "guidelines",
+  "guideline",
+  "guide",
+  "no",
+  "of",
+  "the",
+  "in",
+  "and",
+  "on",
+  "at",
+  "under"
+]);
+var CONNECTIVES = /* @__PURE__ */ new Set(["of", "the", "in", "on", "at", "and", "under", "from", "an", "to", "for", "with", "by"]);
+var withoutConnectives = (tokens) => tokens.filter((t) => !CONNECTIVES.has(t));
+var spineOf = (tokens) => tokens.filter((t) => /^\d+[a-z]{0,2}$/.test(t) || /^[a-z]$/.test(t));
+var spineIsFaithful = (tokens) => tokens.every((t) => !/\d/.test(t) || /^\d+[a-z]{0,2}$/.test(t));
+var arraysEqual = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+var startsWithTokens = (haystack, prefix) => prefix.length < haystack.length && prefix.every((v, i) => v === haystack[i]);
+function windowAt(tokens, window) {
+  if (window.length === 0 || window.length > tokens.length) return -1;
+  for (let i = 0; i + window.length <= tokens.length; i++) {
+    let hit = true;
+    for (let j = 0; j < window.length; j++) {
+      if (tokens[i + j] !== window[j]) {
+        hit = false;
+        break;
+      }
+    }
+    if (hit) return i;
+  }
+  return -1;
+}
+
+// src/citation/names.ts
+var DOCUMENT_IDENTIFIER = /\b((?:[A-Za-z]{1,10}[\s/-]+){1,3})((?:19|20)\d{2})\s*[/-]\s*(\d{1,4})\b(?![/-]\d)/g;
+var NAME_FILLER = /* @__PURE__ */ new Set([
+  "a",
+  "an",
+  "this",
+  "that",
+  "these",
+  "those",
+  "such",
+  "said",
+  "same",
+  "its",
+  "their",
+  "our",
+  "any",
+  "each",
+  "every",
+  "all",
+  "both",
+  "other",
+  "another",
+  "above",
+  "below",
+  "herein",
+  "thereof",
+  "as",
+  "by",
+  "for",
+  "with",
+  "from",
+  "to",
+  "or",
+  "per",
+  "see",
+  "also",
+  "cited",
+  "referred",
+  "mentioned",
+  "pursuant",
+  "according",
+  "regulation",
+  "regulations",
+  "directive",
+  "directives",
+  "decision",
+  "decisions",
+  "act",
+  "acts",
+  "rule",
+  "rules",
+  "standard",
+  "standards",
+  "technical",
+  "document",
+  "documents",
+  "text",
+  "texts",
+  "law",
+  "framework",
+  "provision",
+  "provisions",
+  "paragraphs",
+  "item",
+  "items",
+  "clause",
+  "clauses",
+  "para",
+  "art",
+  "ibid",
+  "id",
+  // How a provision is pointed at ("as required by", "laid down in").
+  "required",
+  "requires",
+  "specified",
+  "set",
+  "out",
+  "laid",
+  "down",
+  "provided",
+  "defined",
+  "stated",
+  "described",
+  // Where inside a provision.
+  "first",
+  "second",
+  "third",
+  "fourth",
+  "fifth",
+  "last",
+  "final",
+  "preceding",
+  "following",
+  "previous",
+  "next",
+  "sentence",
+  "sentences",
+  "indent",
+  "indents",
+  "subparagraphs",
+  "subpoint",
+  "subpoints",
+  "limb",
+  "limbs",
+  "introductory",
+  "wording",
+  "version",
+  "applicable",
+  "relevant",
+  "current",
+  // How one act relates to another ("as amended by", "supplementing").
+  "amended",
+  "supplemented",
+  "implemented",
+  "replaced",
+  "corrected",
+  "repealed",
+  "amending",
+  "supplementing",
+  "repealing",
+  "replacing",
+  "correcting",
+  // How an act is written: the kind, the institution and the formal formula.
+  "reg",
+  "regs",
+  "dir",
+  "eu",
+  "ec",
+  "eec",
+  "euratom",
+  "european",
+  "parliament",
+  "council",
+  "commission",
+  "union",
+  "delegated",
+  "implementing",
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december"
+]);
+var ROMAN_NUMERALS = /* @__PURE__ */ new Set(["ii", "iii", "iv", "vi", "vii", "viii", "ix", "xi", "xii"]);
+var unexplainedWords = (tokens) => tokens.filter(
+  (t) => !STRUCTURAL.has(t) && !NAME_FILLER.has(t) && !ROMAN_NUMERALS.has(t) && !/^\d/.test(t) && t.length > 1
+);
+var NAME_CONNECTORS = /* @__PURE__ */ new Set(["of", "in", "under", "from"]);
+function unrecognisedNameTail(tokens) {
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    if (!NAME_CONNECTORS.has(tokens[i] ?? "")) continue;
+    const words = unexplainedWords(tokens.slice(i + 1));
+    return words.length > 0 ? words : null;
+  }
+  return null;
+}
+function unplacedIdentifier(text, rest) {
+  for (const m of text.matchAll(DOCUMENT_IDENTIFIER)) {
+    const [, lead, year, serial] = m;
+    if (lead === void 0 || year === void 0 || serial === void 0) continue;
+    const words = lead.split(/[\s/-]+/).filter((w) => w !== "");
+    const plain = (w) => STRUCTURAL.has((w ?? "").toLowerCase()) || NAME_FILLER.has((w ?? "").toLowerCase());
+    while (words.length > 0 && plain(words[0])) words.shift();
+    if (words.length === 0 || words.length > 2) continue;
+    if (words.some((w) => plain(w))) continue;
+    if (windowAt(rest, [year, serial]) !== -1) return `${words.join("/")}/${year}/${serial}`;
+  }
+  return null;
+}
+
+// src/citation/aliases.ts
+function documentAliases(regulations, holdings) {
+  const index = /* @__PURE__ */ new Map();
+  const add = (raw, docId, derived = false) => {
+    const tokens = citationTokens(raw);
+    if (tokens.length === 0) return;
+    const key = tokens.join(" ");
+    const slot = index.get(key);
+    if (slot === void 0) index.set(key, { tokens, docs: /* @__PURE__ */ new Set([docId]), ...derived ? { derived } : {} });
+    else if (derived !== true || slot.derived === true) slot.docs.add(docId);
+  };
+  for (const r of regulations) {
+    add(r.framework, r.document_id);
+    add(r.document_id, r.document_id);
+    add(idDocSegment(r.id), r.document_id);
+    add(`${r.framework} ${r.document_id}`, r.document_id);
+  }
+  for (const h of holdings ?? []) {
+    if (h.title === void 0) continue;
+    for (const variant of titleNames(h.title)) add(variant, h.document_id, true);
+  }
+  return index;
+}
+function titleNames(title) {
+  const unbracketed = (t) => t.replace(/\([^)]*\)/g, " ");
+  const head = title.split(/\s[\u2014\u2013-]\s|:\s|\s(?:under|pursuant\s+to|in\s+accordance\s+with)\s+Articles?\b/i)[0] ?? title;
+  const named = [...title.matchAll(/\(([^)]*)\)/g)].map((m) => (m[1] ?? "").replace(/["'\u2018\u2019\u201c\u201d]/g, " "));
+  const variants = [title, unbracketed(title), head, unbracketed(head), ...named];
+  const words = (t) => citationTokens(t).filter((w) => !STRUCTURAL.has(w) && !/^\d+$/.test(w)).length;
+  return [...new Set(variants.map((v) => v.replace(/\s+/g, " ").trim()))].filter((v) => words(v) >= 3);
+}
+function scopeToDocument(tokens, index) {
+  let best = null;
+  let bestAt = -1;
+  for (const entry of index.values()) {
+    const at = windowAt(tokens, entry.tokens);
+    if (at === -1) continue;
+    const better = best === null || entry.tokens.length > best.tokens.length || entry.tokens.length === best.tokens.length && entry.docs.size < best.docs.size;
+    if (better) {
+      best = entry;
+      bestAt = at;
+    }
+  }
+  if (best === null) return { docs: null, rest: tokens, derived: false };
+  let rest = [...tokens.slice(0, bestAt), ...tokens.slice(bestAt + best.tokens.length)];
+  for (const other of index.values()) {
+    if (other === best || [...other.docs].some((d) => !best.docs.has(d))) continue;
+    for (let at = windowAt(rest, other.tokens); at !== -1; at = windowAt(rest, other.tokens)) {
+      rest = [...rest.slice(0, at), ...rest.slice(at + other.tokens.length)];
+    }
+  }
+  return { docs: best.docs, rest, derived: best.derived === true };
+}
+function withInstrumentNames(index, regulations, text) {
+  const spans = instrumentSpans(text);
+  if (spans.length === 0) return index;
+  const named = new Map(index);
+  for (const { key, span } of spans) {
+    const docs = heldInstrumentDocuments(regulations, key);
+    const tokens = citationTokens(span);
+    if (docs.size === 0 || tokens.length === 0) continue;
+    const id = tokens.join(" ");
+    const slot = named.get(id);
+    if (slot === void 0) named.set(id, { tokens, docs, derived: true });
+    else if (slot.derived === true) named.set(id, { ...slot, docs: /* @__PURE__ */ new Set([...slot.docs, ...docs]) });
+  }
+  return named;
+}
+function accountedFor(text, rest, chosen, index, isContext) {
+  for (const n of instrumentSpans(text)) {
+    if (!isContext(n) && windowAt(rest, citationTokens(n.span)) !== -1) return false;
+  }
+  let remaining = rest;
+  for (const entry of index.values()) {
+    if (![...chosen].every((d) => entry.docs.has(d))) continue;
+    for (let at = windowAt(remaining, entry.tokens); at !== -1; at = windowAt(remaining, entry.tokens)) {
+      remaining = [...remaining.slice(0, at), ...remaining.slice(at + entry.tokens.length)];
+    }
+  }
+  return unexplainedWords(remaining).length === 0;
+}
+
+// src/citation/described.ts
+var SUBORDINATING_CUE = /\b(?:(?:as\s+)?(?:amended|supplemented|implemented|replaced|corrected|repealed)\s+by|referred\s+to\s+in|pursuant\s+to|in\s+accordance\s+with|(?:adopted|issued)\s+under|within\s+the\s+meaning\s+of|cited\s+in|mentioned\s+in|see\s+also)\s+(?:(?:the|a|an|commission|council|delegated|implementing)\s+)*$/i;
+var KIND_GAP = String.raw`[\s\-‐-―]+`;
+var kindWords = (...words) => words.join(KIND_GAP);
+var DESCRIBED_INSTRUMENTS = [
+  { key: "rts", re: /\bR\.T\.S\b\.?|\bRTSs?\b/gi, held: [["rts"]] },
+  {
+    key: "rts",
+    re: new RegExp(`\\b${kindWords("regulatory", "technical", "standards?")}\\b`, "gi"),
+    held: [["rts"], ["regulatory", "technical", "standard"], ["regulatory", "technical", "standards"]]
+  },
+  { key: "its", re: /\bITSs?\b/g, held: [["its"]], pronoun: true },
+  { key: "its", re: /\bI\.T\.S\b\.?/gi, held: [["its"]] },
+  // "its" cannot be a pronoun straight after an article ("the its on reporting").
+  // Not "that": "a rule that its text amends" is ordinary English. The article is
+  // matched, not looked behind for: a look-behind over white space is tried at every
+  // position of a run of it, which made a long run cost the square of its length.
+  { key: "its", re: /\b(?:the|an?|this)\s+(its)\b/gi, held: [["its"]], inGroup: true },
+  {
+    key: "its",
+    re: new RegExp(`\\b${kindWords("implementing", "technical", "standards?")}\\b`, "gi"),
+    held: [["its"], ["implementing", "technical", "standard"], ["implementing", "technical", "standards"]]
+  },
+  {
+    // Not when the word that makes it one of the two above stands before it: that phrase
+    // is one of them, and `describedInstruments` leaves it out where it lies inside one.
+    key: "technical-standards",
+    re: new RegExp(`\\b${kindWords("technical", "standards?")}\\b`, "gi"),
+    held: [["rts"], ["its"], ["technical", "standard"], ["technical", "standards"]]
+  },
+  {
+    key: "delegated",
+    re: new RegExp(`\\b(?:commission${KIND_GAP})?delegated${KIND_GAP}(?:regulation|decision|act)s?\\b`, "gi"),
+    held: [["delegated"]]
+  },
+  {
+    key: "implementing",
+    re: new RegExp(`\\b(?:commission${KIND_GAP})?implementing${KIND_GAP}(?:regulation|decision|act)s?\\b`, "gi"),
+    held: [["implementing"]]
+  },
+  ...["regulation", "guideline", "decision", "recommendation"].map((kind) => ({
+    key: `ecb-${kind}`,
+    // The ECB, its dotted acronym or its full name, with or without a possessive.
+    re: new RegExp(
+      `(?:\\becb|\\bE\\.C\\.B\\b\\.?|\\beuropean${KIND_GAP}central${KIND_GAP}bank)(?:['\u2019]s)?\\s+${kind}s?\\b`,
+      "gi"
+    ),
+    held: [["ecb", kind], ["ecb", `${kind}s`], ["european", "central", "bank", kind], ["european", "central", "bank", `${kind}s`]],
+    issuer: "ecb"
+  })),
+  {
+    key: "ecb-guideline",
+    re: new RegExp(
+      `\\bguidelines?\\s+of\\s+the\\s+(?:ecb|european${KIND_GAP}central${KIND_GAP}bank)\\b`,
+      "gi"
+    ),
+    held: [["ecb", "guideline"], ["ecb", "guidelines"]],
+    issuer: "ecb"
+  }
+];
+var DESCRIPTOR_END = /[,;:()[\]"\u201c\u201d]|\s[-\u2013\u2014]\s|\b(?:art(?:icle)?s?|para(?:graph)?s?|sections?|chapters?|annex(?:es)?|points?)\.?\s*\(?\d|\s(?:under|referred|cited|mentioned|pursuant|adopted|according|per|as)\b/i;
+var SENTENCE_END = /\.(?=\s+[A-Z]|\s*$)/;
+function nameStartsAt(after, names) {
+  if (names.length === 0) return -1;
+  const words = [...after.matchAll(/[A-Za-z0-9]+/g)].map((m) => ({
+    at: m.index,
+    token: CITATION_EXPANSIONS[m[0].toLowerCase()] ?? m[0].toLowerCase()
+  }));
+  for (let i = 0; i < words.length; i++) {
+    if (names.some((n) => n.length > 0 && n.every((t, j) => words[i + j]?.token === t))) return words[i]?.at ?? -1;
+  }
+  return -1;
+}
+function descriptorQuote(text, start, matched, names) {
+  const after = text.slice(start + matched.length);
+  const stops = [after.search(DESCRIPTOR_END), after.search(SENTENCE_END), nameStartsAt(after, names)].filter((n) => n !== -1);
+  const own = `${matched}${stops.length === 0 ? after : after.slice(0, Math.min(...stops))}`;
+  const body = own.replace(/\s+/g, " ").trim().replace(/(?:\s+(?:of|in|on|under|from|and|or|to|the|an?|as|by|at|for|with|see))+$/i, "").replace(/[:;,\s]+$/, "");
+  const quote = /(?:\b[A-Za-z]\.){2,}$/.test(body) ? body : body.replace(/\.+$/, "");
+  return quote.length === 0 || quote.length > 80 ? matched : quote;
+}
+var NUMBER_AFTER_DESCRIPTOR = new RegExp(
+  String.raw`^\s*(?:\(${ACT_TAG}\)\s*)?(?:no\.?\s*)?\d{1,4}\s*\/\s*\d{1,4}\b` + String.raw`|^\s*(?:\(\s*)?[A-Za-z]{2,10}(?:\s*\/\s*[A-Za-z]{2,10})*\s*\/\s*(?:19|20)\d{2}\s*\/\s*\d{1,4}\b`,
+  "i"
+);
+function numberGateReads(acts, start, matched) {
+  const kindAt = start + matched.search(/[A-Za-z]+$/);
+  return acts.some((a) => a.start === kindAt);
+}
+function describedInstruments(text, names = []) {
+  const caseLost = !/[a-z]/.test(text);
+  const acts = numberedActs(text);
+  const found = [];
+  const cut = [];
+  const all = DESCRIBED_INSTRUMENTS.flatMap(
+    (entry) => entry.pronoun === true && caseLost ? [] : [...text.matchAll(entry.re)].map((m) => {
+      const matched = entry.inGroup === true ? m[1] ?? "" : m[0];
+      return { entry, start: m.index + m[0].length - matched.length, matched };
+    })
+  );
+  const qualified = all.filter((h) => h.entry.key === "rts" || h.entry.key === "its");
+  const hits = all.filter(
+    (h) => h.entry.key !== "technical-standards" || !qualified.some((q) => q.start <= h.start && h.start + h.matched.length <= q.start + q.matched.length)
+  ).sort((a, b) => a.start - b.start || b.matched.length - a.matched.length);
+  for (const { entry: { key, held, issuer }, start, matched } of hits) {
+    const end = start + matched.length;
+    if (numberGateReads(acts, start, matched)) continue;
+    const id = /^\s*\/\s*(\d{4})\s*\/\s*(\d{1,4})\b/.exec(text.slice(end));
+    if (id !== null) {
+      const lead = /(?:\b[A-Za-z]+\s*\/\s*)*$/.exec(text.slice(0, start))?.[0] ?? "";
+      const whole = `${lead}${matched}${id[0]}`.replace(/\s+/g, "");
+      if (!found.some((f) => f.quote === whole)) {
+        found.push({
+          key,
+          quote: whole,
+          held: [citationTokens(`${matched} ${id[1] ?? ""} ${id[2] ?? ""}`)],
+          identifier: true,
+          numbered: true
+        });
+      }
+      cut.push([start - lead.length, end + id[0].length]);
+      continue;
+    }
+    if (found.some((f) => f.key === key && !f.identifier)) {
+      cut.push([start, end]);
+      continue;
+    }
+    const quote = descriptorQuote(text, start, matched, names);
+    if (!found.some((f) => f.quote === quote)) {
+      const numbered = NUMBER_AFTER_DESCRIPTOR.test(text.slice(end));
+      found.push({ key, quote, held, identifier: false, numbered, ...issuer === void 0 ? {} : { issuer } });
+    }
+    cut.push([start, end]);
+  }
+  const merged = [];
+  for (const [from, to] of cut.sort((a, b) => a[0] - b[0] || a[1] - b[1])) {
+    const last = merged[merged.length - 1];
+    if (last !== void 0 && from <= last[1]) last[1] = Math.max(last[1], to);
+    else merged.push([from, to]);
+  }
+  let residual = text;
+  for (const [from, to] of merged.reverse()) residual = `${residual.slice(0, from)} ${residual.slice(to)}`;
+  return { found, residual };
+}
+function holdsKind(regulations, held) {
+  return regulations.some(
+    (r) => [r.framework, r.document_id, idDocSegment(r.id), `${r.framework} ${r.document_id}`].some((field) => {
+      const tokens = citationTokens(field);
+      return held.some((window) => windowAt(tokens, window) !== -1);
+    })
+  );
+}
+
+// src/citation/points.ts
+var REFERENCE_WORD = /(?:^|[\s(])(?:articles?|paragraphs?|subparagraphs?|points?|letters?|sections?|chapters?|annex(?:es)?|nos?|and|or|to|of|in|under|with|by|see|from|than)$/i;
+function startsAnItem(text, at, headingOk) {
+  const before = text.slice(0, at).replace(/[ \t]+$/, "").replace(/(?:\s*[▼►◄][A-Z]\d*)+[ \t]*$/, "");
+  if (before === "" || /[\r\n]$/.test(before)) return true;
+  const t = before.replace(/\s+$/, "");
+  if (/[;:.]$/.test(t) || /[;:.]\s+(?:and|or)$/i.test(t)) return true;
+  return headingOk && /[A-Za-z]$/.test(t) && !REFERENCE_WORD.test(t);
+}
+var isReference = (text, at) => REFERENCE_WORD.test(text.slice(0, at).replace(/\s+$/, ""));
+var MARKER_PATTERNS = {
+  // Priority order: when two styles chain equally well, the first one is read.
+  num: [
+    ["dot", /(?<![\w.,/-])(\d{1,3})\.(?=\s|$)/g],
+    ["paren", /\((\d{1,3})\)/g],
+    ["rparen", /(?<![\w(])(\d{1,3})\)/g]
+  ],
+  alpha: [
+    ["paren", /\(([a-z])\)/g],
+    ["rparen", /(?<![\w(])([a-z])\)/g]
+  ]
+};
+function marksOf(text, kind, style, lo, hi, anywhere = false) {
+  const pattern = MARKER_PATTERNS[kind].find(([s]) => s === style)[1];
+  const out = [];
+  for (const m of text.matchAll(pattern)) {
+    const start = m.index ?? 0;
+    const end = start + m[0].length;
+    if (start < lo || end > hi || m[1] === void 0) continue;
+    if (anywhere ? isReference(text, start) : !startsAnItem(text, start, style === "dot")) continue;
+    out.push({ value: m[1], start, end });
+  }
+  return out;
+}
+function itemRun(text, kind, lo, hi) {
+  let best = [];
+  for (const [style] of MARKER_PATTERNS[kind]) {
+    const marks = marksOf(text, kind, style, lo, hi);
+    const run = [];
+    let pos = lo;
+    for (const m of marks) {
+      const want = kind === "num" ? String(run.length + 1) : String.fromCharCode(97 + run.length);
+      if (m.start >= pos && m.value === want) {
+        run.push(m);
+        pos = m.end;
+      }
+    }
+    const first = run[0];
+    if (first !== void 0 && (best[0] === void 0 || first.start < best[0].start)) best = run;
+  }
+  return best;
+}
+var ROMAN_LETTER = /* @__PURE__ */ new Set(["i", "v", "x"]);
+function textCarriesPoint(text, segments) {
+  if (segments.length === 0) return "unknown";
+  let lo = 0;
+  let hi = text.length;
+  let prev = null;
+  for (const seg of segments) {
+    const kind = /^\d{1,3}$/.test(seg) ? "num" : /^[a-z]$/.test(seg) ? "alpha" : null;
+    if (kind === null) return "unknown";
+    if (prev === "alpha" && kind === "alpha" && ROMAN_LETTER.has(seg)) return "unknown";
+    const index = kind === "num" ? Number(seg) : seg.charCodeAt(0) - 96;
+    if (index < 1) return "unknown";
+    const run = itemRun(text, kind, lo, hi);
+    const found = run[index - 1];
+    if (found !== void 0) {
+      lo = found.end;
+      hi = run[index]?.start ?? hi;
+      prev = kind;
+      continue;
+    }
+    if (run.length === 0 && itemRun(text, kind, 0, text.length).length === 0) return "unknown";
+    const stray = MARKER_PATTERNS[kind].some(
+      ([style]) => marksOf(text, kind, style, lo, hi, true).some((m) => m.value === (kind === "num" ? String(index) : seg))
+    );
+    return stray ? "unknown" : "no";
+  }
+  return "yes";
+}
+
+// src/citation/resolve.ts
+var MAX_CANDIDATES = 10;
+var asCandidate = (r) => ({
+  id: r.id,
+  citation: r.citation,
+  document_id: r.document_id
+});
+var instrumentLabel = (instrument, tag) => {
+  const m = /^(regulation|directive|decision|guideline)-(\d{2,4})-(\d+)$/.exec(instrument);
+  if (m === null) return instrument.toUpperCase();
+  const kind = `${(m[1] ?? "").charAt(0).toUpperCase()}${(m[1] ?? "").slice(1)}`;
+  const year = m[2] ?? "";
+  const serial = m[3] ?? "";
+  const modern = Number(year) >= 2015;
+  const institution = tag ?? (modern ? "EU" : void 0);
+  if (modern) return `${kind} (${institution}) ${year}/${serial}`;
+  if (m[1] === "regulation") return `${kind}${institution === void 0 ? "" : ` (${institution})`} No ${serial}/${year}`;
+  return `${kind} ${year}/${serial}${institution === void 0 ? "" : `/${institution}`}`;
+};
+function ambiguousResolution(text, hits) {
+  const docs = new Set(hits.map((r) => r.document_id));
+  return {
+    match: null,
+    confidence: "none",
+    ambiguous: true,
+    candidates: hits.slice(0, MAX_CANDIDATES).map(asCandidate),
+    unmatched_segments: [],
+    coverage_note: `"${text}" matches ${hits.length} provisions across ${docs.size} document(s)${hits.length > MAX_CANDIDATES ? ` (first ${MAX_CANDIDATES} listed)` : ""}. Name the document to disambiguate, or open one of the candidates.`
+  };
+}
+function withoutLooseIssuerDescriptor(regulations, text, holdings) {
+  const index = documentAliases(regulations, holdings);
+  const described = describedInstruments(text, [...index.values()].map((e) => e.tokens));
+  const unheld = described.found.filter((d) => !holdsKind(regulations, d.held));
+  if (unheld.length === 0) return null;
+  if (!unheld.every((d) => d.issuer !== void 0 && !d.identifier && !d.numbered)) return null;
+  const residualTokens = citationTokens(described.residual);
+  if (spineOf(residualTokens.filter((t) => !STRUCTURAL.has(t))).length === 0) return null;
+  if (instrumentSpans(text).some((n) => corpusHolds(regulations, n.key))) return null;
+  const namedDocs = scopeToDocument(residualTokens, index).docs;
+  if (namedDocs === null) return null;
+  const frameworks = new Set(regulations.filter((r) => namedDocs.has(r.document_id)).map((r) => r.framework.toLowerCase()));
+  if (frameworks.size !== 1 || !unheld.every((d) => frameworks.has(d.issuer ?? ""))) return null;
+  return described.residual;
+}
+function resolveCitationDetailed(regulations, text, holdings) {
+  const none = (extra = {}) => ({
+    match: null,
+    confidence: "none",
+    candidates: [],
+    ambiguous: false,
+    unmatched_segments: [],
+    ...extra
+  });
+  const queryTokens = citationTokens(text);
+  if (queryTokens.length === 0) return none();
+  const withoutDescriptor = withoutLooseIssuerDescriptor(regulations, text, holdings);
+  if (withoutDescriptor !== null) return resolveCitationDetailed(regulations, withoutDescriptor, holdings);
+  const spans = instrumentSpans(text);
+  const subordinate = (n) => SUBORDINATING_CUE.test(text.slice(0, n.start)) && spans.some((o) => o.start < n.start && corpusHolds(regulations, o.key));
+  const attempt = (index2) => {
+    const scope = scopeToDocument(queryTokens, index2);
+    const pool2 = scope.docs === null ? regulations : regulations.filter((r) => scope.docs?.has(r.document_id) === true);
+    const bare2 = (tokens) => scopeToDocument(tokens, index2).rest;
+    const nq = scope.rest.join(" ");
+    const exactHits2 = pool2.filter((r) => bare2(citationTokens(r.citation)).join(" ") === nq);
+    const aliasHits2 = exactHits2.length > 0 ? [] : pool2.filter((r) => (r.citation_aliases ?? []).some((a) => bare2(citationTokens(a)).join(" ") === nq));
+    const core = (tokens) => withoutConnectives(bare2(tokens)).join(" ");
+    const nqCore = withoutConnectives(scope.rest).join(" ");
+    const coreHits2 = exactHits2.length > 0 || aliasHits2.length > 0 || nqCore === nq ? [] : pool2.filter((r) => core(citationTokens(r.citation)) === nqCore);
+    const coreAliasHits2 = exactHits2.length > 0 || aliasHits2.length > 0 || coreHits2.length > 0 || nqCore === nq ? [] : pool2.filter((r) => (r.citation_aliases ?? []).some((al) => core(citationTokens(al)) === nqCore));
+    return { index: index2, ...scope, pool: pool2, bare: bare2, nq, exactHits: exactHits2, aliasHits: aliasHits2, coreHits: coreHits2, coreAliasHits: coreAliasHits2 };
+  };
+  let scoped = attempt(withInstrumentNames(documentAliases(regulations, holdings), regulations, text));
+  if (scoped.derived && scoped.docs !== null && scoped.exactHits.length === 0 && scoped.aliasHits.length === 0 && scoped.coreHits.length === 0 && scoped.coreAliasHits.length === 0 && !accountedFor(text, scoped.rest, scoped.docs, scoped.index, (n) => !corpusHolds(regulations, n.key) && subordinate(n))) {
+    scoped = attempt(documentAliases(regulations));
+  }
+  const { index, docs, rest, pool, bare, exactHits, aliasHits, coreHits, coreAliasHits } = scoped;
+  if (exactHits.length === 1) {
+    return { ...none(), match: exactHits[0] ?? null, confidence: "exact" };
+  }
+  if (exactHits.length > 1) return ambiguousResolution(text, exactHits);
+  if (aliasHits.length === 1) {
+    const hit = aliasHits[0];
+    return {
+      ...none(),
+      match: hit ?? null,
+      confidence: "alias",
+      coverage_note: hit === void 0 ? void 0 : `Matched an alias. This provision's own citation is "${hit.citation}" \u2014 quote that, not "${text}".`
+    };
+  }
+  if (aliasHits.length > 1) return ambiguousResolution(text, aliasHits);
+  if (coreHits.length === 1) return { ...none(), match: coreHits[0] ?? null, confidence: "segment" };
+  if (coreHits.length > 1) return ambiguousResolution(text, coreHits);
+  if (coreAliasHits.length === 1) {
+    const hit = coreAliasHits[0];
+    return {
+      ...none(),
+      match: hit ?? null,
+      confidence: "alias",
+      coverage_note: hit === void 0 ? void 0 : `Matched an alias. This provision's own citation is "${hit.citation}" \u2014 quote that, not "${text}".`
+    };
+  }
+  if (coreAliasHits.length > 1) return ambiguousResolution(text, coreAliasHits);
+  const insideName = (n) => docs !== null && windowAt(rest, citationTokens(n.span)) === -1;
+  const unheldMention = spans.find((n) => !corpusHolds(regulations, n.key) && !insideName(n) && !subordinate(n));
+  if (unheldMention !== void 0) {
+    const gated = unheldMention.key;
+    const what = EMPOWERMENTS[gated];
+    const byCite = regulations.filter((r) => (r.cites ?? []).some((c) => citationTokens(c.framework).join("") === gated)).map((r) => r.id);
+    const mentions = [
+      .../* @__PURE__ */ new Set([...byCite, ...instrumentMentions(regulations).get(gated) ?? []])
+    ];
+    const shown = mentions.slice(0, 3);
+    return none({
+      coverage_note: `This library holds no ${instrumentLabel(gated, unheldMention.tag)}. Nothing was matched, rather than sourcing a same-numbered provision from another document. ` + (what === void 0 ? "" : `It is ${what.kind}` + (what.empoweredBy === void 0 ? "" : `, adopted under ${what.empoweredBy}`) + ". " + (what.visibleAt === void 0 ? "" : `That relationship is stated in the text at ${what.visibleAt}. `)) + (shown.length > 0 ? `${mentions.length} held provision(s) name it: ${shown.join(", ")}${mentions.length > shown.length ? ", \u2026" : ""} \u2014 open those for what this library says about it. Its own text is not here, so do not state its requirements from this library.` : "The library's overview lists the documents it holds.")
+    });
+  }
+  const heldMention = spans.find((n) => corpusHolds(regulations, n.key));
+  const instrument = heldMention?.key ?? null;
+  const instrumentName2 = heldMention === void 0 ? null : instrumentLabel(heldMention.key, heldMention.tag);
+  const described = describedInstruments(text, [...index.values()].map((e) => e.tokens));
+  const unheld = described.found.filter((d) => !holdsKind(regulations, d.held));
+  const placeable = spineOf(citationTokens(described.residual).filter((t) => !STRUCTURAL.has(t))).length > 0;
+  const namedDocs = unheld.length > 0 && placeable ? scopeToDocument(citationTokens(described.residual), index).docs : null;
+  const looselyDescribed = (() => {
+    if (namedDocs === null || docs === null || instrumentName2 !== null) return false;
+    if (!unheld.every((d) => d.issuer !== void 0 && !d.identifier && !d.numbered)) return false;
+    const frameworks = new Set(regulations.filter((r) => namedDocs.has(r.document_id)).map((r) => r.framework.toLowerCase()));
+    return frameworks.size === 1 && unheld.every((d) => frameworks.has(d.issuer ?? ""));
+  })();
+  if (unheld.length > 0 && placeable && !looselyDescribed) {
+    const quoted = unheld.map((d) => `"${d.quote}"`).join(" and ");
+    const identifiers = unheld.every((d) => d.identifier);
+    const heldNames = [];
+    if (instrumentName2 !== null) heldNames.push(instrumentName2);
+    const instrumentDocs = instrument === null ? /* @__PURE__ */ new Set() : heldInstrumentDocuments(regulations, instrument);
+    for (const d of namedDocs ?? []) {
+      if (instrumentDocs.has(d)) continue;
+      if (!heldNames.some((n) => n.toLowerCase() === d.toLowerCase())) heldNames.push(d);
+    }
+    const group = instrument === null && (namedDocs?.size ?? 0) > 1;
+    const heldList = group ? `documents under a framework or name it shares (${heldNames.slice(0, 3).join(", ")}${heldNames.length > 3 ? ", \u2026" : ""})` : `a document this library holds (${heldNames.slice(0, 3).join(", ")})`;
+    const numberedDescription = !identifiers && unheld.some((d) => d.numbered);
+    const wayOut = (identifiers ? "" : numberedDescription ? 'Cite the instrument in full, kind then "(EU)" then its number (for example "Regulation (EU) YYYY/NNN"), so this library can say whether it is held; ' : "Cite the instrument by number so this library can say whether it is held; ") + (identifiers ? "Search" : "search") + " for its name to see what the provisions held here say about it, or check the library's overview for what it holds. This note states nothing about what it requires.";
+    const how = identifiers ? "an identifier" : "description";
+    const issuers = [...new Set(unheld.flatMap((d) => d.issuer === void 0 || d.identifier || d.numbered ? [] : [d.issuer]))];
+    const sameIssuer = [...new Set(regulations.filter((r) => issuers.includes(r.framework.toLowerCase())).map((r) => r.document_id))];
+    const issuerNote = sameIssuer.length === 0 ? "" : ` It does hold ${sameIssuer.length === 1 ? "a document" : "documents"} under the ${issuers.map((i) => i.toUpperCase()).join("/")} framework (${sameIssuer.slice(0, 5).join(", ")}${sameIssuer.length > 5 ? ", \u2026" : ""}); if one of those is what was meant, cite it by its id or title.`;
+    return none({
+      coverage_note: heldNames.length === 0 ? identifiers ? `"${text}" names an instrument by an identifier (${quoted}), and this library holds no document identified as such. Nothing was matched, rather than sourcing a same-numbered provision from another document. ${wayOut}` : `"${text}" names an instrument by description (${quoted}), and this library holds no document identified as such. Nothing was matched, rather than sourcing a same-numbered provision from another document.${issuerNote} ${wayOut}` : `"${text}" names ${heldList} and also an instrument by ${how} (${quoted}) that it holds no document identified as, so which of the two the provision belongs to cannot be told. Nothing was matched, rather than sourcing a same-numbered provision from either. Name one instrument per citation. ${wayOut}`
+    });
+  }
+  const unplaced = unplacedIdentifier(text, rest);
+  if (unplaced !== null) {
+    return none({
+      coverage_note: `"${text}" names a document by the number ${unplaced}, and this library holds no document that answers to it, so the number was not read as part of a provision's. Nothing was matched, rather than sourcing a same-numbered provision from another document. The library's overview lists the documents it holds; or search with the document's name.`
+    });
+  }
+  const unrecognised = docs === null && heldMention === void 0 ? unrecognisedNameTail(queryTokens) : null;
+  if (unrecognised !== null) {
+    const held = [...new Set(regulations.map((r) => r.document_id))];
+    const partialNote = citationPartialClause(holdings, null);
+    return none({
+      coverage_note: `"${text}" is about something this library does not recognise as a document it holds ("${unrecognised.join(" ")}"), so a provision with that number in a held document would be a guess. Nothing was matched. Name the document by an id or title from the library's overview${held.length === 0 ? "" : ` (${held.slice(0, 6).join(", ")}${held.length > 6 ? ", \u2026" : ""})`}, or drop the words that are not part of its name.${partialNote === null ? "" : ` ${partialNote}`}`
+    });
+  }
+  const spine = spineOf(rest.filter((t) => !STRUCTURAL.has(t)));
+  if (spine.length === 0) {
+    const named = docs === null ? [] : [...docs];
+    return none({
+      coverage_note: named.length > 0 ? `"${text}" names a document this library holds (${named.join(", ")}) but no provision within it. Add a provision number, or search inside it.` : `"${text}" carries no provision number to resolve, and names no document this library holds. If it names an instrument, this library may still describe it without holding it \u2014 search for its distinctive words, or check the library's overview for what it holds.`
+    });
+  }
+  const recordSpine = (r) => spineOf(bare(citationTokens(r.citation)).filter((t) => !STRUCTURAL.has(t)));
+  const spineHits = pool.filter((r) => arraysEqual(recordSpine(r), spine));
+  if (spineHits.length === 1) {
+    return { ...none(), match: spineHits[0] ?? null, confidence: "segment" };
+  }
+  if (spineHits.length > 1) return ambiguousResolution(text, spineHits);
+  const partial2 = citationPartialClause(holdings, docs);
+  const withPartial = (note) => partial2 === null ? note : `${note} ${partial2}`;
+  const relatives = pool.filter((r) => startsWithTokens(recordSpine(r), spine));
+  if (relatives.length > 0) {
+    return none({
+      candidates: relatives.slice(0, MAX_CANDIDATES).map(asCandidate),
+      coverage_note: withPartial(
+        `No provision is "${text}" itself. This library holds ${relatives.length} narrower provision(s) under it${relatives.length > MAX_CANDIDATES ? ` (first ${MAX_CANDIDATES} listed)` : ""}; open one, or walk its subtree.`
+      )
+    });
+  }
+  const containerTokens = rest.filter((t) => !STRUCTURAL.has(t));
+  const containers = (spineIsFaithful(containerTokens) ? pool : []).map((r) => ({ r, rs: recordSpine(r), rt: bare(citationTokens(r.citation)).filter((t) => !STRUCTURAL.has(t)) })).filter(({ rs, rt }) => rs.length > 0 && spineIsFaithful(rt) && startsWithTokens(spine, rs)).sort((a, b) => b.rs.length - a.rs.length);
+  if (containers.length > 0) {
+    const holders = [...new Set(containers.map(({ r }) => r.document_id))];
+    if (holders.length > 1) {
+      const perDocument = holders.map((d) => containers.find(({ r }) => r.document_id === d).r);
+      const listed = perDocument.slice(0, MAX_CANDIDATES);
+      const where = docs === null ? `sit in ${holders.length} documents (${holders.slice(0, 5).join(", ")}${holders.length > 5 ? ", \u2026" : ""}) and the citation names none of them` : `sit in ${holders.length} of the documents it names (${holders.slice(0, 5).join(", ")}${holders.length > 5 ? ", \u2026" : ""})`;
+      return none({
+        unmatched_segments: spine,
+        candidates: listed.map(asCandidate),
+        coverage_note: `No provision is "${text}" itself \u2014 this library does not address provisions at that granularity. Provisions that could contain it ${where}, so which one it belongs to cannot be told, and nothing is said here about whether the text of any of them has the point. ${perDocument.length > listed.length ? `(First ${MAX_CANDIDATES} listed.) ` : ""}Name the document, or open the candidates and check.`
+      });
+    }
+    const best = containers[0];
+    const points = spine.slice(best.rs.length);
+    const inside = points.join(".");
+    const carries = textCarriesPoint(best.r.text, points);
+    const held = `It holds the provision containing it: "${best.r.citation}" (${best.r.id})`;
+    const tail2 = carries === "yes" ? `, whose text carries point ${inside}. Open it and quote the point from its text rather than citing this resolution.` : carries === "no" ? `, but no point ${inside} was found in its text; its numbering may differ. Open it and check before anything is cited from this resolution.` : `; whether its text has point ${inside} could not be established, as its numbering could not be read reliably. Open it.`;
+    return none({
+      unmatched_segments: spine,
+      candidates: containers.slice(0, MAX_CANDIDATES).map(({ r }) => asCandidate(r)),
+      coverage_note: `No provision is "${text}" itself \u2014 this library does not address provisions at that granularity. ${held}${tail2}`
+    });
+  }
+  return none({
+    unmatched_segments: spine,
+    coverage_note: `Nothing in this library is numbered ${spine.join(".")}${docs === null ? "" : " in the document named"}. ` + (partial2 === null ? "" : `${partial2} `) + "Try a search on the citation's key words."
+  });
+}
+
 // src/pending.ts
 var isoDay = (now) => now.toISOString().slice(0, 10);
 function pendingState(change, today) {
@@ -11494,908 +12410,6 @@ var CorpusFileSchema = external_exports.object({
 function loadCorpusFile(path) {
   const raw = JSON.parse(readFileSync(path, "utf8"));
   return CorpusFileSchema.parse(raw);
-}
-var CITATION_EXPANSIONS = {
-  art: "article",
-  arts: "articles",
-  par: "paragraph",
-  para: "paragraph",
-  paras: "paragraphs",
-  gl: "guidelines"
-};
-function citationTokens(text) {
-  return text.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 0).map((t) => CITATION_EXPANSIONS[t] ?? t);
-}
-var STRUCTURAL = /* @__PURE__ */ new Set([
-  "article",
-  "articles",
-  "paragraph",
-  "paragraphs",
-  "point",
-  "points",
-  "section",
-  "sections",
-  "chapter",
-  "chapters",
-  "annex",
-  "annexes",
-  "subparagraph",
-  "letter",
-  "recital",
-  "part",
-  "title",
-  "guidelines",
-  "guideline",
-  "guide",
-  "no",
-  "of",
-  "the",
-  "in",
-  "and",
-  "on",
-  "at",
-  "under"
-]);
-var CONNECTIVES = /* @__PURE__ */ new Set(["of", "the", "in", "on", "at", "and", "under", "from", "an", "to", "for", "with", "by"]);
-var withoutConnectives = (tokens) => tokens.filter((t) => !CONNECTIVES.has(t));
-var spineOf = (tokens) => tokens.filter((t) => /^\d+[a-z]{0,2}$/.test(t) || /^[a-z]$/.test(t));
-var spineIsFaithful = (tokens) => tokens.every((t) => !/\d/.test(t) || /^\d+[a-z]{0,2}$/.test(t));
-var arraysEqual = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
-var startsWithTokens = (haystack, prefix) => prefix.length < haystack.length && prefix.every((v, i) => v === haystack[i]);
-var REFERENCE_WORD = /(?:^|[\s(])(?:articles?|paragraphs?|subparagraphs?|points?|letters?|sections?|chapters?|annex(?:es)?|nos?|and|or|to|of|in|under|with|by|see|from|than)$/i;
-function startsAnItem(text, at, headingOk) {
-  const before = text.slice(0, at).replace(/[ \t]+$/, "").replace(/(?:\s*[▼►◄][A-Z]\d*)+[ \t]*$/, "");
-  if (before === "" || /[\r\n]$/.test(before)) return true;
-  const t = before.replace(/\s+$/, "");
-  if (/[;:.]$/.test(t) || /[;:.]\s+(?:and|or)$/i.test(t)) return true;
-  return headingOk && /[A-Za-z]$/.test(t) && !REFERENCE_WORD.test(t);
-}
-var isReference = (text, at) => REFERENCE_WORD.test(text.slice(0, at).replace(/\s+$/, ""));
-var MARKER_PATTERNS = {
-  // Priority order: when two styles chain equally well, the first one is read.
-  num: [
-    ["dot", /(?<![\w.,/-])(\d{1,3})\.(?=\s|$)/g],
-    ["paren", /\((\d{1,3})\)/g],
-    ["rparen", /(?<![\w(])(\d{1,3})\)/g]
-  ],
-  alpha: [
-    ["paren", /\(([a-z])\)/g],
-    ["rparen", /(?<![\w(])([a-z])\)/g]
-  ]
-};
-function marksOf(text, kind, style, lo, hi, anywhere = false) {
-  const pattern = MARKER_PATTERNS[kind].find(([s]) => s === style)[1];
-  const out = [];
-  for (const m of text.matchAll(pattern)) {
-    const start = m.index ?? 0;
-    const end = start + m[0].length;
-    if (start < lo || end > hi || m[1] === void 0) continue;
-    if (anywhere ? isReference(text, start) : !startsAnItem(text, start, style === "dot")) continue;
-    out.push({ value: m[1], start, end });
-  }
-  return out;
-}
-function itemRun(text, kind, lo, hi) {
-  let best = [];
-  for (const [style] of MARKER_PATTERNS[kind]) {
-    const marks = marksOf(text, kind, style, lo, hi);
-    const run = [];
-    let pos = lo;
-    for (const m of marks) {
-      const want = kind === "num" ? String(run.length + 1) : String.fromCharCode(97 + run.length);
-      if (m.start >= pos && m.value === want) {
-        run.push(m);
-        pos = m.end;
-      }
-    }
-    const first = run[0];
-    if (first !== void 0 && (best[0] === void 0 || first.start < best[0].start)) best = run;
-  }
-  return best;
-}
-var ROMAN_LETTER = /* @__PURE__ */ new Set(["i", "v", "x"]);
-function textCarriesPoint(text, segments) {
-  if (segments.length === 0) return "unknown";
-  let lo = 0;
-  let hi = text.length;
-  let prev = null;
-  for (const seg of segments) {
-    const kind = /^\d{1,3}$/.test(seg) ? "num" : /^[a-z]$/.test(seg) ? "alpha" : null;
-    if (kind === null) return "unknown";
-    if (prev === "alpha" && kind === "alpha" && ROMAN_LETTER.has(seg)) return "unknown";
-    const index = kind === "num" ? Number(seg) : seg.charCodeAt(0) - 96;
-    if (index < 1) return "unknown";
-    const run = itemRun(text, kind, lo, hi);
-    const found = run[index - 1];
-    if (found !== void 0) {
-      lo = found.end;
-      hi = run[index]?.start ?? hi;
-      prev = kind;
-      continue;
-    }
-    if (run.length === 0 && itemRun(text, kind, 0, text.length).length === 0) return "unknown";
-    const stray = MARKER_PATTERNS[kind].some(
-      ([style]) => marksOf(text, kind, style, lo, hi, true).some((m) => m.value === (kind === "num" ? String(index) : seg))
-    );
-    return stray ? "unknown" : "no";
-  }
-  return "yes";
-}
-function windowAt(tokens, window) {
-  if (window.length === 0 || window.length > tokens.length) return -1;
-  for (let i = 0; i + window.length <= tokens.length; i++) {
-    let hit = true;
-    for (let j = 0; j < window.length; j++) {
-      if (tokens[i + j] !== window[j]) {
-        hit = false;
-        break;
-      }
-    }
-    if (hit) return i;
-  }
-  return -1;
-}
-function documentAliases(regulations, holdings) {
-  const index = /* @__PURE__ */ new Map();
-  const add = (raw, docId, derived = false) => {
-    const tokens = citationTokens(raw);
-    if (tokens.length === 0) return;
-    const key = tokens.join(" ");
-    const slot = index.get(key);
-    if (slot === void 0) index.set(key, { tokens, docs: /* @__PURE__ */ new Set([docId]), ...derived ? { derived } : {} });
-    else if (derived !== true || slot.derived === true) slot.docs.add(docId);
-  };
-  for (const r of regulations) {
-    add(r.framework, r.document_id);
-    add(r.document_id, r.document_id);
-    add(idDocSegment(r.id), r.document_id);
-    add(`${r.framework} ${r.document_id}`, r.document_id);
-  }
-  for (const h of holdings ?? []) {
-    if (h.title === void 0) continue;
-    for (const variant of titleNames(h.title)) add(variant, h.document_id, true);
-  }
-  return index;
-}
-function titleNames(title) {
-  const unbracketed = (t) => t.replace(/\([^)]*\)/g, " ");
-  const head = title.split(/\s[\u2014\u2013-]\s|:\s|\s(?:under|pursuant\s+to|in\s+accordance\s+with)\s+Articles?\b/i)[0] ?? title;
-  const named = [...title.matchAll(/\(([^)]*)\)/g)].map((m) => (m[1] ?? "").replace(/["'\u2018\u2019\u201c\u201d]/g, " "));
-  const variants = [title, unbracketed(title), head, unbracketed(head), ...named];
-  const words = (t) => citationTokens(t).filter((w) => !STRUCTURAL.has(w) && !/^\d+$/.test(w)).length;
-  return [...new Set(variants.map((v) => v.replace(/\s+/g, " ").trim()))].filter((v) => words(v) >= 3);
-}
-function scopeToDocument(tokens, index) {
-  let best = null;
-  let bestAt = -1;
-  for (const entry of index.values()) {
-    const at = windowAt(tokens, entry.tokens);
-    if (at === -1) continue;
-    const better = best === null || entry.tokens.length > best.tokens.length || entry.tokens.length === best.tokens.length && entry.docs.size < best.docs.size;
-    if (better) {
-      best = entry;
-      bestAt = at;
-    }
-  }
-  if (best === null) return { docs: null, rest: tokens, derived: false };
-  let rest = [...tokens.slice(0, bestAt), ...tokens.slice(bestAt + best.tokens.length)];
-  for (const other of index.values()) {
-    if (other === best || [...other.docs].some((d) => !best.docs.has(d))) continue;
-    for (let at = windowAt(rest, other.tokens); at !== -1; at = windowAt(rest, other.tokens)) {
-      rest = [...rest.slice(0, at), ...rest.slice(at + other.tokens.length)];
-    }
-  }
-  return { docs: best.docs, rest, derived: best.derived === true };
-}
-var DOCUMENT_IDENTIFIER = /\b((?:[A-Za-z]{1,10}[\s/-]+){1,3})((?:19|20)\d{2})\s*[/-]\s*(\d{1,4})\b(?![/-]\d)/g;
-var NAME_FILLER = /* @__PURE__ */ new Set([
-  "a",
-  "an",
-  "this",
-  "that",
-  "these",
-  "those",
-  "such",
-  "said",
-  "same",
-  "its",
-  "their",
-  "our",
-  "any",
-  "each",
-  "every",
-  "all",
-  "both",
-  "other",
-  "another",
-  "above",
-  "below",
-  "herein",
-  "thereof",
-  "as",
-  "by",
-  "for",
-  "with",
-  "from",
-  "to",
-  "or",
-  "per",
-  "see",
-  "also",
-  "cited",
-  "referred",
-  "mentioned",
-  "pursuant",
-  "according",
-  "regulation",
-  "regulations",
-  "directive",
-  "directives",
-  "decision",
-  "decisions",
-  "act",
-  "acts",
-  "rule",
-  "rules",
-  "standard",
-  "standards",
-  "technical",
-  "document",
-  "documents",
-  "text",
-  "texts",
-  "law",
-  "framework",
-  "provision",
-  "provisions",
-  "paragraphs",
-  "item",
-  "items",
-  "clause",
-  "clauses",
-  "para",
-  "art",
-  "ibid",
-  "id",
-  // How a provision is pointed at ("as required by", "laid down in").
-  "required",
-  "requires",
-  "specified",
-  "set",
-  "out",
-  "laid",
-  "down",
-  "provided",
-  "defined",
-  "stated",
-  "described",
-  // Where inside a provision.
-  "first",
-  "second",
-  "third",
-  "fourth",
-  "fifth",
-  "last",
-  "final",
-  "preceding",
-  "following",
-  "previous",
-  "next",
-  "sentence",
-  "sentences",
-  "indent",
-  "indents",
-  "subparagraphs",
-  "subpoint",
-  "subpoints",
-  "limb",
-  "limbs",
-  "introductory",
-  "wording",
-  "version",
-  "applicable",
-  "relevant",
-  "current",
-  // How one act relates to another ("as amended by", "supplementing").
-  "amended",
-  "supplemented",
-  "implemented",
-  "replaced",
-  "corrected",
-  "repealed",
-  "amending",
-  "supplementing",
-  "repealing",
-  "replacing",
-  "correcting",
-  // How an act is written: the kind, the institution and the formal formula.
-  "reg",
-  "regs",
-  "dir",
-  "eu",
-  "ec",
-  "eec",
-  "euratom",
-  "european",
-  "parliament",
-  "council",
-  "commission",
-  "union",
-  "delegated",
-  "implementing",
-  "january",
-  "february",
-  "march",
-  "april",
-  "may",
-  "june",
-  "july",
-  "august",
-  "september",
-  "october",
-  "november",
-  "december"
-]);
-var ROMAN_NUMERALS = /* @__PURE__ */ new Set(["ii", "iii", "iv", "vi", "vii", "viii", "ix", "xi", "xii"]);
-var unexplainedWords = (tokens) => tokens.filter(
-  (t) => !STRUCTURAL.has(t) && !NAME_FILLER.has(t) && !ROMAN_NUMERALS.has(t) && !/^\d/.test(t) && t.length > 1
-);
-var NAME_CONNECTORS = /* @__PURE__ */ new Set(["of", "in", "under", "from"]);
-function unrecognisedNameTail(tokens) {
-  for (let i = tokens.length - 1; i >= 0; i--) {
-    if (!NAME_CONNECTORS.has(tokens[i] ?? "")) continue;
-    const words = unexplainedWords(tokens.slice(i + 1));
-    return words.length > 0 ? words : null;
-  }
-  return null;
-}
-function unplacedIdentifier(text, rest) {
-  for (const m of text.matchAll(DOCUMENT_IDENTIFIER)) {
-    const [, lead, year, serial] = m;
-    if (lead === void 0 || year === void 0 || serial === void 0) continue;
-    const words = lead.split(/[\s/-]+/).filter((w) => w !== "");
-    const plain = (w) => STRUCTURAL.has((w ?? "").toLowerCase()) || NAME_FILLER.has((w ?? "").toLowerCase());
-    while (words.length > 0 && plain(words[0])) words.shift();
-    if (words.length === 0 || words.length > 2) continue;
-    if (words.some((w) => plain(w))) continue;
-    if (windowAt(rest, [year, serial]) !== -1) return `${words.join("/")}/${year}/${serial}`;
-  }
-  return null;
-}
-var INSTRUMENT_PATTERNS = [
-  {
-    key: "crr",
-    re: /\bcrr\b|\bcapital\s+requirements\s+regulation\b|regulation\s*\(eu\)\s*(no\.?\s*)?575\s*\/\s*2013|\b575\s*\/\s*2013\b/i,
-    acts: ["regulation-2013-575"]
-  },
-  {
-    key: "crd",
-    re: /\bcrd\s*(iv|v)?\b|\bcapital\s+requirements\s+directive\b|directive\s*2013\s*\/\s*36/i,
-    acts: ["directive-2013-36"]
-  }
-];
-var isYearNumber = (s) => /^(?:19(?:5[89]|[6-9]\d)|20\d\d)$/.test(s);
-var ACT_TAG = String.raw`(?:eu|ec|eec|euratom)`;
-var ACT_FORMULA = String.raw`(?:\s+of\s+the\s+european\s+parliament\s+and\s+(?:of\s+)?(?:the\s+)?council` + String.raw`(?:\s+of\s+\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4})?)?`;
-var NUMBERED_ACT = new RegExp(
-  // Each run of white space follows a token of its own, so a long run can be split
-  // between the quantifiers in only one way.
-  String.raw`\b(regulation|directive|decision|guideline)s?\s*` + String.raw`(?:(\(${ACT_TAG}\)|${ACT_TAG}\b)\s*)?(?:no\.?\s*)?` + String.raw`(\d{1,4})\s*\/\s*(\d{1,4})\b` + String.raw`(\s*\/\s*${ACT_TAG}\b)?` + ACT_FORMULA,
-  "gi"
-);
-var NUMBER_FIRST_ACT = new RegExp(
-  // One run of white space at a time, so a long run cannot be split between
-  // quantifiers in more than one way.
-  String.raw`(?<![\d/])(?:no\.?\s*)?(\d{1,4})\s*\/\s*(\d{1,4})\b\s*` + String.raw`(\/\s*${ACT_TAG}\b\s*)?(\(${ACT_TAG}\)\s*)?` + String.raw`(regulation|directive|decision)s?\b` + String.raw`(?!\s*(?:(?:\(${ACT_TAG}\)|${ACT_TAG}\b)\s*)?(?:no\.?\s*)?\d{1,4}\s*\/\s*\d{1,4}\b)` + ACT_FORMULA,
-  "gi"
-);
-function yearAndSerial(kind, first, second) {
-  const yearFirst = kind === "directive" || kind === "decision";
-  if (isYearNumber(first) && !isYearNumber(second)) return [first, second];
-  if (isYearNumber(second) && !isYearNumber(first)) return [second, first];
-  if (isYearNumber(first) && isYearNumber(second)) {
-    return yearFirst || Number(first) >= 2015 ? [first, second] : [second, first];
-  }
-  return yearFirst ? [first, second] : [second, first];
-}
-function numberedActs(text) {
-  const acts = [];
-  const add = (kind, first, second, institution, start, end) => {
-    const tagged = institution !== void 0;
-    if (!tagged && (kind === "guideline" || !isYearNumber(first) && !isYearNumber(second))) return;
-    const [year, serial] = yearAndSerial(kind, first, second);
-    const written = (institution ?? "").replace(/[()\s/]/g, "").toLowerCase();
-    const tag = written === "" ? void 0 : written === "euratom" ? "Euratom" : written.toUpperCase();
-    acts.push({ key: `${kind}-${year}-${serial}`, ...tag === void 0 ? {} : { tag }, start, end });
-  };
-  for (const m of text.matchAll(NUMBERED_ACT)) {
-    const kind = m[1]?.toLowerCase();
-    if (kind === void 0 || m[3] === void 0 || m[4] === void 0) continue;
-    add(kind, m[3], m[4], m[2] ?? m[5], m.index, m.index + m[0].length);
-  }
-  const kindFirst = acts.length;
-  for (const m of text.matchAll(NUMBER_FIRST_ACT)) {
-    const kind = m[5]?.toLowerCase();
-    const end = m.index + m[0].length;
-    if (kind === void 0 || m[1] === void 0 || m[2] === void 0) continue;
-    if (acts.slice(0, kindFirst).some((a) => m.index < a.end && a.start < end)) continue;
-    add(kind, m[1], m[2], m[3] ?? m[4], m.index, end);
-  }
-  return acts.sort((a, b) => a.start - b.start);
-}
-var numberedActKeys = (text) => numberedActs(text).map((a) => a.key);
-var canonicalInstrument = (key) => INSTRUMENT_PATTERNS.find((p) => p.acts.includes(key))?.key ?? key;
-function instrumentSpans(text) {
-  const acts = numberedActs(text);
-  const spans = [];
-  for (const { key, re } of INSTRUMENT_PATTERNS) {
-    for (const m of text.matchAll(new RegExp(re.source, "gi"))) {
-      const start = m.index;
-      const end = start + m[0].length;
-      if (acts.some((a) => a.start <= start && end <= a.end && canonicalInstrument(a.key) !== key)) continue;
-      spans.push({ key, span: m[0], start, end });
-    }
-  }
-  for (const act of acts) {
-    spans.push({
-      key: canonicalInstrument(act.key),
-      ...act.tag === void 0 ? {} : { tag: act.tag },
-      span: text.slice(act.start, act.end),
-      start: act.start,
-      end: act.end
-    });
-  }
-  return spans;
-}
-var SUBORDINATING_CUE = /\b(?:(?:as\s+)?(?:amended|supplemented|implemented|replaced|corrected|repealed)\s+by|referred\s+to\s+in|pursuant\s+to|in\s+accordance\s+with|(?:adopted|issued)\s+under|within\s+the\s+meaning\s+of|cited\s+in|mentioned\s+in|see\s+also)\s+(?:(?:the|a|an|commission|council|delegated|implementing)\s+)*$/i;
-var KIND_GAP = String.raw`[\s\-‐-―]+`;
-var kindWords = (...words) => words.join(KIND_GAP);
-var DESCRIBED_INSTRUMENTS = [
-  { key: "rts", re: /\bR\.T\.S\b\.?|\bRTSs?\b/gi, held: [["rts"]] },
-  {
-    key: "rts",
-    re: new RegExp(`\\b${kindWords("regulatory", "technical", "standards?")}\\b`, "gi"),
-    held: [["rts"], ["regulatory", "technical", "standard"], ["regulatory", "technical", "standards"]]
-  },
-  { key: "its", re: /\bITSs?\b/g, held: [["its"]], pronoun: true },
-  { key: "its", re: /\bI\.T\.S\b\.?/gi, held: [["its"]] },
-  // "its" cannot be a pronoun straight after an article ("the its on reporting").
-  // Not "that": "a rule that its text amends" is ordinary English. The article is
-  // matched, not looked behind for: a look-behind over white space is tried at every
-  // position of a run of it, which made a long run cost the square of its length.
-  { key: "its", re: /\b(?:the|an?|this)\s+(its)\b/gi, held: [["its"]], inGroup: true },
-  {
-    key: "its",
-    re: new RegExp(`\\b${kindWords("implementing", "technical", "standards?")}\\b`, "gi"),
-    held: [["its"], ["implementing", "technical", "standard"], ["implementing", "technical", "standards"]]
-  },
-  {
-    // Not when the word that makes it one of the two above stands before it: that phrase
-    // is one of them, and `describedInstruments` leaves it out where it lies inside one.
-    key: "technical-standards",
-    re: new RegExp(`\\b${kindWords("technical", "standards?")}\\b`, "gi"),
-    held: [["rts"], ["its"], ["technical", "standard"], ["technical", "standards"]]
-  },
-  {
-    key: "delegated",
-    re: new RegExp(`\\b(?:commission${KIND_GAP})?delegated${KIND_GAP}(?:regulation|decision|act)s?\\b`, "gi"),
-    held: [["delegated"]]
-  },
-  {
-    key: "implementing",
-    re: new RegExp(`\\b(?:commission${KIND_GAP})?implementing${KIND_GAP}(?:regulation|decision|act)s?\\b`, "gi"),
-    held: [["implementing"]]
-  },
-  ...["regulation", "guideline", "decision", "recommendation"].map((kind) => ({
-    key: `ecb-${kind}`,
-    // The ECB, its dotted acronym or its full name, with or without a possessive.
-    re: new RegExp(
-      `(?:\\becb|\\bE\\.C\\.B\\b\\.?|\\beuropean${KIND_GAP}central${KIND_GAP}bank)(?:['\u2019]s)?\\s+${kind}s?\\b`,
-      "gi"
-    ),
-    held: [["ecb", kind], ["ecb", `${kind}s`], ["european", "central", "bank", kind], ["european", "central", "bank", `${kind}s`]],
-    issuer: "ecb"
-  })),
-  {
-    key: "ecb-guideline",
-    re: new RegExp(
-      `\\bguidelines?\\s+of\\s+the\\s+(?:ecb|european${KIND_GAP}central${KIND_GAP}bank)\\b`,
-      "gi"
-    ),
-    held: [["ecb", "guideline"], ["ecb", "guidelines"]],
-    issuer: "ecb"
-  }
-];
-var DESCRIPTOR_END = /[,;:()[\]"\u201c\u201d]|\s[-\u2013\u2014]\s|\b(?:art(?:icle)?s?|para(?:graph)?s?|sections?|chapters?|annex(?:es)?|points?)\.?\s*\(?\d|\s(?:under|referred|cited|mentioned|pursuant|adopted|according|per|as)\b/i;
-var SENTENCE_END = /\.(?=\s+[A-Z]|\s*$)/;
-function nameStartsAt(after, names) {
-  if (names.length === 0) return -1;
-  const words = [...after.matchAll(/[A-Za-z0-9]+/g)].map((m) => ({
-    at: m.index,
-    token: CITATION_EXPANSIONS[m[0].toLowerCase()] ?? m[0].toLowerCase()
-  }));
-  for (let i = 0; i < words.length; i++) {
-    if (names.some((n) => n.length > 0 && n.every((t, j) => words[i + j]?.token === t))) return words[i]?.at ?? -1;
-  }
-  return -1;
-}
-function descriptorQuote(text, start, matched, names) {
-  const after = text.slice(start + matched.length);
-  const stops = [after.search(DESCRIPTOR_END), after.search(SENTENCE_END), nameStartsAt(after, names)].filter((n) => n !== -1);
-  const own = `${matched}${stops.length === 0 ? after : after.slice(0, Math.min(...stops))}`;
-  const body = own.replace(/\s+/g, " ").trim().replace(/(?:\s+(?:of|in|on|under|from|and|or|to|the|an?|as|by|at|for|with|see))+$/i, "").replace(/[:;,\s]+$/, "");
-  const quote = /(?:\b[A-Za-z]\.){2,}$/.test(body) ? body : body.replace(/\.+$/, "");
-  return quote.length === 0 || quote.length > 80 ? matched : quote;
-}
-var NUMBER_AFTER_DESCRIPTOR = new RegExp(
-  String.raw`^\s*(?:\(${ACT_TAG}\)\s*)?(?:no\.?\s*)?\d{1,4}\s*\/\s*\d{1,4}\b` + String.raw`|^\s*(?:\(\s*)?[A-Za-z]{2,10}(?:\s*\/\s*[A-Za-z]{2,10})*\s*\/\s*(?:19|20)\d{2}\s*\/\s*\d{1,4}\b`,
-  "i"
-);
-function numberGateReads(acts, start, matched) {
-  const kindAt = start + matched.search(/[A-Za-z]+$/);
-  return acts.some((a) => a.start === kindAt);
-}
-function describedInstruments(text, names = []) {
-  const caseLost = !/[a-z]/.test(text);
-  const acts = numberedActs(text);
-  const found = [];
-  const cut = [];
-  const all = DESCRIBED_INSTRUMENTS.flatMap(
-    (entry) => entry.pronoun === true && caseLost ? [] : [...text.matchAll(entry.re)].map((m) => {
-      const matched = entry.inGroup === true ? m[1] ?? "" : m[0];
-      return { entry, start: m.index + m[0].length - matched.length, matched };
-    })
-  );
-  const qualified = all.filter((h) => h.entry.key === "rts" || h.entry.key === "its");
-  const hits = all.filter(
-    (h) => h.entry.key !== "technical-standards" || !qualified.some((q) => q.start <= h.start && h.start + h.matched.length <= q.start + q.matched.length)
-  ).sort((a, b) => a.start - b.start || b.matched.length - a.matched.length);
-  for (const { entry: { key, held, issuer }, start, matched } of hits) {
-    const end = start + matched.length;
-    if (numberGateReads(acts, start, matched)) continue;
-    const id = /^\s*\/\s*(\d{4})\s*\/\s*(\d{1,4})\b/.exec(text.slice(end));
-    if (id !== null) {
-      const lead = /(?:\b[A-Za-z]+\s*\/\s*)*$/.exec(text.slice(0, start))?.[0] ?? "";
-      const whole = `${lead}${matched}${id[0]}`.replace(/\s+/g, "");
-      if (!found.some((f) => f.quote === whole)) {
-        found.push({
-          key,
-          quote: whole,
-          held: [citationTokens(`${matched} ${id[1] ?? ""} ${id[2] ?? ""}`)],
-          identifier: true,
-          numbered: true
-        });
-      }
-      cut.push([start - lead.length, end + id[0].length]);
-      continue;
-    }
-    if (found.some((f) => f.key === key && !f.identifier)) {
-      cut.push([start, end]);
-      continue;
-    }
-    const quote = descriptorQuote(text, start, matched, names);
-    if (!found.some((f) => f.quote === quote)) {
-      const numbered = NUMBER_AFTER_DESCRIPTOR.test(text.slice(end));
-      found.push({ key, quote, held, identifier: false, numbered, ...issuer === void 0 ? {} : { issuer } });
-    }
-    cut.push([start, end]);
-  }
-  const merged = [];
-  for (const [from, to] of cut.sort((a, b) => a[0] - b[0] || a[1] - b[1])) {
-    const last = merged[merged.length - 1];
-    if (last !== void 0 && from <= last[1]) last[1] = Math.max(last[1], to);
-    else merged.push([from, to]);
-  }
-  let residual = text;
-  for (const [from, to] of merged.reverse()) residual = `${residual.slice(0, from)} ${residual.slice(to)}`;
-  return { found, residual };
-}
-function holdsKind(regulations, held) {
-  return regulations.some(
-    (r) => [r.framework, r.document_id, idDocSegment(r.id), `${r.framework} ${r.document_id}`].some((field) => {
-      const tokens = citationTokens(field);
-      return held.some((window) => windowAt(tokens, window) !== -1);
-    })
-  );
-}
-var EMPOWERMENTS = {
-  "regulation-2021-930": {
-    kind: "a regulatory technical standard \u2014 a Commission delegated act, not a legislative one",
-    empoweredBy: "Article 181(3)(a) and Article 182(4)(a) of the CRR",
-    visibleAt: "regulation://crr/article-181"
-  },
-  "regulation-2010-1093": {
-    kind: "the Regulation establishing the EBA; its Article 16 is the basis on which every EBA guideline in this library is issued, and the source of their comply-or-explain effect",
-    visibleAt: "regulation://crr/article-181"
-  }
-};
-var mentionCache = /* @__PURE__ */ new WeakMap();
-function instrumentMentions(regulations) {
-  const cached2 = mentionCache.get(regulations);
-  if (cached2 !== void 0) return cached2;
-  const index = /* @__PURE__ */ new Map();
-  for (const r of regulations) {
-    const seen = new Set(numberedActKeys(r.text).map(canonicalInstrument));
-    for (const key of seen) {
-      const at = index.get(key);
-      if (at === void 0) index.set(key, [r.id]);
-      else at.push(r.id);
-    }
-  }
-  mentionCache.set(regulations, index);
-  return index;
-}
-function heldNeedles(instrument) {
-  const named = INSTRUMENT_PATTERNS.find((p) => p.key === instrument);
-  return [instrument, ...named?.acts ?? []].flatMap((key) => {
-    const m = /^([a-z]+)-(\d{2,4})-(\d+)$/.exec(key);
-    return m === null ? [key.replace(/[^a-z0-9]/g, "")] : [`${m[1]}${m[2]}${m[3]}`, `${m[1]}${m[3]}${m[2]}`];
-  });
-}
-var heldDocumentsCache = /* @__PURE__ */ new WeakMap();
-function heldInstrumentDocuments(regulations, instrument) {
-  const byInstrument = heldDocumentsCache.get(regulations) ?? /* @__PURE__ */ new Map();
-  heldDocumentsCache.set(regulations, byInstrument);
-  const known = byInstrument.get(instrument);
-  if (known !== void 0) return known;
-  const needles = heldNeedles(instrument);
-  const docs = /* @__PURE__ */ new Set();
-  for (const r of regulations) {
-    const hay = `${r.framework}${r.document_id}${idDocSegment(r.id)}`.toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (needles.some((n) => hay.includes(n))) docs.add(r.document_id);
-  }
-  byInstrument.set(instrument, docs);
-  return docs;
-}
-var corpusHolds = (regulations, instrument) => heldInstrumentDocuments(regulations, instrument).size > 0;
-function withInstrumentNames(index, regulations, text) {
-  const spans = instrumentSpans(text);
-  if (spans.length === 0) return index;
-  const named = new Map(index);
-  for (const { key, span } of spans) {
-    const docs = heldInstrumentDocuments(regulations, key);
-    const tokens = citationTokens(span);
-    if (docs.size === 0 || tokens.length === 0) continue;
-    const id = tokens.join(" ");
-    const slot = named.get(id);
-    if (slot === void 0) named.set(id, { tokens, docs, derived: true });
-    else if (slot.derived === true) named.set(id, { ...slot, docs: /* @__PURE__ */ new Set([...slot.docs, ...docs]) });
-  }
-  return named;
-}
-function accountedFor(text, rest, chosen, index, isContext) {
-  for (const n of instrumentSpans(text)) {
-    if (!isContext(n) && windowAt(rest, citationTokens(n.span)) !== -1) return false;
-  }
-  let remaining = rest;
-  for (const entry of index.values()) {
-    if (![...chosen].every((d) => entry.docs.has(d))) continue;
-    for (let at = windowAt(remaining, entry.tokens); at !== -1; at = windowAt(remaining, entry.tokens)) {
-      remaining = [...remaining.slice(0, at), ...remaining.slice(at + entry.tokens.length)];
-    }
-  }
-  return unexplainedWords(remaining).length === 0;
-}
-var MAX_CANDIDATES = 10;
-var asCandidate = (r) => ({
-  id: r.id,
-  citation: r.citation,
-  document_id: r.document_id
-});
-var instrumentLabel = (instrument, tag) => {
-  const m = /^(regulation|directive|decision|guideline)-(\d{2,4})-(\d+)$/.exec(instrument);
-  if (m === null) return instrument.toUpperCase();
-  const kind = `${(m[1] ?? "").charAt(0).toUpperCase()}${(m[1] ?? "").slice(1)}`;
-  const year = m[2] ?? "";
-  const serial = m[3] ?? "";
-  const modern = Number(year) >= 2015;
-  const institution = tag ?? (modern ? "EU" : void 0);
-  if (modern) return `${kind} (${institution}) ${year}/${serial}`;
-  if (m[1] === "regulation") return `${kind}${institution === void 0 ? "" : ` (${institution})`} No ${serial}/${year}`;
-  return `${kind} ${year}/${serial}${institution === void 0 ? "" : `/${institution}`}`;
-};
-function ambiguousResolution(text, hits) {
-  const docs = new Set(hits.map((r) => r.document_id));
-  return {
-    match: null,
-    confidence: "none",
-    ambiguous: true,
-    candidates: hits.slice(0, MAX_CANDIDATES).map(asCandidate),
-    unmatched_segments: [],
-    coverage_note: `"${text}" matches ${hits.length} provisions across ${docs.size} document(s)${hits.length > MAX_CANDIDATES ? ` (first ${MAX_CANDIDATES} listed)` : ""}. Name the document to disambiguate, or open one of the candidates.`
-  };
-}
-function withoutLooseIssuerDescriptor(regulations, text, holdings) {
-  const index = documentAliases(regulations, holdings);
-  const described = describedInstruments(text, [...index.values()].map((e) => e.tokens));
-  const unheld = described.found.filter((d) => !holdsKind(regulations, d.held));
-  if (unheld.length === 0) return null;
-  if (!unheld.every((d) => d.issuer !== void 0 && !d.identifier && !d.numbered)) return null;
-  const residualTokens = citationTokens(described.residual);
-  if (spineOf(residualTokens.filter((t) => !STRUCTURAL.has(t))).length === 0) return null;
-  if (instrumentSpans(text).some((n) => corpusHolds(regulations, n.key))) return null;
-  const namedDocs = scopeToDocument(residualTokens, index).docs;
-  if (namedDocs === null) return null;
-  const frameworks = new Set(regulations.filter((r) => namedDocs.has(r.document_id)).map((r) => r.framework.toLowerCase()));
-  if (frameworks.size !== 1 || !unheld.every((d) => frameworks.has(d.issuer ?? ""))) return null;
-  return described.residual;
-}
-function resolveCitationDetailed(regulations, text, holdings) {
-  const none = (extra = {}) => ({
-    match: null,
-    confidence: "none",
-    candidates: [],
-    ambiguous: false,
-    unmatched_segments: [],
-    ...extra
-  });
-  const queryTokens = citationTokens(text);
-  if (queryTokens.length === 0) return none();
-  const withoutDescriptor = withoutLooseIssuerDescriptor(regulations, text, holdings);
-  if (withoutDescriptor !== null) return resolveCitationDetailed(regulations, withoutDescriptor, holdings);
-  const spans = instrumentSpans(text);
-  const subordinate = (n) => SUBORDINATING_CUE.test(text.slice(0, n.start)) && spans.some((o) => o.start < n.start && corpusHolds(regulations, o.key));
-  const attempt = (index2) => {
-    const scope = scopeToDocument(queryTokens, index2);
-    const pool2 = scope.docs === null ? regulations : regulations.filter((r) => scope.docs?.has(r.document_id) === true);
-    const bare2 = (tokens) => scopeToDocument(tokens, index2).rest;
-    const nq = scope.rest.join(" ");
-    const exactHits2 = pool2.filter((r) => bare2(citationTokens(r.citation)).join(" ") === nq);
-    const aliasHits2 = exactHits2.length > 0 ? [] : pool2.filter((r) => (r.citation_aliases ?? []).some((a) => bare2(citationTokens(a)).join(" ") === nq));
-    const core = (tokens) => withoutConnectives(bare2(tokens)).join(" ");
-    const nqCore = withoutConnectives(scope.rest).join(" ");
-    const coreHits2 = exactHits2.length > 0 || aliasHits2.length > 0 || nqCore === nq ? [] : pool2.filter((r) => core(citationTokens(r.citation)) === nqCore);
-    const coreAliasHits2 = exactHits2.length > 0 || aliasHits2.length > 0 || coreHits2.length > 0 || nqCore === nq ? [] : pool2.filter((r) => (r.citation_aliases ?? []).some((al) => core(citationTokens(al)) === nqCore));
-    return { index: index2, ...scope, pool: pool2, bare: bare2, nq, exactHits: exactHits2, aliasHits: aliasHits2, coreHits: coreHits2, coreAliasHits: coreAliasHits2 };
-  };
-  let scoped = attempt(withInstrumentNames(documentAliases(regulations, holdings), regulations, text));
-  if (scoped.derived && scoped.docs !== null && scoped.exactHits.length === 0 && scoped.aliasHits.length === 0 && scoped.coreHits.length === 0 && scoped.coreAliasHits.length === 0 && !accountedFor(text, scoped.rest, scoped.docs, scoped.index, (n) => !corpusHolds(regulations, n.key) && subordinate(n))) {
-    scoped = attempt(documentAliases(regulations));
-  }
-  const { index, docs, rest, pool, bare, exactHits, aliasHits, coreHits, coreAliasHits } = scoped;
-  if (exactHits.length === 1) {
-    return { ...none(), match: exactHits[0] ?? null, confidence: "exact" };
-  }
-  if (exactHits.length > 1) return ambiguousResolution(text, exactHits);
-  if (aliasHits.length === 1) {
-    const hit = aliasHits[0];
-    return {
-      ...none(),
-      match: hit ?? null,
-      confidence: "alias",
-      coverage_note: hit === void 0 ? void 0 : `Matched an alias. This provision's own citation is "${hit.citation}" \u2014 quote that, not "${text}".`
-    };
-  }
-  if (aliasHits.length > 1) return ambiguousResolution(text, aliasHits);
-  if (coreHits.length === 1) return { ...none(), match: coreHits[0] ?? null, confidence: "segment" };
-  if (coreHits.length > 1) return ambiguousResolution(text, coreHits);
-  if (coreAliasHits.length === 1) {
-    const hit = coreAliasHits[0];
-    return {
-      ...none(),
-      match: hit ?? null,
-      confidence: "alias",
-      coverage_note: hit === void 0 ? void 0 : `Matched an alias. This provision's own citation is "${hit.citation}" \u2014 quote that, not "${text}".`
-    };
-  }
-  if (coreAliasHits.length > 1) return ambiguousResolution(text, coreAliasHits);
-  const insideName = (n) => docs !== null && windowAt(rest, citationTokens(n.span)) === -1;
-  const unheldMention = spans.find((n) => !corpusHolds(regulations, n.key) && !insideName(n) && !subordinate(n));
-  if (unheldMention !== void 0) {
-    const gated = unheldMention.key;
-    const what = EMPOWERMENTS[gated];
-    const byCite = regulations.filter((r) => (r.cites ?? []).some((c) => citationTokens(c.framework).join("") === gated)).map((r) => r.id);
-    const mentions = [
-      .../* @__PURE__ */ new Set([...byCite, ...instrumentMentions(regulations).get(gated) ?? []])
-    ];
-    const shown = mentions.slice(0, 3);
-    return none({
-      coverage_note: `This library holds no ${instrumentLabel(gated, unheldMention.tag)}. Nothing was matched, rather than sourcing a same-numbered provision from another document. ` + (what === void 0 ? "" : `It is ${what.kind}` + (what.empoweredBy === void 0 ? "" : `, adopted under ${what.empoweredBy}`) + ". " + (what.visibleAt === void 0 ? "" : `That relationship is stated in the text at ${what.visibleAt}. `)) + (shown.length > 0 ? `${mentions.length} held provision(s) name it: ${shown.join(", ")}${mentions.length > shown.length ? ", \u2026" : ""} \u2014 open those for what this library says about it. Its own text is not here, so do not state its requirements from this library.` : "The library's overview lists the documents it holds.")
-    });
-  }
-  const heldMention = spans.find((n) => corpusHolds(regulations, n.key));
-  const instrument = heldMention?.key ?? null;
-  const instrumentName2 = heldMention === void 0 ? null : instrumentLabel(heldMention.key, heldMention.tag);
-  const described = describedInstruments(text, [...index.values()].map((e) => e.tokens));
-  const unheld = described.found.filter((d) => !holdsKind(regulations, d.held));
-  const placeable = spineOf(citationTokens(described.residual).filter((t) => !STRUCTURAL.has(t))).length > 0;
-  const namedDocs = unheld.length > 0 && placeable ? scopeToDocument(citationTokens(described.residual), index).docs : null;
-  const looselyDescribed = (() => {
-    if (namedDocs === null || docs === null || instrumentName2 !== null) return false;
-    if (!unheld.every((d) => d.issuer !== void 0 && !d.identifier && !d.numbered)) return false;
-    const frameworks = new Set(regulations.filter((r) => namedDocs.has(r.document_id)).map((r) => r.framework.toLowerCase()));
-    return frameworks.size === 1 && unheld.every((d) => frameworks.has(d.issuer ?? ""));
-  })();
-  if (unheld.length > 0 && placeable && !looselyDescribed) {
-    const quoted = unheld.map((d) => `"${d.quote}"`).join(" and ");
-    const identifiers = unheld.every((d) => d.identifier);
-    const heldNames = [];
-    if (instrumentName2 !== null) heldNames.push(instrumentName2);
-    const instrumentDocs = instrument === null ? /* @__PURE__ */ new Set() : heldInstrumentDocuments(regulations, instrument);
-    for (const d of namedDocs ?? []) {
-      if (instrumentDocs.has(d)) continue;
-      if (!heldNames.some((n) => n.toLowerCase() === d.toLowerCase())) heldNames.push(d);
-    }
-    const group = instrument === null && (namedDocs?.size ?? 0) > 1;
-    const heldList = group ? `documents under a framework or name it shares (${heldNames.slice(0, 3).join(", ")}${heldNames.length > 3 ? ", \u2026" : ""})` : `a document this library holds (${heldNames.slice(0, 3).join(", ")})`;
-    const numberedDescription = !identifiers && unheld.some((d) => d.numbered);
-    const wayOut = (identifiers ? "" : numberedDescription ? 'Cite the instrument in full, kind then "(EU)" then its number (for example "Regulation (EU) YYYY/NNN"), so this library can say whether it is held; ' : "Cite the instrument by number so this library can say whether it is held; ") + (identifiers ? "Search" : "search") + " for its name to see what the provisions held here say about it, or check the library's overview for what it holds. This note states nothing about what it requires.";
-    const how = identifiers ? "an identifier" : "description";
-    const issuers = [...new Set(unheld.flatMap((d) => d.issuer === void 0 || d.identifier || d.numbered ? [] : [d.issuer]))];
-    const sameIssuer = [...new Set(regulations.filter((r) => issuers.includes(r.framework.toLowerCase())).map((r) => r.document_id))];
-    const issuerNote = sameIssuer.length === 0 ? "" : ` It does hold ${sameIssuer.length === 1 ? "a document" : "documents"} under the ${issuers.map((i) => i.toUpperCase()).join("/")} framework (${sameIssuer.slice(0, 5).join(", ")}${sameIssuer.length > 5 ? ", \u2026" : ""}); if one of those is what was meant, cite it by its id or title.`;
-    return none({
-      coverage_note: heldNames.length === 0 ? identifiers ? `"${text}" names an instrument by an identifier (${quoted}), and this library holds no document identified as such. Nothing was matched, rather than sourcing a same-numbered provision from another document. ${wayOut}` : `"${text}" names an instrument by description (${quoted}), and this library holds no document identified as such. Nothing was matched, rather than sourcing a same-numbered provision from another document.${issuerNote} ${wayOut}` : `"${text}" names ${heldList} and also an instrument by ${how} (${quoted}) that it holds no document identified as, so which of the two the provision belongs to cannot be told. Nothing was matched, rather than sourcing a same-numbered provision from either. Name one instrument per citation. ${wayOut}`
-    });
-  }
-  const unplaced = unplacedIdentifier(text, rest);
-  if (unplaced !== null) {
-    return none({
-      coverage_note: `"${text}" names a document by the number ${unplaced}, and this library holds no document that answers to it, so the number was not read as part of a provision's. Nothing was matched, rather than sourcing a same-numbered provision from another document. The library's overview lists the documents it holds; or search with the document's name.`
-    });
-  }
-  const unrecognised = docs === null && heldMention === void 0 ? unrecognisedNameTail(queryTokens) : null;
-  if (unrecognised !== null) {
-    const held = [...new Set(regulations.map((r) => r.document_id))];
-    const partialNote = citationPartialClause(holdings, null);
-    return none({
-      coverage_note: `"${text}" is about something this library does not recognise as a document it holds ("${unrecognised.join(" ")}"), so a provision with that number in a held document would be a guess. Nothing was matched. Name the document by an id or title from the library's overview${held.length === 0 ? "" : ` (${held.slice(0, 6).join(", ")}${held.length > 6 ? ", \u2026" : ""})`}, or drop the words that are not part of its name.${partialNote === null ? "" : ` ${partialNote}`}`
-    });
-  }
-  const spine = spineOf(rest.filter((t) => !STRUCTURAL.has(t)));
-  if (spine.length === 0) {
-    const named = docs === null ? [] : [...docs];
-    return none({
-      coverage_note: named.length > 0 ? `"${text}" names a document this library holds (${named.join(", ")}) but no provision within it. Add a provision number, or search inside it.` : `"${text}" carries no provision number to resolve, and names no document this library holds. If it names an instrument, this library may still describe it without holding it \u2014 search for its distinctive words, or check the library's overview for what it holds.`
-    });
-  }
-  const recordSpine = (r) => spineOf(bare(citationTokens(r.citation)).filter((t) => !STRUCTURAL.has(t)));
-  const spineHits = pool.filter((r) => arraysEqual(recordSpine(r), spine));
-  if (spineHits.length === 1) {
-    return { ...none(), match: spineHits[0] ?? null, confidence: "segment" };
-  }
-  if (spineHits.length > 1) return ambiguousResolution(text, spineHits);
-  const partial2 = citationPartialClause(holdings, docs);
-  const withPartial = (note) => partial2 === null ? note : `${note} ${partial2}`;
-  const relatives = pool.filter((r) => startsWithTokens(recordSpine(r), spine));
-  if (relatives.length > 0) {
-    return none({
-      candidates: relatives.slice(0, MAX_CANDIDATES).map(asCandidate),
-      coverage_note: withPartial(
-        `No provision is "${text}" itself. This library holds ${relatives.length} narrower provision(s) under it${relatives.length > MAX_CANDIDATES ? ` (first ${MAX_CANDIDATES} listed)` : ""}; open one, or walk its subtree.`
-      )
-    });
-  }
-  const containerTokens = rest.filter((t) => !STRUCTURAL.has(t));
-  const containers = (spineIsFaithful(containerTokens) ? pool : []).map((r) => ({ r, rs: recordSpine(r), rt: bare(citationTokens(r.citation)).filter((t) => !STRUCTURAL.has(t)) })).filter(({ rs, rt }) => rs.length > 0 && spineIsFaithful(rt) && startsWithTokens(spine, rs)).sort((a, b) => b.rs.length - a.rs.length);
-  if (containers.length > 0) {
-    const holders = [...new Set(containers.map(({ r }) => r.document_id))];
-    if (holders.length > 1) {
-      const perDocument = holders.map((d) => containers.find(({ r }) => r.document_id === d).r);
-      const listed = perDocument.slice(0, MAX_CANDIDATES);
-      const where = docs === null ? `sit in ${holders.length} documents (${holders.slice(0, 5).join(", ")}${holders.length > 5 ? ", \u2026" : ""}) and the citation names none of them` : `sit in ${holders.length} of the documents it names (${holders.slice(0, 5).join(", ")}${holders.length > 5 ? ", \u2026" : ""})`;
-      return none({
-        unmatched_segments: spine,
-        candidates: listed.map(asCandidate),
-        coverage_note: `No provision is "${text}" itself \u2014 this library does not address provisions at that granularity. Provisions that could contain it ${where}, so which one it belongs to cannot be told, and nothing is said here about whether the text of any of them has the point. ${perDocument.length > listed.length ? `(First ${MAX_CANDIDATES} listed.) ` : ""}Name the document, or open the candidates and check.`
-      });
-    }
-    const best = containers[0];
-    const points = spine.slice(best.rs.length);
-    const inside = points.join(".");
-    const carries = textCarriesPoint(best.r.text, points);
-    const held = `It holds the provision containing it: "${best.r.citation}" (${best.r.id})`;
-    const tail2 = carries === "yes" ? `, whose text carries point ${inside}. Open it and quote the point from its text rather than citing this resolution.` : carries === "no" ? `, but no point ${inside} was found in its text; its numbering may differ. Open it and check before anything is cited from this resolution.` : `; whether its text has point ${inside} could not be established, as its numbering could not be read reliably. Open it.`;
-    return none({
-      unmatched_segments: spine,
-      candidates: containers.slice(0, MAX_CANDIDATES).map(({ r }) => asCandidate(r)),
-      coverage_note: `No provision is "${text}" itself \u2014 this library does not address provisions at that granularity. ${held}${tail2}`
-    });
-  }
-  return none({
-    unmatched_segments: spine,
-    coverage_note: `Nothing in this library is numbered ${spine.join(".")}${docs === null ? "" : " in the document named"}. ` + (partial2 === null ? "" : `${partial2} `) + "Try a search on the citation's key words."
-  });
 }
 function createFileAdapters(corpus) {
   const regMap = new Map(corpus.regulation.map((r) => [r.id, r]));
@@ -16796,6 +16810,7 @@ var package_default = {
     "./schema": "./src/schema.ts",
     "./adapters": "./src/adapters.ts",
     "./file-adapter": "./src/file-adapter.ts",
+    "./citation": "./src/citation/index.ts",
     "./validate": "./src/validate.ts",
     "./citation-style": "./src/citation-style.ts",
     "./playbook-context": "./src/playbook-context.ts",

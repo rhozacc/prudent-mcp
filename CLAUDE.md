@@ -14,7 +14,8 @@ A read-only MCP server over a structured knowledge base for IRB credit-risk mode
 src/server.ts            instructions (~300 tokens, held by tests/instructions.test.ts) and registration
 src/schema.ts            zod schemas + template-literal URI types; PlaybookSchema is the compiled playbook
 src/adapters.ts          per-surface interfaces, empty defaults, handles
-src/file-adapter.ts      adapters over a corpus JSON file, regulation_history, and the citation resolver
+src/file-adapter.ts      adapters over a corpus JSON file and regulation_history; re-exports the resolver's public names
+src/citation/            the citation resolver: tokens, points, names, instruments, described, aliases, resolve (index.ts is `prudent-mcp/citation`)
 src/brief.ts             routePlaybooks: BM25F over playbooks + a vote of the provisions a question finds
 src/render.ts            a playbook as deterministic text; citations come from ids; budgets
 src/playbook-verify.ts   verifyPlaybook V1-V8, the gate between a compiled draft and a reader (pure)
@@ -74,7 +75,7 @@ Bun, strict TypeScript (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`
 **`cite`**
 - A confident wrong citation is the worst failure this server can produce. `resolveCitationDetailed` returns `CitationResolution` (`match`, `confidence`, `candidates`, `ambiguous`, `unmatched_segments`, `coverage_note`), never a bare record. Matching is exact and ordered (exact, alias, instrument gate, numeric spine within the named document); narrower relatives and the containing provision are reported as `candidates` with `match` still null. Don't add a fuzzy fallback and don't fold candidates into `match`.
 - `"alias"` confidence is distinct from `"exact"`: EBA guidelines number paragraphs, and "Article 178" is also a real CRR article.
-- The instrument gates decline a citation naming an instrument the library does not hold, by NUMBER (every standard spelling), by identifier, or by DESCRIPTION (`DESCRIBED_INSTRUMENTS`, one table, every spelling of a kind). A gate that reads one spelling is walked round by the next, so I3's probes carry the respellings. A derived instrument name scopes a citation only when it is accounted for (`accountedFor`); otherwise the ids alone decide. A note may only claim what it verified: `textCarriesPoint` is the ONE reader and returns `yes | no | unknown`. Both guards of the container rule (a faithful, non-empty spine; spine tokens joined on a separator) are load-bearing. Rationale and counts: comments in `src/file-adapter.ts`, `CHANGES.md`.
+- The instrument gates decline a citation naming an instrument the library does not hold, by NUMBER (every standard spelling), by identifier, or by DESCRIPTION (`DESCRIBED_INSTRUMENTS`, one table, every spelling of a kind). A gate that reads one spelling is walked round by the next, so I3's probes carry the respellings. A derived instrument name scopes a citation only when it is accounted for (`accountedFor`); otherwise the ids alone decide. A note may only claim what it verified: `textCarriesPoint` is the ONE reader and returns `yes | no | unknown`. Both guards of the container rule (a faithful, non-empty spine; spine tokens joined on a separator) are load-bearing. Rationale and counts: comments in `src/citation/`, `CHANGES.md`.
 - Don't add curated facts about particular real instruments for descriptive names; a note states no requirements.
 
 **Pending changes and `as_of`**

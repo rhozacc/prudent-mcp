@@ -126,7 +126,8 @@ The `adapters` object is the seam. Defaults return empty, `examples/inmemory-dem
 | Notes (the one place), pending-change plumbing | `src/tools/notes.ts`, `src/tools/pending.ts` |
 | Schemas (zod and template-literal ids) | `src/schema.ts` |
 | Adapter interfaces and the handle object | `src/adapters.ts` |
-| Corpus-file adapters, `as_of` history, the citation resolver | `src/file-adapter.ts` |
+| Corpus-file adapters, `as_of` history | `src/file-adapter.ts` |
+| The citation resolver (instrument gates, aliases, container point, the ordered passes) | `src/citation/` |
 | Ranking (BM25F) | `src/search.ts` |
 | Playbook routing, rendering, verification | `src/brief.ts`, `src/render.ts`, `src/playbook-verify.ts` |
 | Holdings, pending changes, amendments, placeholders (one definition each) | `src/holdings.ts`, `src/pending.ts`, `src/amendments.ts`, `src/placeholders.ts` |
