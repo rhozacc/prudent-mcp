@@ -814,3 +814,27 @@ describe("a document named twice in one citation", () => {
     expect(r.match?.id).toBe("regulation://gl-2017-16/p3");
   });
 });
+
+// ── A number that only starts like a held act's number ─────────────────────────
+//
+// Ids squash an act's kind, year and serial together ("regulation2099123"), so a bare substring test let a citation of
+// Regulation 2099/12 find the document held for 2099/123 and be answered out of it. A digit may not follow the match.
+describe("a numbered act whose number is a prefix of a held act's number", () => {
+  const held = [
+    reg("regulation://regulation-2099-123/article-1", "Article 1", "regulation-2099-123", "regulation-2099-123"),
+    reg("regulation://regulation-2099-123/article-4", "Article 4", "regulation-2099-123", "regulation-2099-123"),
+    reg("regulation://regulation-2012-529/article-2", "Article 2", "regulation-2012-529", "regulation-2012-529"),
+  ];
+
+  it("is not held: the citation declines instead of resolving into the longer number's act", () => {
+    for (const text of ["Article 1 of Regulation (EU) 2099/12", "Article 4 of Regulation (EU) 2099/1", "Article 2 of Regulation (EU) No 52/2012"]) {
+      const r = resolveCitationDetailed(held, text);
+      expect(r.match, text).toBeNull();
+    }
+  });
+
+  it("the held act's own number still resolves", () => {
+    expect(resolveCitationDetailed(held, "Article 4 of Regulation (EU) 2099/123").match?.id).toBe("regulation://regulation-2099-123/article-4");
+    expect(resolveCitationDetailed(held, "Article 2 of Regulation (EU) No 529/2012").match?.id).toBe("regulation://regulation-2012-529/article-2");
+  });
+});

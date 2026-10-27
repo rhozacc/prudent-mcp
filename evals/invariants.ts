@@ -691,6 +691,32 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
     }
   }
 
+  // A number that is a PREFIX of a held act's number ("2018/17" beside a held 2018/171). The held check once compared
+  // squashed ids by substring, so the shorter number counted as held and its article was answered out of the longer
+  // act. Built from the documents the library lists, so it binds only where a numbered act is held.
+  {
+    const listed = asObject((await s.call("sources")).json);
+    const ids = ((listed?.["documents"] ?? []) as Array<{ document_id?: unknown }>).map((d) => String(d.document_id ?? ""));
+    for (const id of ids) {
+      const m = /^(regulation|directive|decision)-(\d{4})-(\d{2,})$/.exec(id);
+      if (m === null) continue;
+      const [, kind, year, serial] = m as unknown as [string, string, string, string];
+      const short = serial.slice(0, -1);
+      const word = kind.charAt(0).toUpperCase() + kind.slice(1);
+      const probe = Number(year) < 2015 ? `Article 1 of ${word} (EU) No ${short}/${year}` : `Article 1 of ${word} (EU) ${year}/${short}`;
+      const reply = await s.call("cite", { text: probe });
+      const got = /"id"\s*:\s*"([^"]+)"/.exec(reply.text)?.[1];
+      if (got !== undefined && got.includes(id)) {
+        findings.push({
+          id: "I3/prefix-number",
+          severity: "fatal",
+          summary: "cite answers a citation of one numbered act out of a held act whose number merely starts the same way.",
+          evidence: [`cite("${probe}") → ${got}`],
+        });
+      }
+    }
+  }
+
   // A document identified by its number ("EBA/GL/2099/04"), which no held document
   // answers to. The framework alone can scope such a citation, and the number then
   // reads as points of a provision. Declined, with no candidates, in any wording.

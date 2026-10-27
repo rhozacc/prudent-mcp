@@ -316,6 +316,15 @@ function heldNeedles(instrument: string): string[] {
  */
 const heldDocumentsCache = new WeakMap<object, Map<string, Set<string>>>();
 
+/** `needle` occurs in `hay` at a position not immediately followed by a digit. */
+function occursNotBeforeDigit(hay: string, needle: string): boolean {
+  for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + 1)) {
+    const next = hay.charAt(at + needle.length);
+    if (next === "" || next < "0" || next > "9") return true;
+  }
+  return false;
+}
+
 export function heldInstrumentDocuments(regulations: Regulation[], instrument: string): Set<string> {
   const byInstrument = heldDocumentsCache.get(regulations) ?? new Map<string, Set<string>>();
   heldDocumentsCache.set(regulations, byInstrument);
@@ -325,7 +334,10 @@ export function heldInstrumentDocuments(regulations: Regulation[], instrument: s
   const docs = new Set<string>();
   for (const r of regulations) {
     const hay = `${r.framework}${r.document_id}${idDocSegment(r.id)}`.toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (needles.some((n) => hay.includes(n))) docs.add(r.document_id);
+    // A needle counts only where no digit follows it: the squashed ids run their numbers together, so a bare substring
+    // test let "regulation201817" (Regulation 2018/17) find a document id'd for 2018/171 and answer a citation of one act
+    // out of another, which is the confident wrong citation this resolver exists to prevent.
+    if (needles.some((n) => occursNotBeforeDigit(hay, n))) docs.add(r.document_id);
   }
   byInstrument.set(instrument, docs);
   return docs;
