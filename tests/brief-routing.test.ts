@@ -43,4 +43,15 @@ describe("routePlaybooks", () => {
     expect(r.ambiguous).toBe(true);
     expect(r.chosen).not.toBeNull();
   });
+
+  test("the head (title, questions) says what a playbook is about; a body that only mentions the words does not outweigh it", () => {
+    const about: Playbook = { ...twin("about"), title: "Gamma delta handling", questions: ["How is gamma delta handled?"], summary: "Gamma delta handling.", requirements: base.requirements.map((r) => ({ ...r, title: "Qqq", statement: "Qqq." })) };
+    // Mentions the words often in its long statements, as a neighbouring topic does, but is about something else.
+    const mentions: Playbook = { ...twin("mentions"), requirements: base.requirements.map((r) => ({ ...r, title: "Qqq", statement: `${"Gamma delta gamma delta applies here. ".repeat(6)}Other matters follow at length.` })) };
+    const question = { question: "gamma delta", playbooks: [mentions, about], rankedProvisions: [] as string[], params: { floor: 0 } };
+    expect(routePlaybooks(question).routes[0]?.playbook.id).toBe(about.id);
+    // The body alone prefers the neighbour: it is the head that settles it.
+    expect(routePlaybooks({ ...question, params: { floor: 0, headWeight: 0 } }).routes[0]?.playbook.id).toBe(mentions.id);
+    expect(routePlaybooks({ ...question, params: { floor: 0, headWeight: 1 } }).routes[0]?.playbook.id).toBe(about.id);
+  });
 });

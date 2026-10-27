@@ -3,8 +3,11 @@
  *
  * Two signals, both computed from what the library already ranks, combined by a fixed rule:
  *
- * - TEXT: BM25F over each playbook's title, typical questions, summary and requirements (the same ranking module as every
- *   other search), with the library's abbreviation table applied.
+ * - TEXT: BM25F over each playbook (the same ranking module as every other search), with the library's abbreviation table
+ *   applied, read in two halves ranked apart: the HEAD (title, typical questions, summary, requirement titles: what the
+ *   playbook says it is about) and the BODY (requirement statements, pitfalls: what it says). Neighbouring topics share body
+ *   vocabulary, and the body is the long part, so a single ranking over both is decided by the body; the head says which topic
+ *   a question is about, so it carries most of the weight.
  * - VOTE: the provisions the question finds, in rank order. Each provision that a playbook cites gives that playbook
  *   1/rank, shared among the playbooks that cite it (a provision three playbooks cite says less about which of them is meant), so a playbook whose provisions are the ones a practitioner's wording lands on wins even when its own prose
  *   uses other words ("RDS" in the question, "reference data set" in the text).
@@ -19,7 +22,7 @@
  *
  * Pure: ranked inputs in, a decision out.
  */
-import { distinctQueryTokens, playbookSearchFields, rankedSearch, type Glossary } from "./search.ts";
+import { distinctQueryTokens, playbookBodyFields, playbookHeadFields, rankedSearch, type Glossary } from "./search.ts";
 import { playbookProvisions } from "./referrers.ts";
 import type { Playbook, RegulationId } from "./schema.ts";
 
@@ -31,6 +34,8 @@ export const ROUTING = {
   voteDepth: 40,
   /** Weight of the text signal against the vote (the vote gets the rest). */
   textWeight: 0.7,
+  /** Weight of the head against the body within the text signal (the body gets the rest). */
+  headWeight: 0.7,
   /** The combined score a playbook must reach to be chosen at all, 0-1. */
   floor: 0.35,
   /** The leader is "ambiguous" when it leads the runner-up by less than this share of its own score. */
@@ -41,7 +46,7 @@ export const ROUTING = {
 
 export interface Route {
   playbook: Playbook;
-  /** Text signal, 0-1: half the BM25F score against the best, half the share of the question's terms the playbook matches. */
+  /** Text signal, 0-1: head and body each scored as half the BM25F score against the best, half the share of the question's terms the playbook matches, then weighted by `headWeight`. */
   text: number;
   /** Vote signal, 0-1 (reciprocal-rank vote against a fixed yardstick). */
   vote: number;
@@ -75,10 +80,18 @@ export function routePlaybooks(args: {
   const specific = args.params?.specificity !== false;
   if (playbooks.length === 0) return { routes: [], chosen: null, ambiguous: false, reason: "no_playbooks", neighbours: [] };
 
-  const matches = rankedSearch([...playbooks], question, playbookSearchFields, undefined, args.glossary === undefined ? undefined : { glossary: args.glossary });
-  const topBm25 = matches[0]?.score ?? 0;
   const tokens = Math.max(1, distinctQueryTokens(question));
-  const textOf = new Map(matches.map((m) => [m.record.id, (0.5 * (topBm25 > 0 ? m.score / topBm25 : 0)) + 0.5 * Math.min(1, m.coverage / tokens)] as const));
+  const items = [...playbooks];
+  const glossaryOption = args.glossary === undefined ? undefined : { glossary: args.glossary };
+  /** One view of the playbooks, 0-1 each: half the BM25F score against the best, half the share of the question's terms matched. */
+  const view = (fields: typeof playbookHeadFields): Map<string, number> => {
+    const matches = rankedSearch(items, question, fields, undefined, glossaryOption);
+    const top = matches[0]?.score ?? 0;
+    return new Map(matches.map((m) => [m.record.id, 0.5 * (top > 0 ? m.score / top : 0) + 0.5 * Math.min(1, m.coverage / tokens)] as const));
+  };
+  const head = view(playbookHeadFields);
+  const body = view(playbookBodyFields);
+  const textOf = new Map(playbooks.map((p) => [p.id, R.headWeight * (head.get(p.id) ?? 0) + (1 - R.headWeight) * (body.get(p.id) ?? 0)] as const));
 
   const cites = new Map(playbooks.map((p) => [p.id, playbookProvisions(p)] as const));
   const vote = new Map<string, number>();

@@ -11760,6 +11760,9 @@ var playbookSearchFields = [
   { name: "requirement_statements", weight: 1, get: (p) => p.requirements.map((r) => r.statement) },
   { name: "pitfalls", weight: 0.5, get: (p) => p.pitfalls.map((x) => x.text) }
 ];
+var HEAD_FIELDS = /* @__PURE__ */ new Set(["title", "questions", "summary", "requirement_titles"]);
+var playbookHeadFields = playbookSearchFields.filter((f) => HEAD_FIELDS.has(f.name));
+var playbookBodyFields = playbookSearchFields.filter((f) => !HEAD_FIELDS.has(f.name));
 
 // src/schema.ts
 var regulationIdSchema = external_exports.string().regex(/^regulation:\/\/.+/);
@@ -16882,6 +16885,8 @@ var ROUTING = {
   voteDepth: 40,
   /** Weight of the text signal against the vote (the vote gets the rest). */
   textWeight: 0.7,
+  /** Weight of the head against the body within the text signal (the body gets the rest). */
+  headWeight: 0.7,
   /** The combined score a playbook must reach to be chosen at all, 0-1. */
   floor: 0.35,
   /** The leader is "ambiguous" when it leads the runner-up by less than this share of its own score. */
@@ -16894,10 +16899,17 @@ function routePlaybooks(args) {
   const R = { ...ROUTING, ...args.params ?? {} };
   const specific = args.params?.specificity !== false;
   if (playbooks.length === 0) return { routes: [], chosen: null, ambiguous: false, reason: "no_playbooks", neighbours: [] };
-  const matches = rankedSearch([...playbooks], question, playbookSearchFields, void 0, args.glossary === void 0 ? void 0 : { glossary: args.glossary });
-  const topBm25 = matches[0]?.score ?? 0;
   const tokens = Math.max(1, distinctQueryTokens(question));
-  const textOf = new Map(matches.map((m) => [m.record.id, 0.5 * (topBm25 > 0 ? m.score / topBm25 : 0) + 0.5 * Math.min(1, m.coverage / tokens)]));
+  const items = [...playbooks];
+  const glossaryOption = args.glossary === void 0 ? void 0 : { glossary: args.glossary };
+  const view = (fields) => {
+    const matches = rankedSearch(items, question, fields, void 0, glossaryOption);
+    const top = matches[0]?.score ?? 0;
+    return new Map(matches.map((m) => [m.record.id, 0.5 * (top > 0 ? m.score / top : 0) + 0.5 * Math.min(1, m.coverage / tokens)]));
+  };
+  const head = view(playbookHeadFields);
+  const body = view(playbookBodyFields);
+  const textOf = new Map(playbooks.map((p) => [p.id, R.headWeight * (head.get(p.id) ?? 0) + (1 - R.headWeight) * (body.get(p.id) ?? 0)]));
   const cites = new Map(playbooks.map((p) => [p.id, playbookProvisions(p)]));
   const vote = /* @__PURE__ */ new Map();
   const citedBy = /* @__PURE__ */ new Map();
