@@ -56,7 +56,7 @@ export type Commentary = z.infer<typeof CommentarySchema>;
 // A citation OUT of the corpus: an instrument this corpus does not hold but
 // whose provisions the record elaborates. Kept as strings, deliberately — a
 // typed RegulationId would assert the target is served, and the whole point is
-// that it is not. `resolve_citation` declines on these; this field is how a
+// that it is not. `cite` declines on these; this field is how a
 // caller learns the relationship exists anyway, which is what makes "what
 // operationalises CRR Article 178?" answerable at all.
 export const ExternalCitationSchema = z.object({
@@ -124,7 +124,7 @@ export const RegulationSchema = z.object({
   parent: regulationIdSchema.optional(),
   // Sub-regulations plus the checks/tests that operationalize this record. A
   // check/test child MUST also name this regulation in its derived_from /
-  // regulatory_basis (the mirror invariant) — that keeps get_referrers the
+  // regulatory_basis (the mirror invariant) — that keeps `related` the
   // single computed reverse index rather than a second source of truth.
   children: z.array(regulationChildIdSchema).default([]),
   // --- Optional provenance and structure, all additive -----------------------
@@ -457,7 +457,7 @@ export const DocumentHoldingSchema = z.object({
 });
 export type DocumentHolding = z.infer<typeof DocumentHoldingSchema>;
 
-// One open (not yet ingested) pending change, as get_corpus_info lists it.
+// One open (not yet ingested) pending change, as `sources` lists it.
 export const PendingChangeSummarySchema = z.object({
   source: sourceIdSchema,
   document_id: z.string(),

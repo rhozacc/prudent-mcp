@@ -65,7 +65,7 @@ drives the generator, the docs, and the drift test.
 - Cross-surface references are typed via template literal URI types (`RegulationId`,
   `CheckId`, …). Do not widen them to `string` to make an error go away — the error is the
   feature.
-- `get_referrers` is the single computed reverse index. Don't add a second scan.
+- `related` (through `src/referrers.ts`) is the single computed reverse index. Don't add a second scan.
 
 ### If you change the docs
 

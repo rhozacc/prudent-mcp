@@ -92,14 +92,14 @@ export function placeholderNotice(found: PreAdoptionPlaceholders): string {
 }
 
 /**
- * Attach the flag to a regulation response body, leading it (like `as_of_note`)
+ * Attach the flag to a regulation response body, leading it (like the version note)
  * so the caveat is read before the text it qualifies. A text without a
  * placeholder returns the body untouched: the keys are absent, never present and
  * empty (absent is not empty).
  *
- * Applied to a single served record (get_regulation, expand_regulation), never to
+ * Applied to a single served record (`get`, `related`), never to
  * a `detail: 'full'` search row: those rows ARE the canonical record schema and
- * stay unmodified, and the flag is one get_regulation away. Embedded children of
+ * stay unmodified, and the flag is one `get` away. Embedded children of
  * an expansion are not scanned either - the flag speaks for the record asked for.
  */
 export function withPlaceholderFlag<T extends { text: string }>(

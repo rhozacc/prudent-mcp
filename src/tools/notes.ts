@@ -1,8 +1,8 @@
 /**
  * Notes: the one place a response says something the reader must not lose.
  *
- * Everything the 0.x server said in `as_of_note`, `pending_changes_note`, `pre_adoption_placeholders` + `notice`,
- * `coverage_note` and the weak-match sentence is one list here, written to be repeated to the person the model is
+ * Everything the 0.x server said in five separate fields and sentences (see the migration table in docs/tools/index.md)
+ * is one list here, written to be repeated to the person the model is
  * answering. A note has a type (so a client can route it), a text (in the library's own words: no tool name, no field
  * name, none of the terms in src/language.ts) and, where it concerns particular provisions, the citations it applies to.
  *

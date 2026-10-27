@@ -15,14 +15,15 @@ bun run demo                        # plain stdio
 
 | Tool call | What you should see |
 |---|---|
-| `get_corpus_info` | counts (4/3/3/2) and coverage (CRR, EBA-GL-2017-16) |
-| `list_review_areas` | `calibration` with two children, plus two flat siblings |
-| `search_regulation` `"long-run average"` | hits CRR 180/1/a and EBA GL para 78 |
-| `get_regulation` `"regulation://crr/178/1/b"` | latest text, version 2024-01-09 |
-| `get_regulation` with `as_of: "2018-01-01"` | 2013-vintage text — `document_version` differs |
-| `resolve_citation` `"CRR Art. 180(1)(a)"` | resolves to the structured Regulation |
-| `get_referrers` `"regulation://crr/180/1/a"` | LRA check + PD calibration playbook |
-| `get_test` `"test://jeffreys"` | `family="calibration-binomial"` and aliases |
-| `get_playbook` `"playbook://calibration/pd"` | three phases with mixed-surface references |
+| `topics` | the calibration area and its one playbook |
+| `brief` `"How is the long-run average PD derived?"` | the playbook as text: what it rests on, what has to be shown, methods, pitfalls |
+| `playbook` `"pd-long-run-average"`, `section: "R2"` | one requirement with the full text of its provisions |
+| `search` `"long-run average"` | hits CRR 180/1/a and EBA GL para 78, with coverage |
+| `get` `"regulation://crr/178/1/a"` | the provision plus an `amendment` note (the demo carries one applying in 60 days) |
+| `get` `"regulation://crr/178/1/b"` with `as_of: "2018-01-01"` | 2013-vintage text — `document_version` differs |
+| `cite` `"CRR Art. 180(1)(a)"` | resolves to the provision |
+| `cite` `"Article 5 of Regulation (EU) 2019/2033"` | `match: null` and an `outside_library` note |
+| `related` `"regulation://crr/180/1/a"` | LRA check, tests and the playbook requirement resting on it |
+| `sources` | each document held whole, in part or undeclared, and the open change |
 
-This is a development-time adapter — substring search, regex citation resolution, hand-typed seed. Real backends implement the same `*Adapter` interfaces with whatever storage and search behaviour they need.
+This is a development-time adapter: hand-typed seed, shared ranking and citation resolver. Real backends implement the same `*Adapter` interfaces with whatever storage they need.

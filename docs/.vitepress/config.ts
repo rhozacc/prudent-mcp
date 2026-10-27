@@ -20,34 +20,25 @@ export default withMermaid(defineConfig({
   ],
   themeConfig: {
     nav: [
-      { text: "Guide",    link: "/guide/" },
-      { text: "Tools",    link: "/tools/" },
-      { text: "Corpus",   link: "/corpus/" },
-      { text: "Examples", link: "/examples/" },
-      { text: "FAQ",      link: "/guide/faq" },
+      { text: "Quickstart", link: "/guide/quickstart" },
+      { text: "Tools",      link: "/tools/" },
+      { text: "Examples",   link: "/examples/" },
+      { text: "Corpus",     link: "/corpus/" },
     ],
     sidebar: [
       {
         text: "Guide",
         items: [
-          { text: "Introduction",  link: "/guide/" },
-          { text: "Concepts",      link: "/guide/concepts" },
           { text: "Quickstart",    link: "/guide/quickstart" },
-          { text: "Architecture",  link: "/guide/architecture" },
           { text: "Clients",       link: "/guide/clients" },
-          { text: "FAQ",           link: "/guide/faq" },
+          { text: "Architecture",  link: "/guide/architecture" },
         ],
       },
       {
-        text: "Tools",
+        text: "Use",
         items: [
-          { text: "Overview",   link: "/tools/" },
-          { text: "Meta",       link: "/tools/meta" },
-          { text: "Regulation", link: "/tools/regulation" },
-          { text: "Tests",      link: "/tools/tests" },
-          { text: "Checks",     link: "/tools/checks" },
-          { text: "Playbooks",  link: "/tools/playbooks" },
-          { text: "Sources",    link: "/tools/sources" },
+          { text: "Tools",    link: "/tools/" },
+          { text: "Examples", link: "/examples/" },
         ],
       },
       {
@@ -56,11 +47,10 @@ export default withMermaid(defineConfig({
           { text: "Corpus structure", link: "/corpus/" },
           { text: "Schema reference", link: "/corpus/schemas" },
           { text: "Corpus graph",     link: "/corpus/graph" },
-          { text: "Prompts",          link: "/prompts/" },
           { text: "Adapters",         link: "/adapters/" },
+          { text: "1.0 design",       link: "/design/1.0" },
         ],
       },
-      { text: "Examples", link: "/examples/" },
     ],
     socialLinks: [
       { icon: "github", link: "https://github.com/rhozacc/prudent-mcp" },

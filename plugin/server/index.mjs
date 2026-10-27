@@ -10889,7 +10889,7 @@ var RegulationSchema = external_exports.object({
   parent: regulationIdSchema.optional(),
   // Sub-regulations plus the checks/tests that operationalize this record. A
   // check/test child MUST also name this regulation in its derived_from /
-  // regulatory_basis (the mirror invariant) — that keeps get_referrers the
+  // regulatory_basis (the mirror invariant) — that keeps `related` the
   // single computed reverse index rather than a second source of truth.
   children: external_exports.array(regulationChildIdSchema).default([]),
   // --- Optional provenance and structure, all additive -----------------------

@@ -17,10 +17,10 @@ The corpus has five kinds of record. Each maps to a URI scheme and to a section 
 | **Regulation** | `regulation://...` | A specific paragraph of a specific regulation. Versioned per source document. |
 | **Test** | `test://...` | A statistical test described — what it measures, when to use it, how to read its output. The MCP never executes tests; it only describes them. |
 | **Check** | `check://...` | A qualitative check with a concrete pass/fail expectation, traced back to law. |
-| **Playbook** | `playbook://...` | A guided walkthrough for validating a review area, structured as phases that reference regulation, tests, and checks. |
+| **Playbook** | `playbook://...` | What one topic requires, compiled across documents: every statement cited, law and practice kept apart. |
 | **Source** | `source://...` | A source document the corpus derives from — currency status, verification date, supersession pointer, upcoming milestones. The regulatory-context registry. |
 
-Plus one taxonomy structure (`ReviewArea`) and runtime-computed types (`CorpusInfo`, `Referrers`) — those last two are derived, not stored.
+Beside them the corpus file carries `topics` (areas and the topics the playbooks were compiled for) and an optional `glossary`, and the server computes `CorpusInfo`, `Referrers` and the response notes at query time; those are derived, not stored.
 
 ## ID format
 
@@ -39,9 +39,8 @@ check://{area}/{topic}[/{specific}]
   e.g. check://calibration/pd/lra-derived
        check://default-definition/utp
 
-playbook://{area}[/{subarea}]
-  e.g. playbook://calibration
-       playbook://calibration/lgd
+playbook://{topic-id}
+  e.g. playbook://pd-long-run-average
 
 source://{framework}/{document-id}
   e.g. source://eba/gl-2017-16
@@ -55,7 +54,7 @@ The five schemes share the same shape: scheme name → typed path segments. `reg
 | Segment | Value | Meaning |
 |---|---|---|
 | scheme | `regulation` | Surface name; one of five |
-| 1 | `crr` | Framework — `crr`, `eba`, `ecb`, … |
+| 1 | `crr` | Framework or document: `crr`, `eba`, `ecb`, … |
 | 2 | `178` | Article |
 | 3 | `1` | Paragraph — optional |
 | 4 | `a` | Point — optional |
@@ -80,7 +79,7 @@ A `Check.derived_from: RegulationId[]` rejects a `TestId` at the type level. Ada
 
 Only `Regulation` is versioned. The other surfaces are always served latest (tests, checks, and playbooks carry a `last_updated` audit field; sources carry `verified`). Sources track supersession — a `status` plus a `superseded_by` pointer — which is not version history: the registry keeps one record per document, and the superseded record simply points at its successor.
 
-A `Regulation` is identified by its `id` plus the source document's `document_version`. When CRR is amended, the same `id` (e.g. `regulation://crr/178/1/b`) gets a new `document_version` and a new `effective_from` date. The MCP's `get_regulation(id, as_of?)` walks the version history to return the version that was in force on the given date.
+A `Regulation` is identified by its `id` plus the source document's `document_version`. When CRR is amended, the same `id` (e.g. `regulation://crr/178/1/b`) gets a new `document_version` and a new `effective_from` date. The `get` tool (`ids`, `as_of?`) walks the version history to return the version that was in force on the given date.
 
 What this means for an adapter: when an amended regulation is ingested, the old record isn't replaced — a new version is added alongside, with its own `effective_from`. The corpus stores the full history per regulation ID.
 
@@ -107,11 +106,11 @@ In the file-adapter format, history lives under the optional top-level `regulati
 | Situation | Result |
 |---|---|
 | no `as_of` | the current record (or `null` if the id is unknown) |
-| `as_of`, no history for the id | the current record — the only version the corpus knows — **flagged**: the adapter reports `basis: "current"` and the tools attach an `as_of_note`. The exception is a date before the source document existed, which is a miss (see below) |
+| `as_of`, no history for the id | the current record — the only version the corpus knows — **flagged**: the adapter reports `basis: "current"` and the tools attach a `version` note. The exception is a date before the source document existed, which is a miss (see below) |
 | `as_of`, history present | the last entry with `effective_from <= as_of` (boundary dates inclusive), `basis: "history"`, no note |
 | `as_of` predates every entry | `null` — the tool layer explains the rule in its miss message |
 
-"The only version the corpus knows" is not "the version in force then", and the record alone cannot say which it is, so a hit served from current text under a past date says so in an additive `as_of_note` (which names the `document_version` served and tells the reader not to present it as the historical text). The note is absent without `as_of`, when history covers the date, and on a miss. The adapter side of this is the optional `resolveAsOf` method — see [Adapters](../adapters/#saying-which-basis-an-as-of-record-was-served-on).
+"The only version the corpus knows" is not "the version in force then", and the record alone cannot say which it is, so a hit served from current text under a past date says so in a `version` note (which names the `document_version` served and tells the reader not to present it as the historical text). The note is absent without `as_of`, when history covers the date, and on a miss. The adapter side of this is the optional `resolveAsOf` method — see [Adapters](../adapters/#saying-which-basis-an-as-of-record-was-served-on).
 
 For an id with no history, the registry still bounds the answer: an `as_of` earlier than the earliest `published` (else `effective_from`) of any source with that record's `document_id` is a miss, because the document did not exist yet. A source that carries neither date makes no claim, and the id behaves as before.
 
@@ -132,6 +131,15 @@ A specific paragraph of a specific regulation, frozen to a document version.
 | `commentary` | `Commentary[]` | no, default `[]` | Interpretive material attached to this paragraph (Q&A, supervisor letters). |
 | `parent` | `RegulationId` | no | Parent record — e.g. the section that contains this paragraph. Always a regulation. |
 | `children` | `RegulationChildId[]` | no, default `[]` | Child records — sub-regulations (paragraphs within a section) **plus** the checks/tests that operationalize this record. `RegulationChildId = RegulationId \| TestId \| CheckId`. Denormalized inverse of `parent`. |
+| `heading_path` | `string[]` | no | The document's own headings above this provision, outermost first, verbatim. The words a reader searches by often sit in a heading, not in the paragraph (search weights this field highest). |
+| `role` | enum | no | `operative`, `definition`, `scope`, `transitional`, `background` or `annex`. `background` provisions are never searched. |
+| `kind`, `obligation` | enum | no | The provision's kind, and its strength as the source words it (`must` / `should` / `may` / `none`): "should" versus "shall" is the difference between guidance and a requirement. |
+| `amends` | `Amendment[]` | no | On a provision of an AMENDING instrument: `{ target, op: replace \| insert_after \| delete, effective_from, point? }`. The target is a provision of another document (the linter checks it resolves). Drives the amendment note on the target. |
+| `citation_aliases` | `string[]` | no | Other spellings that name this record. An alias resolves with `confidence: "alias"`, never `"exact"`. |
+| `cites` | `ExternalCitation[]` | no | Citations the text makes, resolved by the server to the provisions they name (shown by `related`). |
+| `pages`, `anchor`, `is_metadata_only` | | no | Where the text was read from, a verbatim snippet locating it, and whether it carries no substantive obligation. |
+
+**Every optional field above is optional, never defaulted: absent is not empty.** `pages: []` says the text was read from no page; a missing `pages` says it was never captured. A corpus that omits them all behaves exactly as before.
 
 ### Commentary
 
@@ -201,7 +209,7 @@ The relationship is symmetric and must be kept consistent:
 - the check/test names the regulation in its `parent`;
 - and the same regulation appears in the check's `derived_from` (or the test's `regulatory_basis`).
 
-That last rule is the **mirror invariant**. It keeps `derived_from` / `regulatory_basis` the single authoritative up-link, so `get_referrers` — which already scans those forward links — needs no extra work and the two views never drift. A check may derive from several regulations but nests under exactly one (`parent`); the others stay reachable through `derived_from`.
+That last rule is the **mirror invariant**. It keeps `derived_from` / `regulatory_basis` the single authoritative up-link, so `related` — which already reads those forward links — needs no extra work and the two views never drift. A check may derive from several regulations but nests under exactly one (`parent`); the others stay reachable through `derived_from`.
 
 ```json
 {
@@ -234,6 +242,7 @@ A statistical test described, not executed. The corpus tells Claude *what the te
 | `purpose` | `string` | yes | What the test measures and when to use it. |
 | `acceptance_criteria` | `string` | no | Concrete pass/fail bar in plain language. Optional because some tests are diagnostic-only. |
 | `regulatory_basis` | `RegulationId[]` | no, default `[]` | Regulations that reference or require this test family. Softer than `Check.derived_from` — "referenced by" rather than "derived from." |
+| `primary_basis` | `RegulationId[]` | no | The provisions this test actually implements, as against the span `regulatory_basis` covers. A subset of `regulatory_basis`. |
 | `parent` | `RegulationId` | no | Set when this test is listed as a child of a regulation. Must appear in `regulatory_basis` (the mirror invariant). |
 | `last_updated` | `string` (ISO date) | yes | |
 
@@ -267,6 +276,7 @@ A qualitative check with a concrete pass/fail expectation, traced back to law.
 | `id` | `CheckId` | yes | e.g. `check://calibration/pd/lra-derived` |
 | `name` | `string` | yes | Display name. |
 | `derived_from` | `RegulationId[]` | no, default `[]` | Regulation IDs this check operationalizes. |
+| `primary_basis` | `RegulationId[]` | no | The one to three provisions this check actually restates; a subset of `derived_from`. `derived_from` is a span (a check read off a section is traced to all of it), so `related` leads with `primary_basis`. |
 | `parent` | `RegulationId` | no | Set when this check is listed as a child of a regulation. Must appear in `derived_from` (the mirror invariant). |
 | `expectation` | `string` | yes | What "pass" looks like, in plain language. |
 | `expected_evidence` | `string[]` | no, default `[]` | Artifacts the reviewer must gather to complete this check. |
@@ -302,61 +312,54 @@ A check can derive from multiple regulations (overlapping requirements are commo
 
 ## Playbook
 
-A guided walkthrough for validating a review area. Structured as phases; each phase carries references that mix all three other surfaces.
+One playbook per **topic**, compiled across documents by the factory and checked by the verifier in `src/playbook-verify.ts` before a reader sees it. It is self-contained: it ties every regulatory statement to provisions and keeps law, guidelines, supervisory expectations and market practice apart. The server renders it deterministically (`src/render.ts`) and routes questions to it (`src/brief.ts`).
 
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `id` | `PlaybookId` | yes | e.g. `playbook://calibration/pd` |
-| `area` | `string` | yes | Top-level area, e.g. `"calibration"`. Should match a `ReviewArea` id. |
-| `subarea` | `string` | no | e.g. `"pd"`, `"lgd"`, `"ead"`. Should match a `ReviewArea.id` of form `area.subarea`. |
-| `phases` | `Phase[]` | no, default `[]` | Ordered phases of the walkthrough. |
-| `gates` | `string[]` | no, default `[]` | Pass/fail gates between phases — free-text descriptions for now. |
-| `regulatory_scope` | `RegulationId[]` | no, default `[]` | High-level regulatory mandate for the entire playbook. Typically section-level IDs. Distinct from `Phase.references` which are operational per-phase. |
-| `last_updated` | `string` (ISO date) | yes | |
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `PlaybookId` | `playbook://{topic-id}`, no document segment |
+| `title`, `area` | `string` | `area` is an area id from the corpus file's `topics` |
+| `summary` | `string` | The direct answer, at most 180 words |
+| `questions` | `string[]` (1+) | Typical questions; the routing signal for `brief` (invariant I19 checks each one finds its own playbook) |
+| `applies_to` | `{ parameters?, stages? }` | `pd`, `lgd`, `ccf`, `el`, `general`; `development`, `calibration`, `validation`, `review`, `use`, `governance` |
+| `basis[]` | `{ citation, force, role, provisions[{ id, quote? }] }` | The sources the topic rests on. `force` is `law`, `delegated_act`, `guideline`, `supervisory_expectation` or `other`; `quote` is a verbatim excerpt (the verifier checks it) |
+| `requirements[]` | `{ id: R1.., title, statement, provisions[], evidence[], checks[], tests[] }` | The ordered outline: what has to be shown. `statement` at most 220 words; `evidence` is what a reviewer will ask to see |
+| `methods[]` | `{ name, description, basis: regulatory \| practice, provisions[] }` | How, in practice. `practice` is rendered as market practice, not requirement |
+| `pitfalls[]` | `{ text, provisions[] }` | |
+| `related` | `PlaybookId[]` | |
+| `outside_library[]` | `{ name, why }` | Instruments the topic turns on that the library does not hold |
+| `excluded[]` | `{ id, reason }` | Member provisions deliberately not cited |
+| `provenance` | `{ status: draft \| approved \| exemplar, compiled_at, compiler?, inputs_sha, approved_by?, approved_at? }` | `inputs_sha` is what staleness compares |
 
-### Phase
+A citation in the rendered text is built from the provision id through its document's `citation_style`, never taken from the compiler's wording. The verifier's rules (V1 to V8) are each a failure actually seen: a quote the provision does not say, a provision named in prose but not cited, a member provision silently dropped, practice presented as a requirement. Invariant I18 runs it over every served playbook.
 
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `name` | `string` | yes | |
-| `description` | `string` | yes | What happens in this phase, in plain language. |
-| `references` | `(RegulationId \| TestId \| CheckId \| PlaybookId)[]` | no, default `[]` | Mix of references — the regulations that govern this phase, the tests to run, the checks to clear, optionally a sub-playbook to recurse into. |
-
-### Example
+### Example (abridged)
 
 ```json
 {
-  "id": "playbook://calibration/pd",
+  "id": "playbook://pd-long-run-average",
+  "title": "Long-run average default rate for PD calibration",
   "area": "calibration",
-  "subarea": "pd",
-  "phases": [
-    {
-      "name": "Validate LRA derivation",
-      "description": "Confirm the long-run average period covers a full cycle and that the default-rate time series is reconstructed consistently with the currently applied default definition.",
-      "references": [
-        "regulation://crr/180/1/a",
-        "regulation://eba/gl-2017-16/78",
-        "check://calibration/pd/lra-derived"
-      ]
-    },
-    {
-      "name": "Test calibration at grade level",
-      "description": "Run grade-level calibration tests. Use a binomial-family test (Jeffreys or one-sided binomial) per grade; HL or equivalent at portfolio level.",
-      "references": [
-        "test://jeffreys",
-        "test://binomial",
-        "test://hosmer-lemeshow",
-        "check://calibration/pd/segment-tested"
-      ]
-    }
+  "questions": ["How is the long-run average PD derived?"],
+  "basis": [
+    { "citation": "Art. 180(1)(a) CRR", "force": "law",
+      "role": "PDs are estimated by obligor grade from long-run averages of one-year default rates.",
+      "provisions": [{ "id": "regulation://crr/180/1/a", "quote": "Institutions shall estimate PDs by obligor grade from long-run averages of one-year default rates." }] }
   ],
-  "gates": [
-    "LRA period covers a full economic cycle",
-    "All material grades tested individually"
+  "requirements": [
+    { "id": "R1", "title": "Estimate PDs by grade from long-run averages",
+      "statement": "Derive each grade's PD from the long-run average of its one-year default rates rather than from the latest year.",
+      "provisions": [{ "id": "regulation://crr/180/1/a" }],
+      "evidence": ["the grade-level default-rate series", "the averaging method and its documentation"],
+      "checks": ["check://calibration/pd/lra-derived"], "tests": [] }
   ],
-  "last_updated": "2024-10-01"
+  "methods": [], "pitfalls": [], "related": [], "outside_library": [], "excluded": [],
+  "provenance": { "status": "approved", "compiled_at": "2026-10-01T00:00:00Z", "inputs_sha": "..." }
 }
 ```
+
+## Topics and glossary
+
+`topics` in the corpus file lists the areas and, under each, the topics the playbooks were compiled for: `{ version, areas: [{ id, title, topics: [{ id, title, scope, anchors, questions }] }] }`. The `topics` tool reads it (a playbook whose topic is not listed appears under its own `area`). `glossary` maps an abbreviation to the phrases the texts use for it (`"rds": ["reference data set"]`); search treats a phrase as one term where its words run together. Both are data, not code, so the server stays corpus-agnostic.
 
 ---
 
@@ -374,23 +377,24 @@ The registry of source documents the corpus derives from — the regulatory-cont
 | `status` | enum | yes | `"current" \| "pending" \| "superseded"`. |
 | `published` | `string` (date) | no | Publication date. |
 | `effective_from` | `string` (date) | no | Application date. |
-| `verified` | `string` (date) | yes | Last date currency was confirmed against the publisher. Older than 30 days on a current source ⇒ stale: listed in `get_corpus_info.stale_sources` and warned by `bun run validate`. |
+| `verified` | `string` (date) | yes | Last date currency was confirmed against the publisher. Older than 30 days on a current source ⇒ stale: listed under `overdue_for_check` by `sources` and warned by `bun run validate`. |
 | `superseded_by` | `SourceId` | iff superseded | Pointer to the successor record. The linter enforces that it and `status: "superseded"` imply each other, that it resolves, and that chains are acyclic. |
 | `milestones` | `{date, event}[]` | no, default `[]` | Upcoming regulatory dates, kept chronological — the first entry is served as `next_milestone`. Dates are display strings (`"2026-10-19"`, `"Q4 2026"`), never parsed. |
 | `url` | `string` | no | Publisher page. |
 | `notes` | `string` | no | Free-form. |
 | `coverage` | `"full" \| "partial"` | no | How much of the document the corpus holds. **Absent means not declared** — never defaulted. See [Declaring coverage](#declaring-coverage). |
 | `pending_changes` | `PendingChange[]` | no | Changes to the document that are coming or have come, and whether the corpus has ingested them. **Absent means the registry never looked; `[]` means it looked and found none** — never defaulted. See [Declaring pending changes](#declaring-pending-changes). |
+| `citation_style` | `{ kind, short_name?, chapters? }` | no | How the document numbers its provisions, so an id renders as the citation a practitioner writes ("EBA/GL/2017/16 para 28", "Art. 179(1)(d) CRR"). Absent = the record's own `citation` is used. Playbook text and every `citation` the tools return come from this, never from a model. |
 
 ### Declaring coverage
 
-`get_corpus_info.coverage` lists documents ("CRR"), which reads as the whole regulation; a corpus typically holds a subset of its articles. The registry is where that is said, with the optional `coverage` field on the document's current source:
+A list of documents ("CRR") reads as the whole regulation; a corpus typically holds a subset of its articles. The registry is where that is said, with the optional `coverage` field on the document's current source:
 
-- `"partial"` — the corpus holds only part of the document. A miss on that document says the provision is absent from the corpus, not necessarily from the law, and `resolve_citation` says the same on a decline.
+- `"partial"` — the corpus holds only part of the document. A miss on that document says the provision is absent from the library, not necessarily from the law, and `cite` says the same on a decline.
 - `"full"` — the document is held whole. A miss says the id is probably mistyped.
 - *absent* — nobody has declared it. The servers say so ("does not declare that as the whole") rather than assume either; absence of a declaration is a third state, not a synonym for `full`.
 
-Declare it on the **current** source: superseded and pending sources describe other editions and do not speak for the held records. If a document's current sources disagree, partial wins, because reading a partly held document as whole is the error that tells a caller a missing provision does not exist. The server publishes the result as `get_corpus_info.holdings` (record count per document, plus `partial` when declared), computed at serve time from the records and the registry — never stored. `bun run validate` prints a holdings summary and warns when a source declares coverage for a document the corpus holds no regulation records of.
+Declare it on the **current** source: superseded and pending sources describe other editions and do not speak for the held records. If a document's current sources disagree, partial wins, because reading a partly held document as whole is the error that tells a caller a missing provision does not exist. The server publishes the result in `sources` as `held` (`whole`, `part` or `undeclared`) and the provision count per document, computed at serve time from the records and the registry — never stored. `bun run validate` prints a holdings summary and warns when a source declares coverage for a document the corpus holds no regulation records of.
 
 ### Declaring pending changes
 
@@ -437,13 +441,13 @@ An `announced` change in the past is worded as *was expected to apply*, since no
 - **Only a current source speaks.** A superseded or pending source describes another edition of the document, whose changes are not changes to what is served (the rule `coverage` follows).
 - **Provision-level, from `amends` and `affects_ids`.** A provision is told only when something names it (`src/amendments.ts`). An amending instrument's provision carries `amends: [{ target, op: "replace" | "insert_after" | "delete", effective_from }]` (the target is the provision of ANOTHER document it changes, which the linter checks); the amended provision then says who amends it, from when, how, and quotes the amending provision's text as the new wording (or says it is deleted). A pending change can instead list `affects_ids`. Whether the text is still behind comes from the amended document's open changes; under `as_of` each amendment applies by its own `effective_from`. A document with open changes that nothing maps to provisions (an "unmapped" document) says nothing on its provisions: the change is stated once, at document level. Putting the note on every record of the document was tried first, and a model repeated "may be out of date" about paragraphs the amendment never touched. `affects` stays a free-text hint that nothing matches.
 - **Under `as_of`, an earlier date is not behind the change.** A change whose `effective_from` is after the requested `as_of` is left out of the note for that request, whichever version of the text is served; an undated change has no such bound and stays.
-- **Where it shows.** `get_regulation`, `expand_regulation` and `get_regulation_tree` (the root provision) and a `resolve_citation` match carry `pending_changes_note` ahead of the record fields, when the provision is named; `search_regulation` adds to `notice` a sentence for each unmapped document on the page that has a change not ingested, and one naming the named provisions on it, by citation; `get_corpus_info.pending_changes` lists every open change (absent when no source declares the field, `[]` when some do and nothing is open); `list_sources` rows carry `open_pending_changes` (a count, absent at zero) and `get_source` serves each change with its computed `state`.
+- **Where it shows.** As an `amendment` note on `get`, `related`, `brief`, `playbook` (for the provisions it cites) and a `cite` match, when the provision is named. `search` adds a sentence to its `notice` for each unmapped document on the page that has a change not ingested, and one naming the named provisions on it, by citation. `sources` lists every open change (absent when no source declares the field, `[]` when some do and nothing is open), counts them per document as `open_changes`, and serves each change with its computed `state`.
 
 **Keeping it true is the maintenance job** (`/maintain-context`): when a change is published, add the entry with `ingested: false`; when the text is re-ingested, flip `ingested` to `true` (or delete the entry) in the same edit that adds the new records. `bun run validate` warns on every change that has come into force and is still not ingested — the corpus is then serving text that is behind the law — and prints how many open changes the corpus carries. Both are advisory: the registry may be ahead of the extraction by design.
 
 ### On the `document_id` join
 
-Sources deliberately sit outside the reference graph: no field on any content surface points at a source, and `superseded_by` never leaves the registry. The join to content is `framework` + `document_id` string equality, computed where needed. That is what lets a source exist before any content does — a pending consultation is a registry entry with milestones and no regulation records — and it is why sources don't participate in `Regulation.children`, `get_referrers`, or the mirror invariant.
+Sources deliberately sit outside the reference graph: no field on any content surface points at a source, and `superseded_by` never leaves the registry. The join to content is `framework` + `document_id` string equality, computed where needed. That is what lets a source exist before any content does — a pending consultation is a registry entry with milestones and no regulation records — and it is why sources don't participate in `Regulation.children`, `related`, or the mirror invariant.
 
 Sources are latest-only. Supersession is `status: "superseded"` plus a `superseded_by` pointer; version history stays on `Regulation` alone. Never delete a superseded record — it is the provenance trail.
 
@@ -470,50 +474,13 @@ Maintenance is a session job, not a server capability: `/maintain-context` walks
 
 ---
 
-## ReviewArea
-
-The taxonomy of review areas. This is the canonical map from "what an analyst is doing" to "what's in the corpus."
-
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `id` | `string` | yes | Dotted slug, e.g. `"calibration.pd"`. Distinct from the URI-style IDs of other surfaces. |
-| `name` | `string` | yes | Display name. |
-| `parent` | `string` | no | Parent area id. Null means top-level. |
-| `children` | `string[]` | no, default `[]` | Child area ids. Denormalized for query convenience. |
-
-The MCP exposes the full list via `list_review_areas`. If a sub-area is added, both the parent's `children` and the child's `parent` need updating.
-
-### Example
-
-```json
-[
-  { "id": "calibration", "name": "Calibration", "children": ["calibration.pd", "calibration.lgd"] },
-  { "id": "calibration.pd", "name": "PD Calibration", "parent": "calibration", "children": [] },
-  { "id": "calibration.lgd", "name": "LGD Calibration", "parent": "calibration", "children": [] }
-]
-```
-
-A representative slice of the taxonomy:
-
-- `default-definition`
-- `calibration`
-  - `calibration.pd`
-  - `calibration.lgd`
-- `rating-assignment`
-  - `rating-assignment.overrides`
-- `monitoring`
-  - `monitoring.discrimination`
-
-Top-level slugs are bare (`calibration`), child slugs are dotted (`calibration.pd`). The dotted form is intentional — it makes the parent-child relationship visible from the ID alone, the way URI segments do for the other surfaces.
-
----
-
 ## Computed surfaces
 
 These types exist in the schema but are computed at query time, not stored:
 
-- **`CorpusInfo`** — what's loaded right now. The adapter exposes the data; the MCP computes the summary.
-- **`Referrers`** — back-references for a given ID. The MCP computes this by scanning `Check.derived_from` and `Phase.references`. Reverse indexes don't live in the corpus; the MCP builds them. Because a check/test listed in `Regulation.children` must mirror its `derived_from` / `regulatory_basis` (the mirror invariant), those forward links already cover it — `children` needs no separate scanning.
+- **`CorpusInfo`** — what's loaded right now, behind `sources`. The adapter exposes the data; the server computes the summary, including `holdings`.
+- **`Referrers`** — back-references for a given ID, behind `related`. The server computes this by scanning `Check.derived_from`, `Test.regulatory_basis` and the playbooks' provisions. Reverse indexes don't live in the corpus. Because a check/test listed in `Regulation.children` must mirror its `derived_from` / `regulatory_basis` (the mirror invariant), those forward links already cover it — `children` needs no separate scanning.
+- **Notes** — amendment, version, placeholder, outside-library and weak-match caveats, computed per response from the data above.
 
 ---
 
@@ -527,10 +494,11 @@ These types exist in the schema but are computed at query time, not stored:
 | `Check.parent` | `RegulationId?` | Set when the check is a child of a regulation. Mirrors one of its `derived_from` entries. |
 | `Test.regulatory_basis` | `RegulationId[]` | Regulations that reference or require this test family. |
 | `Test.parent` | `RegulationId?` | Set when the test is a child of a regulation. Mirrors one of its `regulatory_basis` entries. |
-| `Playbook.regulatory_scope` | `RegulationId[]` | High-level mandate. Typically section-level IDs. |
-| `Phase.references` | `(RegulationId \| TestId \| CheckId \| PlaybookId)[]` | Mixed by design. |
-| `ReviewArea.parent` / `.children` | `ReviewArea.id` | Inside the taxonomy only. |
-| `Playbook.area` / `.subarea` | `ReviewArea.id` | Soft link — not type-enforced, but the MCP relies on it being consistent. |
+| `Playbook.basis[].provisions`, `.requirements[].provisions`, `.methods[].provisions`, `.pitfalls[].provisions` | `RegulationId` | What the playbook cites. The verifier checks each. |
+| `Playbook.requirements[].checks` / `.tests` | `CheckId[]` / `TestId[]` | Mixed by design: a requirement names the checks and tests that evidence it. |
+| `Playbook.related` | `PlaybookId[]` | Neighbouring topics. |
+| `Playbook.area` | area id in `topics` | Soft link — not type-enforced. |
+| `Regulation.amends[].target` | `RegulationId` | On an amending instrument's provision; must resolve to a provision of ANOTHER document. |
 | `Source.superseded_by` | `SourceId?` | Supersession pointer, inside the registry only. Set iff `status` is `"superseded"`; linter-enforced. |
 | `Source.document_id` / `.framework` | `Regulation.document_id` / `.framework` | Soft join, computed where needed — no URI reference in either direction. |
 
@@ -553,4 +521,4 @@ bun run validate      # integrity linter — mirror invariant, dangling refs, cy
 bun run graph         # regenerates docs/corpus/graph.md, a Mermaid map of the corpus
 ```
 
-`validate` exits non-zero on any violation, so it drops straight into CI. It also prints an `info:` line counting the regulation records whose text names an instrument by a pre-adoption placeholder ("Regulation (EU) xx/xx"); that is neither an error nor a warning, because a guideline written before a standard was adopted legitimately names it that way. The server flags each such record when it serves it (`pre_adoption_placeholders`, see [`get_regulation`](/tools/regulation#get-regulation)) — computed from the text, so nothing in the corpus file marks them. `graph` derives the [corpus graph](/corpus/graph) from the data itself, so the diagram can't drift from what's actually loaded.
+`validate` exits non-zero on any violation, so it drops straight into CI. It also prints an `info:` line counting the regulation records whose text names an instrument by a pre-adoption placeholder ("Regulation (EU) xx/xx"); that is neither an error nor a warning, because a guideline written before a standard was adopted legitimately names it that way. The server flags each such record when it serves it with a `placeholder` note (see [`get`](/tools/#get)) — computed from the text, so nothing in the corpus file marks them. `graph` derives the [corpus graph](/corpus/graph) from the data itself, so the diagram can't drift from what's actually loaded.

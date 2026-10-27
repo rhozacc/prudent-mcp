@@ -83,7 +83,7 @@ export interface RegulationAdapter {
   /**
    * OPTIONAL. The same resolution as `get(id, asOf)` with an `asOf` date, plus
    * the basis the record was served on — so the tool layer can attach an
-   * `as_of_note` when the current text stands in for a version the corpus does
+   * a `version` note when the current text stands in for a version the corpus does
    * not record.
    *
    * Implement it as the single piece of logic and have `get` delegate to it, so
