@@ -201,17 +201,4 @@ The prompt `walk_through(topic, focus?)` asks the model to call `brief`, go thro
 
 ## Migrating from 0.x
 
-0.x had nineteen tools. 1.0 replaced them; this table is the only place the old names appear.
-
-| 0.x | 1.0 |
-|---|---|
-| `list_review_areas` | `topics` |
-| `get_playbook`, `expand_playbook`, `get_area_overview` | `playbook` (or `brief` to find it) |
-| `search_regulation`, `search_checks`, `search_tests`, `search_playbooks` | `search` with `scope` |
-| `get_regulation`, `get_check`, `get_test`, `get_source` | `get` |
-| `resolve_citation` | `cite` |
-| `expand_regulation`, `get_regulation_tree`, `get_referrers` | `related` |
-| `get_corpus_info`, `list_sources` | `sources` |
-| `get_coverage_gaps` | removed (an operations metric, not a reading tool) |
-| `as_of_note`, `pending_changes_note`, `pre_adoption_placeholders` + `notice`, `coverage_note` | `notes` |
-| three review prompts | `walk_through` |
+0.x had nineteen tools. 1.0 replaced them with the eight above; the old-to-new table is in [the 1.0 design](/design/1.0#migrating-from-0-x).
