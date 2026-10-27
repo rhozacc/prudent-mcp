@@ -56,7 +56,7 @@ const ACT_FORMULA = String.raw`(?:\s+of\s+the\s+european\s+parliament\s+and\s+(?
  * Capture groups: 1 kind, 2 the institution before the number, 3 and 4 the two
  * halves of the number, 5 the institution after it.
  */
-export const NUMBERED_ACT = new RegExp(
+const NUMBERED_ACT = new RegExp(
   // Each run of white space follows a token of its own, so a long run can be split
   // between the quantifiers in only one way.
   String.raw`\b(regulation|directive|decision|guideline)s?\s*` +
@@ -334,3 +334,10 @@ export function heldInstrumentDocuments(regulations: Regulation[], instrument: s
 /** Does any served record belong to the instrument this citation names? */
 export const corpusHolds = (regulations: Regulation[], instrument: string): boolean =>
   heldInstrumentDocuments(regulations, instrument).size > 0;
+
+/**
+ * A FRESH copy of the act-number pattern, for consumers that want the same grammar (the dashboard's "ingest next"
+ * scan). The shared instance stays private: it is global (`g`), so a caller's `.exec()`/`.test()` would move its
+ * `lastIndex` and make the next `matchAll` here start part-way into the text, silently skipping an act.
+ */
+export const numberedActPattern = (): RegExp => new RegExp(NUMBERED_ACT.source, NUMBERED_ACT.flags);

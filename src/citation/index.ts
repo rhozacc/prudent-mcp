@@ -4,4 +4,4 @@ export { describedKindWindows, holdsKind } from "./described.ts";
 export type { PointCheck } from "./points.ts";
 export { textCarriesPoint } from "./points.ts";
 export { resolveCitationDetailed, resolveCitationIn } from "./resolve.ts";
-export { NUMBERED_ACT, numberedActKeys } from "./instruments.ts";
+export { numberedActKeys, numberedActPattern } from "./instruments.ts";

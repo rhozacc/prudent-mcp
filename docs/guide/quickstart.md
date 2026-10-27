@@ -36,4 +36,4 @@ See [Clients](/guide/clients) for Claude Desktop, Claude Code, Cursor and progra
 
 ## Working on the code
 
-`bun run test:ci` is the gate and what CI runs. The pieces, in the order to read them: `src/schema.ts` (the shapes), `src/tools/` (one file per tool), `src/search.ts` and `src/file-adapter.ts` (ranking and citation resolution), `evals/` (the context-quality invariants). [Architecture](/guide/architecture) is the map.
+`bun run test:ci` is the gate and what CI runs. The pieces, in the order to read them: `src/schema.ts` (the shapes), `src/tools/` (one file per tool), `src/search.ts` (ranking), `src/citation/` (citation resolution), `src/file-adapter.ts` (loading a corpus file), `evals/` (the context-quality invariants). [Architecture](/guide/architecture) is the map.

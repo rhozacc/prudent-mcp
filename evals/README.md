@@ -11,7 +11,7 @@ bun run evals:call search '{"query":"...","scope":"checks"}'  # drive one tool b
 
 ## What is being measured
 
-The invariants were written against the 0.x tool shapes and are answered by the eight tools through a translation (`evals/legacy.ts`, itself tested), with each note standing in for the field it replaced; the traces below are the real calls and bodies.
+The invariants were written against the 0.x tool shapes and most are still answered by the eight tools through a translation (`evals/legacy.ts`, itself tested; I1, I2 and the I5 fetch already call the 1.0 tools directly), with each note standing in for the field it replaced; the traces below are the real calls and bodies.
 
 The unit is the **call trace**: for every tool call, the bytes that land in the model's context, the latency, and whether it errored. Every invariant is expressed over traces, so a claim is always tied to an observation rather than to a reading of the source.
 
