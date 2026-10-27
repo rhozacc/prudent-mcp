@@ -59,6 +59,61 @@ const schemeOf = (uri: string): Scheme | null => {
 };
 
 // ============================================================================
+// Reading 1.0 replies
+// ============================================================================
+
+type Json = Record<string, unknown>;
+export type Note = { type?: string; text?: string; applies_to?: string[] };
+
+const asObject = (json: unknown): Json | null => plainRecord(json);
+
+/** The `notes` array of a reply: what the library says about the edge of what it just returned. */
+export const notesOf = (json: unknown): Note[] => {
+  const n = asObject(json)?.["notes"];
+  return Array.isArray(n) ? (n as Note[]).filter((x) => typeof x === "object" && x !== null) : [];
+};
+
+/** The text of every note of one type, joined; undefined when the reply carries none (a note is absent, never empty). */
+export const noteText = (json: unknown, type: string): string | undefined => {
+  const texts = notesOf(json).flatMap((n) => (n.type === type && typeof n.text === "string" ? [n.text] : []));
+  return texts.length === 0 ? undefined : texts.join(" ");
+};
+
+/** The rows of a `search` page. */
+const searchRows = (json: unknown): Array<Json & { id: string }> => {
+  const r = asObject(json)?.["results"];
+  return (Array.isArray(r) ? r : []).filter((x): x is Json & { id: string } => typeof x === "object" && x !== null && typeof (x as Json)["id"] === "string");
+};
+
+/** The first record `get` returned. */
+const firstRecord = (json: unknown): Json | null => {
+  const r = asObject(json)?.["records"];
+  return Array.isArray(r) ? asObject(r[0]) : null;
+};
+
+/** One document of the library as `sources` lists it. */
+interface DocumentRow {
+  id?: string;
+  document_id: string;
+  framework: string;
+  title?: string;
+  status?: string;
+  held?: string;
+}
+
+/** The documents the library says it holds, read from `sources` (the call every invariant that needs the document list makes). */
+async function documentsOf(s: Session): Promise<{ trace: CallTrace; documents: DocumentRow[] }> {
+  const trace = await s.call("sources", {});
+  const raw = asObject(trace.json)?.["documents"];
+  const documents = (Array.isArray(raw) ? raw : []).flatMap((d): DocumentRow[] => {
+    const o = asObject(d);
+    if (o === null || typeof o["document_id"] !== "string" || typeof o["framework"] !== "string") return [];
+    return [{ ...(o as unknown as DocumentRow) }];
+  });
+  return { trace, documents };
+}
+
+// ============================================================================
 // I1 — the response body is machine-readable
 // ============================================================================
 
@@ -155,8 +210,8 @@ export async function describedIdsResolve(s: Session): Promise<InvariantResult> 
  * held a provision with it.
  *
  * Whether a probe BINDS depends on the corpus holding no document of that kind,
- * and that is read from what the server itself says it loaded (`get_corpus_info`
- * document ids, frameworks and coverage), never inferred from the reply: a reply
+ * and that is read from what the server itself says it loaded (`sources`
+ * document ids and frameworks), never inferred from the reply: a reply
  * that returns nothing is what a correctly held kind and a correctly declined one
  * look like from outside, so equality of replies cannot tell them apart. A corpus
  * that does hold such a document makes that probe not applicable.
@@ -181,25 +236,14 @@ export async function descriptiveInstrumentGateHolds(
   s: Session,
 ): Promise<{ applicable: boolean; findings: Finding[] }> {
   const findings: Finding[] = [];
-  const info = await s.call("get_corpus_info");
   // What the corpus holds, as the resolver reads it: framework, document id, id
   // segment and "framework document_id" (`holdsKind`, the gate's own definition,
   // so the two cannot disagree about a kind carried only by the framework or the
-  // id segment). `holdings` gives framework and document id for any server; the
+  // id segment). `sources` gives framework and document id for any server; the
   // id segments need the corpus file, which a file-backed session has.
   const docs: Array<{ id: `regulation://${string}`; framework: string; document_id: string }> = [];
-  const body = (info.json ?? {}) as { coverage?: unknown; holdings?: unknown };
-  if (Array.isArray(body.holdings)) {
-    for (const h of body.holdings as Array<Record<string, unknown>>) {
-      if (typeof h["document_id"] === "string" && typeof h["framework"] === "string") {
-        docs.push({ id: `regulation://${h["document_id"]}/x`, framework: h["framework"], document_id: h["document_id"] });
-      }
-    }
-  }
-  if (Array.isArray(body.coverage)) {
-    for (const c of body.coverage) {
-      if (typeof c === "string") docs.push({ id: `regulation://${c}/x`, framework: "", document_id: c });
-    }
+  for (const d of (await documentsOf(s)).documents) {
+    docs.push({ id: `regulation://${d.document_id}/x`, framework: d.framework, document_id: d.document_id });
   }
   if (s.corpusFile !== undefined) {
     for (const r of loadCorpusFile(s.corpusFile).regulation) docs.push(r);
@@ -208,27 +252,28 @@ export async function descriptiveInstrumentGateHolds(
   for (const text of DESCRIPTIVE_PROBES) {
     if (holdsKind(docs, describedKindWindows(text))) continue;
     bound++;
-    const r = await s.call("resolve_citation", { text });
-    const j = (r.json ?? {}) as { match?: unknown; candidates?: unknown; coverage_note?: unknown };
+    const r = await s.call("cite", { text });
+    const j = (r.json ?? {}) as { match?: unknown; candidates?: unknown };
+    const outside = noteText(r.json, "outside_library");
     const candidates = Array.isArray(j.candidates) ? j.candidates.length : 0;
     if ((j.match !== null && j.match !== undefined) || candidates > 0) {
       findings.push({
         id: "I3/descriptive-instrument",
         severity: "fatal",
         summary:
-          "resolve_citation answers a citation into an instrument named by description, which the corpus does not hold, out of a same-numbered provision of another document.",
+          "cite answers a citation into an instrument named by description, which the corpus does not hold, out of a same-numbered provision of another document.",
         evidence: [
-          `resolve_citation("${text}") → match ${j.match === null || j.match === undefined ? "null" : "set"}, ${candidates} candidate(s)`,
+          `cite("${text}") → match ${j.match === null || j.match === undefined ? "null" : "set"}, ${candidates} candidate(s)`,
           "the model will attribute that text to the instrument the caller described",
         ],
       });
-    } else if (typeof j.coverage_note !== "string" || !/by description/i.test(j.coverage_note)) {
+    } else if (outside === undefined || !/by description/i.test(outside)) {
       findings.push({
         id: "I3/descriptive-refusal-not-shaped",
         severity: "warn",
         summary:
-          "resolve_citation declines an instrument named by description but the note does not say it was read as a description, so it reads as a malformed citation rather than a coverage boundary.",
-        evidence: [`resolve_citation("${text}") → ${r.text.slice(0, 220)}`],
+          "cite declines an instrument named by description but its outside_library note does not say it was read as a description, so it reads as a malformed citation rather than a coverage boundary.",
+        evidence: [`cite("${text}") → ${r.text.slice(0, 220)}`],
       });
     }
   }
@@ -237,7 +282,7 @@ export async function descriptiveInstrumentGateHolds(
       id: "I3/descriptive-instrument-na",
       severity: "info",
       summary: "The corpus holds a document of every kind the descriptive probes name, so the descriptive gate could not be tested.",
-      evidence: [`${docs.length} document name(s) read from get_corpus_info and the corpus file`],
+      evidence: [`${docs.length} document name(s) read from sources and the corpus file`],
     });
   }
   return { applicable: bound > 0, findings };
@@ -257,20 +302,14 @@ export async function descriptiveInstrumentGateHolds(
  */
 export async function issuerDescriptorIsLoose(s: Session): Promise<{ applicable: boolean; findings: Finding[] }> {
   const findings: Finding[] = [];
-  const info = await s.call("get_corpus_info");
-  const holdings = ((info.json as { holdings?: Array<{ document_id?: unknown; framework?: unknown }> } | null)?.holdings ?? []);
-  const issuerDocs = new Set(
-    holdings.flatMap((h) =>
-      typeof h.document_id === "string" && typeof h.framework === "string" && h.framework.toLowerCase() === "ecb" ? [h.document_id] : [],
-    ),
-  );
+  const { documents } = await documentsOf(s);
+  const issuerDocs = new Set(documents.filter((d) => d.framework.toLowerCase() === "ecb").map((d) => d.document_id));
   if (issuerDocs.size === 0) return { applicable: false, findings };
   const served = new Map<string, Array<{ id: string; citation: string }>>();
   for (const q of ["default", "estimation", "downturn", "validation", "model", "risk", "regulation"]) {
-    const t = await s.call("search_regulation", { query: q, limit: 20 });
-    const rows = ((t.json as { results?: Array<{ id?: unknown; citation?: unknown; document_id?: unknown }> } | null)?.results ?? []);
-    for (const row of rows) {
-      if (typeof row.id !== "string" || typeof row.citation !== "string" || typeof row.document_id !== "string") continue;
+    const t = await s.call("search", { query: q, limit: 20 });
+    for (const row of searchRows(t.json)) {
+      if (typeof row["citation"] !== "string" || typeof row["document_id"] !== "string") continue;
       if (!issuerDocs.has(row.document_id) || row.citation.trim() === "") continue;
       const list = served.get(row.document_id) ?? [];
       if (list.length < 2 && !list.some((r) => r.id === row.id)) list.push({ id: row.id, citation: row.citation });
@@ -280,10 +319,10 @@ export async function issuerDescriptorIsLoose(s: Session): Promise<{ applicable:
   let asked = 0;
   for (const [documentId, records] of served) {
     for (const { id, citation } of records) {
-      const plain = await s.call("resolve_citation", { text: `${documentId} ${citation}` });
+      const plain = await s.call("cite", { text: `${documentId} ${citation}` });
       if (plain.isError || ((plain.json as { match?: { id?: unknown } | null } | null)?.match?.id) !== id) continue;
       for (const text of [`ECB Guideline ${documentId} ${citation}`, `${citation} of the ECB Guidelines (${documentId})`]) {
-        const loose = await s.call("resolve_citation", { text });
+        const loose = await s.call("cite", { text });
         if (loose.isError) continue;
         asked++;
         const matched = ((loose.json as { match?: { id?: unknown } | null } | null)?.match?.id);
@@ -292,10 +331,10 @@ export async function issuerDescriptorIsLoose(s: Session): Promise<{ applicable:
             id: "I3/issuer-descriptor",
             severity: "fatal",
             summary:
-              "resolve_citation declines, or answers with another record, a citation that names a held document by its id and also calls it by its issuer's kind of text (\"ECB Guideline\") - the descriptor was read as a second instrument.",
+              "cite declines, or answers with another record, a citation that names a held document by its id and also calls it by its issuer's kind of text (\"ECB Guideline\") - the descriptor was read as a second instrument.",
             evidence: [
-              `resolve_citation("${documentId} ${citation}") -> ${id}`,
-              `resolve_citation("${text}") -> ${typeof matched === "string" ? matched : "no match"}`,
+              `cite("${documentId} ${citation}") -> ${id}`,
+              `cite("${text}") -> ${typeof matched === "string" ? matched : "no match"}`,
               "the descriptor and the id name one document; the id is the exact half",
             ],
           });
@@ -308,14 +347,14 @@ export async function issuerDescriptorIsLoose(s: Session): Promise<{ applicable:
       id: "I3/issuer-descriptor-na",
       severity: "info",
       summary: "No record of a document of the descriptor's issuer resolved by its own id, so the descriptor beside a held document could not be tested.",
-      evidence: [`${issuerDocs.size} document(s) of that issuer listed by get_corpus_info`],
+      evidence: [`${issuerDocs.size} document(s) of that issuer listed by sources`],
     });
   }
   return { applicable: asked > 0, findings };
 }
 
 /**
- * When resolve_citation places a citation inside the record that contains it,
+ * When cite places a citation inside the record that contains it,
  * the note may say that record's text carries the point. That is a claim about
  * the SERVED text, and it used to be made without looking: an article of seven
  * paragraphs was said to carry point 9, and a caller told so goes looking and
@@ -323,7 +362,7 @@ export async function issuerDescriptorIsLoose(s: Session): Promise<{ applicable:
  *
  * Corpus-agnostic: citations the server hands out are deepened to points it is
  * unlikely to hold at that granularity, and every note that says "carries point
- * X" is checked against the text `get_regulation` serves for the container it
+ * X" is checked against the text `get` serves for the container it
  * names. Two checks, deliberately not the same code: the resolver's own reader
  * (so the note and the record cannot drift apart) and a loose marker test
  * written independently (so a reader that is wrong in the same way as the
@@ -337,7 +376,7 @@ export async function containerClaimsAreTrue(
   const findings: Finding[] = [];
   const bases = new Set<string>();
   for (const q of ["default", "estimation", "downturn", "validation", "model", "risk"]) {
-    const t = await s.call("search_regulation", { query: q, limit: 10 });
+    const t = await s.call("search", { query: q, limit: 10 });
     for (const m of t.text.matchAll(/"citation"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
       const c = m[1];
       if (c !== undefined && /\d/.test(c) && !/\(/.test(c)) bases.add(c);
@@ -367,13 +406,12 @@ export async function containerClaimsAreTrue(
   for (const base of [...bases].slice(0, 12)) {
     for (const suffix of ["(1)", "(9)", "(99)", "(2)(b)"]) {
       const probe = `${base}${suffix}`;
-      const r = await s.call("resolve_citation", { text: probe });
+      const r = await s.call("cite", { text: probe });
       if (r.isError) continue;
       const j = (r.json ?? {}) as {
         match?: unknown;
         unmatched_segments?: unknown;
         candidates?: Array<{ id?: string; document_id?: string }>;
-        coverage_note?: unknown;
       };
       const candidate = Array.isArray(j.candidates) ? j.candidates[0] : undefined;
       if (
@@ -385,7 +423,7 @@ export async function containerClaimsAreTrue(
         continue; // did not reach the containing-provision rule
       }
       reached++;
-      const note = typeof j.coverage_note === "string" ? j.coverage_note : "";
+      const note = noteText(r.json, "outside_library") ?? "";
       const claim = /carries point ([0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)\./.exec(note)?.[1];
       if (claim === undefined) continue;
       // Containers in several documents are different provisions that share a
@@ -398,16 +436,17 @@ export async function containerClaimsAreTrue(
           id: "I3/container-claim-cross-document",
           severity: "fatal",
           summary:
-            "resolve_citation presents one record as the provision containing a citation and says its text carries the point, though the records that could contain it sit in several documents - it verified a text that may not be the one cited.",
+            "cite presents one record as the provision containing a citation and says its text carries the point, though the records that could contain it sit in several documents - it verified a text that may not be the one cited.",
           evidence: [
-            `resolve_citation("${probe}") claims point ${claim} in ${candidate.id}`,
+            `cite("${probe}") claims point ${claim} in ${candidate.id}`,
             `candidates sit in ${documents.size} documents: ${[...documents].slice(0, 5).join(", ")}`,
           ],
         });
         continue;
       }
-      const rec = await s.call("get_regulation", { id: candidate.id });
-      const text = typeof (rec.json as { text?: unknown } | null)?.text === "string" ? (rec.json as { text: string }).text : null;
+      const rec = await s.call("get", { ids: candidate.id });
+      const recText = firstRecord(rec.json)?.["text"];
+      const text = typeof recText === "string" ? recText : null;
       if (rec.isError || text === null) continue;
       const segs = claim.split(".");
       const reads = textCarriesPoint(text, segs);
@@ -417,9 +456,9 @@ export async function containerClaimsAreTrue(
           id: "I3/container-claim",
           severity: "fatal",
           summary:
-            "resolve_citation says the containing record's text carries a point, and the text the server serves for that record does not.",
+            "cite says the containing record's text carries a point, and the text the server serves for that record does not.",
           evidence: [
-            `resolve_citation("${probe}") claims point ${claim} in ${candidate.id}`,
+            `cite("${probe}") claims point ${claim} in ${candidate.id}`,
             `the resolver's reader of the served text: ${reads}; independent marker test: ${loose ? "found" : "not found"}`,
             "a caller told the point exists goes looking for it and quotes around the gap",
           ],
@@ -432,7 +471,7 @@ export async function containerClaimsAreTrue(
       id: "I3/container-claim-na",
       severity: "info",
       summary: "No probed citation reached the containing-provision rule, so its claim about the container's text could not be tested.",
-      evidence: [`${bases.size} citation(s) observed through search_regulation`],
+      evidence: [`${bases.size} citation(s) observed through search`],
     });
   }
   return { applicable: reached > 0, findings };
@@ -456,17 +495,14 @@ export async function ownCitationsResolve(s: Session): Promise<{ applicable: boo
   const findings: Finding[] = [];
   const served = new Map<string, string>();
   for (const q of ["default", "estimation", "downturn", "validation", "model", "risk", "regulation"]) {
-    const t = await s.call("search_regulation", { query: q, limit: 10 });
-    const rows = ((t.json as { results?: Array<{ id?: unknown; citation?: unknown }> } | null)?.results ?? []);
-    for (const row of rows) {
-      if (typeof row.id === "string" && typeof row.citation === "string" && row.citation.trim() !== "") {
-        served.set(row.id, row.citation);
-      }
+    const t = await s.call("search", { query: q, limit: 10 });
+    for (const row of searchRows(t.json)) {
+      if (typeof row["citation"] === "string" && row["citation"].trim() !== "") served.set(row.id, row["citation"]);
     }
   }
   let bound = 0;
   for (const [id, citation] of [...served].slice(0, 30)) {
-    const r = await s.call("resolve_citation", { text: citation });
+    const r = await s.call("cite", { text: citation });
     if (r.isError) continue;
     bound++;
     const j = (r.json ?? {}) as { match?: { id?: unknown } | null; ambiguous?: unknown };
@@ -476,10 +512,10 @@ export async function ownCitationsResolve(s: Session): Promise<{ applicable: boo
       id: "I3/own-citation",
       severity: "fatal",
       summary:
-        "resolve_citation does not return the record whose own citation it was given - it declines, or names another record, for a citation the server itself serves.",
+        "cite does not return the record whose own citation it was given - it declines, or names another record, for a citation the server itself serves.",
       evidence: [
-        `search_regulation serves ${id} with the citation "${citation}"`,
-        `resolve_citation("${citation}") -> match ${matched === undefined || matched === null ? "null" : String(matched)}, ambiguous ${String(j.ambiguous)}`,
+        `search serves ${id} with the citation "${citation}"`,
+        `cite("${citation}") -> match ${matched === undefined || matched === null ? "null" : String(matched)}, ambiguous ${String(j.ambiguous)}`,
         "a gate that reads words in the citation ran ahead of the equality pass, or the equality pass is scoped to the wrong document",
       ],
     });
@@ -488,7 +524,7 @@ export async function ownCitationsResolve(s: Session): Promise<{ applicable: boo
     findings.push({
       id: "I3/own-citation-na",
       severity: "info",
-      summary: "No record citation was observed through search_regulation, so a record's own citation could not be tested.",
+      summary: "No record citation was observed through search, so a record's own citation could not be tested.",
       evidence: [`${served.size} citation(s) observed`],
     });
   }
@@ -520,7 +556,7 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
   // Discover real article numbers from ids the server itself hands out.
   const seen = new Set<number>();
   for (const q of ["default", "estimation", "risk", "data", "model"]) {
-    const t = await s.call("search_regulation", { query: q, limit: 20 });
+    const t = await s.call("search", { query: q, limit: 20 });
     for (const m of t.text.matchAll(/article-(\d+)/g)) {
       const n = Number(m[1]);
       if (Number.isFinite(n)) seen.add(n);
@@ -547,28 +583,28 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
   const absent = maxSeen + 1000; // provably not in the corpus
   const present = maxSeen;
 
-  const miss = await s.call("resolve_citation", { text: `Article ${absent}` });
+  const miss = await s.call("cite", { text: `Article ${absent}` });
   const missMatch = /"id"\s*:\s*"([^"]+)"/.exec(miss.text)?.[1];
   if (missMatch !== undefined) {
     findings.push({
       id: "I3/fabricates",
       severity: "fatal",
-      summary: `resolve_citation invents a match for a citation the corpus cannot contain — it answered "Article ${absent}" with a different provision instead of null.`,
+      summary: `cite invents a match for a citation the corpus cannot contain — it answered "Article ${absent}" with a different provision instead of null.`,
       evidence: [
         `highest article number observed in the corpus: ${maxSeen}`,
-        `resolve_citation("Article ${absent}") → ${missMatch}`,
+        `cite("Article ${absent}") → ${missMatch}`,
         "a resolver that always resolves gives the model no way to tell a hit from a guess",
       ],
     });
   }
 
-  const hit = await s.call("resolve_citation", { text: `Article ${present}` });
+  const hit = await s.call("cite", { text: `Article ${present}` });
   const hitMatch = /"id"\s*:\s*"([^"]+)"/.exec(hit.text)?.[1];
   if (hitMatch !== undefined && !hitMatch.includes(`article-${present}`)) {
     findings.push({
       id: "I3/wrong-number",
       severity: "fatal",
-      summary: `resolve_citation returned a different provision than the one asked for — "Article ${present}" resolved to ${hitMatch}.`,
+      summary: `cite returned a different provision than the one asked for — "Article ${present}" resolved to ${hitMatch}.`,
       evidence: [`expected an id containing "article-${present}", got "${hitMatch}"`],
     });
   }
@@ -612,16 +648,16 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
     `Article ${present} of Directive 575/2013`,
     `Article ${present} of 575/2013 Decision`,
   ]) {
-    const foreign = await s.call("resolve_citation", { text: probe });
+    const foreign = await s.call("cite", { text: probe });
     const foreignMatch = /"id"\s*:\s*"([^"]+)"/.exec(foreign.text)?.[1];
     if (foreignMatch !== undefined) {
       findings.push({
         id: "I3/wrong-instrument",
         severity: "fatal",
         summary:
-          "resolve_citation answers a citation into an instrument the corpus does not hold, sourcing the match from an unrelated document.",
+          "cite answers a citation into an instrument the corpus does not hold, sourcing the match from an unrelated document.",
         evidence: [
-          `resolve_citation("${probe}") → ${foreignMatch}`,
+          `cite("${probe}") → ${foreignMatch}`,
           "the model will attribute this text to the instrument the user named",
         ],
       });
@@ -636,8 +672,8 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
         id: "I3/refusal-not-instrument-shaped",
         severity: "warn",
         summary:
-          "resolve_citation declines a citation naming an instrument this corpus does not hold, but the refusal does not name the instrument — so it reads as a malformed citation rather than a coverage boundary.",
-        evidence: [`resolve_citation("${probe}") → ${foreign.text.slice(0, 220)}`],
+          "cite declines a citation naming an instrument this corpus does not hold, but the refusal does not name the instrument — so it reads as a malformed citation rather than a coverage boundary.",
+        evidence: [`cite("${probe}") → ${foreign.text.slice(0, 220)}`],
       });
     }
     // And it must not invent a citation for a real act while refusing it. A
@@ -649,8 +685,8 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
         id: "I3/mislabels-instrument",
         severity: "fatal",
         summary:
-          'resolve_citation renders a post-2015 EU act with the pre-2015 "No" — a wrong citation of a real instrument, emitted while refusing it.',
-        evidence: [`resolve_citation("${probe}") → ${foreign.text.slice(0, 220)}`],
+          'cite renders a post-2015 EU act with the pre-2015 "No" — a wrong citation of a real instrument, emitted while refusing it.',
+        evidence: [`cite("${probe}") → ${foreign.text.slice(0, 220)}`],
       });
     }
   }
@@ -659,7 +695,7 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
   // answers to. The framework alone can scope such a citation, and the number then
   // reads as points of a provision. Declined, with no candidates, in any wording.
   for (const probe of ["Article 1 of EBA/GL/2099/04", "Article 1 of ESMA/2099/1444"]) {
-    const identified = await s.call("resolve_citation", { text: probe });
+    const identified = await s.call("cite", { text: probe });
     const j = (identified.json ?? {}) as { match?: unknown; candidates?: unknown };
     const candidates = Array.isArray(j.candidates) ? j.candidates.length : 0;
     if ((j.match ?? null) !== null || candidates > 0) {
@@ -667,8 +703,8 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
         id: "I3/identifier",
         severity: "fatal",
         summary:
-          "resolve_citation answers a citation that names a document by an identifier no held document answers to out of a same-numbered provision of another document, reading the identifier's year and serial as points.",
-        evidence: [`resolve_citation("${probe}") -> match ${(j.match ?? null) === null ? "null" : "set"}, ${candidates} candidate(s)`],
+          "cite answers a citation that names a document by an identifier no held document answers to out of a same-numbered provision of another document, reading the identifier's year and serial as points.",
+        evidence: [`cite("${probe}") -> match ${(j.match ?? null) === null ? "null" : "set"}, ${candidates} candidate(s)`],
       });
     }
   }
@@ -688,7 +724,7 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
       `Article ${n} of the Capital Requirements Regulation`,
       `Article ${n} of Regulation (EU) No 575/2013`,
     ]) {
-      const r = await s.call("resolve_citation", { text });
+      const r = await s.call("cite", { text });
       answers.set(text, ((r.json as { match?: { id?: string } | null } | null)?.match?.id) ?? null);
     }
     if (new Set(answers.values()).size > 1) {
@@ -696,8 +732,8 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
         id: "I3/same-instrument-same-answer",
         severity: "fatal",
         summary:
-          "resolve_citation answers differently for the same provision of the same instrument depending on how the instrument is named - at least one spelling is being resolved into a different document.",
-        evidence: [...answers].map(([text, id]) => `resolve_citation("${text}") -> ${id ?? "null"}`),
+          "cite answers differently for the same provision of the same instrument depending on how the instrument is named - at least one spelling is being resolved into a different document.",
+        evidence: [...answers].map(([text, id]) => `cite("${text}") -> ${id ?? "null"}`),
       });
     }
   }
@@ -714,25 +750,23 @@ export async function citationResolutionIsHonest(s: Session): Promise<InvariantR
  * name a resolver can fail to recognise - and then the bare provision number goes
  * looking in every document and is answered out of whichever has one.
  *
- * Corpus-agnostic: the documents and titles are the ones `get_corpus_info` lists,
+ * Corpus-agnostic: the documents and titles are the ones `sources` lists,
  * the records the ones the server serves in search rows. Declining is honest (a
  * title with an odd word in it may not be an exact name); a different record is not.
  */
 export async function titledCitationsResolve(s: Session): Promise<{ applicable: boolean; findings: Finding[] }> {
   const findings: Finding[] = [];
-  const info = await s.call("get_corpus_info", {});
-  const holdings = ((info.json as { holdings?: Array<{ document_id?: unknown; title?: unknown }> } | null)?.holdings ?? []);
+  const { documents } = await documentsOf(s);
   const titles = new Map<string, string>();
-  for (const h of holdings) {
-    if (typeof h.document_id === "string" && typeof h.title === "string" && h.title.trim() !== "") titles.set(h.document_id, h.title);
+  for (const d of documents) {
+    if (typeof d.title === "string" && d.title.trim() !== "") titles.set(d.document_id, d.title);
   }
   if (titles.size === 0) return { applicable: false, findings };
   const byDocument = new Map<string, Array<{ id: string; citation: string }>>();
   for (const q of ["default", "estimation", "downturn", "validation", "model", "risk", "regulation"]) {
-    const t = await s.call("search_regulation", { query: q, limit: 20 });
-    const rows = ((t.json as { results?: Array<{ id?: unknown; citation?: unknown; document_id?: unknown }> } | null)?.results ?? []);
-    for (const row of rows) {
-      if (typeof row.id !== "string" || typeof row.citation !== "string" || typeof row.document_id !== "string") continue;
+    const t = await s.call("search", { query: q, limit: 20 });
+    for (const row of searchRows(t.json)) {
+      if (typeof row["citation"] !== "string" || typeof row["document_id"] !== "string") continue;
       if (!titles.has(row.document_id) || row.citation.trim() === "") continue;
       const list = byDocument.get(row.document_id) ?? [];
       if (list.length < 2 && !list.some((r) => r.id === row.id)) list.push({ id: row.id, citation: row.citation });
@@ -744,7 +778,7 @@ export async function titledCitationsResolve(s: Session): Promise<{ applicable: 
     const title = titles.get(documentId) ?? "";
     for (const { id, citation } of records) {
       for (const text of [`${citation} of ${title}`, `${title}, ${citation}`]) {
-        const r = await s.call("resolve_citation", { text });
+        const r = await s.call("cite", { text });
         if (r.isError) continue;
         asked++;
         const matched = ((r.json as { match?: { id?: unknown } | null } | null)?.match?.id);
@@ -753,10 +787,10 @@ export async function titledCitationsResolve(s: Session): Promise<{ applicable: 
             id: "I3/titled-citation",
             severity: "fatal",
             summary:
-              "resolve_citation answers a citation that names a document by its registry title with a record other than the one it was given - the title was not read as a name, and the bare provision number was answered from another document.",
+              "cite answers a citation that names a document by its registry title with a record other than the one it was given - the title was not read as a name, and the bare provision number was answered from another document.",
             evidence: [
-              `search_regulation serves ${id} (document ${documentId}) with the citation "${citation}"`,
-              `resolve_citation("${text}") -> ${matched}`,
+              `search serves ${id} (document ${documentId}) with the citation "${citation}"`,
+              `cite("${text}") -> ${matched}`,
               "a caller who named a document by its title is handed a provision of a different one",
             ],
           });
@@ -768,8 +802,8 @@ export async function titledCitationsResolve(s: Session): Promise<{ applicable: 
     findings.push({
       id: "I3/titled-citation-na",
       severity: "info",
-      summary: "No record of a document with a registry title was observed through search_regulation, so naming a document by its title could not be tested.",
-      evidence: [`${titles.size} document title(s) listed by get_corpus_info`],
+      summary: "No record of a document with a registry title was observed through search, so naming a document by its title could not be tested.",
+      evidence: [`${titles.size} document title(s) listed by sources`],
     });
   }
   return { applicable: asked > 0, findings };
