@@ -6,7 +6,7 @@ import { EMPOWERMENTS, corpusHolds, heldInstrumentDocuments, instrumentMentions,
 import type { NamedInstrument } from "./instruments.ts";
 import { unplacedIdentifier, unrecognisedNameTail } from "./names.ts";
 import { textCarriesPoint } from "./points.ts";
-import { STRUCTURAL, arraysEqual, citationTokens, spineIsFaithful, spineOf, startsWithTokens, windowAt, withoutConnectives } from "./tokens.ts";
+import { STRUCTURAL, arraysEqual, citationTokens, recordTokensOf, spineIsFaithful, spineOf, startsWithTokens, windowAt, withoutConnectives } from "./tokens.ts";
 import type { Regulation, DocumentHolding, CitationCandidate, CitationResolution } from "../schema.ts";
 import { citationPartialClause } from "../holdings.ts";
 
@@ -131,6 +131,7 @@ export function resolveCitationDetailed(
   });
 
   const queryTokens = citationTokens(text);
+  const recordTokens = recordTokensOf(regulations);
   if (queryTokens.length === 0) return none();
 
   // An ECB-kind descriptor ("ECB Guidelines") beside a held document of that issuer is a loose second name for the
@@ -168,13 +169,13 @@ export function resolveCitationDetailed(
     // number — and on this corpus that offered EBA "Paragraph 41" as the answer
     // to a question about Article 4(1). Matching only ever gets stricter here.
     const nq = scope.rest.join(" ");
-    const exactHits = pool.filter((r) => bare(citationTokens(r.citation)).join(" ") === nq);
+    const exactHits = pool.filter((r) => bare(recordTokens(r.citation)).join(" ") === nq);
     // (i-alias) The same equality against a record's declared aliases. Looked for
     // here too, because a derived scope is accepted on either.
     const aliasHits =
       exactHits.length > 0
         ? []
-        : pool.filter((r) => (r.citation_aliases ?? []).some((a) => bare(citationTokens(a)).join(" ") === nq));
+        : pool.filter((r) => (r.citation_aliases ?? []).some((a) => bare(recordTokens(a)).join(" ") === nq));
     // (i-core) The same equality with the connectives left out of both sides, for a
     // citation that has some ("Article 3 of the") and found no exact record.
     const core = (tokens: string[]): string => withoutConnectives(bare(tokens)).join(" ");
@@ -182,13 +183,13 @@ export function resolveCitationDetailed(
     const coreHits =
       exactHits.length > 0 || aliasHits.length > 0 || nqCore === nq
         ? []
-        : pool.filter((r) => core(citationTokens(r.citation)) === nqCore);
+        : pool.filter((r) => core(recordTokens(r.citation)) === nqCore);
     // The same, against a record's declared aliases: "Credit risk chapter, paragraph 170 of the (EGIM)" is the alias
     // once the connectives are set aside, exactly as "Article 3 of the" is a record's own citation.
     const coreAliasHits =
       exactHits.length > 0 || aliasHits.length > 0 || coreHits.length > 0 || nqCore === nq
         ? []
-        : pool.filter((r) => (r.citation_aliases ?? []).some((al) => core(citationTokens(al)) === nqCore));
+        : pool.filter((r) => (r.citation_aliases ?? []).some((al) => core(recordTokens(al)) === nqCore));
     return { index, ...scope, pool, bare, nq, exactHits, aliasHits, coreHits, coreAliasHits };
   };
   let scoped = attempt(withInstrumentNames(documentAliases(regulations, holdings), regulations, text));
@@ -482,7 +483,7 @@ export function resolveCitationDetailed(
   }
 
   const recordSpine = (r: Regulation): string[] =>
-    spineOf(bare(citationTokens(r.citation)).filter((t) => !STRUCTURAL.has(t)));
+    spineOf(bare(recordTokens(r.citation)).filter((t) => !STRUCTURAL.has(t)));
 
   const spineHits = pool.filter((r) => arraysEqual(recordSpine(r), spine));
   if (spineHits.length === 1) {
@@ -529,7 +530,7 @@ export function resolveCitationDetailed(
   // to contain 121.
   const containerTokens = rest.filter((t) => !STRUCTURAL.has(t));
   const containers = (spineIsFaithful(containerTokens) ? pool : [])
-    .map((r) => ({ r, rs: recordSpine(r), rt: bare(citationTokens(r.citation)).filter((t) => !STRUCTURAL.has(t)) }))
+    .map((r) => ({ r, rs: recordSpine(r), rt: bare(recordTokens(r.citation)).filter((t) => !STRUCTURAL.has(t)) }))
     // Two guards, both against a SHORT spine claiming to contain a long one.
     // A record whose citation carries no numbers is a prefix of everything, so
     // a "Preamble" would contain every citation in the corpus. And a record

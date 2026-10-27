@@ -10483,6 +10483,23 @@ var CITATION_EXPANSIONS = {
 function citationTokens(text) {
   return text.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 0).map((t) => CITATION_EXPANSIONS[t] ?? t);
 }
+var recordTokenCache = /* @__PURE__ */ new WeakMap();
+function recordTokensOf(regulations) {
+  let byText = recordTokenCache.get(regulations);
+  if (byText === void 0) {
+    byText = /* @__PURE__ */ new Map();
+    recordTokenCache.set(regulations, byText);
+  }
+  const cache3 = byText;
+  return (text) => {
+    let tokens = cache3.get(text);
+    if (tokens === void 0) {
+      tokens = citationTokens(text);
+      cache3.set(text, tokens);
+    }
+    return tokens;
+  };
+}
 var STRUCTURAL = /* @__PURE__ */ new Set([
   "article",
   "articles",
@@ -11082,6 +11099,7 @@ function resolveCitationDetailed(regulations, text, holdings) {
     ...extra
   });
   const queryTokens = citationTokens(text);
+  const recordTokens = recordTokensOf(regulations);
   if (queryTokens.length === 0) return none();
   const withoutDescriptor = withoutLooseIssuerDescriptor(regulations, text, holdings);
   if (withoutDescriptor !== null) return resolveCitationDetailed(regulations, withoutDescriptor, holdings);
@@ -11092,12 +11110,12 @@ function resolveCitationDetailed(regulations, text, holdings) {
     const pool2 = scope.docs === null ? regulations : regulations.filter((r) => scope.docs?.has(r.document_id) === true);
     const bare2 = (tokens) => scopeToDocument(tokens, index2).rest;
     const nq = scope.rest.join(" ");
-    const exactHits2 = pool2.filter((r) => bare2(citationTokens(r.citation)).join(" ") === nq);
-    const aliasHits2 = exactHits2.length > 0 ? [] : pool2.filter((r) => (r.citation_aliases ?? []).some((a) => bare2(citationTokens(a)).join(" ") === nq));
+    const exactHits2 = pool2.filter((r) => bare2(recordTokens(r.citation)).join(" ") === nq);
+    const aliasHits2 = exactHits2.length > 0 ? [] : pool2.filter((r) => (r.citation_aliases ?? []).some((a) => bare2(recordTokens(a)).join(" ") === nq));
     const core = (tokens) => withoutConnectives(bare2(tokens)).join(" ");
     const nqCore = withoutConnectives(scope.rest).join(" ");
-    const coreHits2 = exactHits2.length > 0 || aliasHits2.length > 0 || nqCore === nq ? [] : pool2.filter((r) => core(citationTokens(r.citation)) === nqCore);
-    const coreAliasHits2 = exactHits2.length > 0 || aliasHits2.length > 0 || coreHits2.length > 0 || nqCore === nq ? [] : pool2.filter((r) => (r.citation_aliases ?? []).some((al) => core(citationTokens(al)) === nqCore));
+    const coreHits2 = exactHits2.length > 0 || aliasHits2.length > 0 || nqCore === nq ? [] : pool2.filter((r) => core(recordTokens(r.citation)) === nqCore);
+    const coreAliasHits2 = exactHits2.length > 0 || aliasHits2.length > 0 || coreHits2.length > 0 || nqCore === nq ? [] : pool2.filter((r) => (r.citation_aliases ?? []).some((al) => core(recordTokens(al)) === nqCore));
     return { index: index2, ...scope, pool: pool2, bare: bare2, nq, exactHits: exactHits2, aliasHits: aliasHits2, coreHits: coreHits2, coreAliasHits: coreAliasHits2 };
   };
   let scoped = attempt(withInstrumentNames(documentAliases(regulations, holdings), regulations, text));
@@ -11201,7 +11219,7 @@ function resolveCitationDetailed(regulations, text, holdings) {
       coverage_note: named.length > 0 ? `"${text}" names a document this library holds (${named.join(", ")}) but no provision within it. Add a provision number, or search inside it.` : `"${text}" carries no provision number to resolve, and names no document this library holds. If it names an instrument, this library may still describe it without holding it \u2014 search for its distinctive words, or check the library's overview for what it holds.`
     });
   }
-  const recordSpine = (r) => spineOf(bare(citationTokens(r.citation)).filter((t) => !STRUCTURAL.has(t)));
+  const recordSpine = (r) => spineOf(bare(recordTokens(r.citation)).filter((t) => !STRUCTURAL.has(t)));
   const spineHits = pool.filter((r) => arraysEqual(recordSpine(r), spine));
   if (spineHits.length === 1) {
     return { ...none(), match: spineHits[0] ?? null, confidence: "segment" };
@@ -11219,7 +11237,7 @@ function resolveCitationDetailed(regulations, text, holdings) {
     });
   }
   const containerTokens = rest.filter((t) => !STRUCTURAL.has(t));
-  const containers = (spineIsFaithful(containerTokens) ? pool : []).map((r) => ({ r, rs: recordSpine(r), rt: bare(citationTokens(r.citation)).filter((t) => !STRUCTURAL.has(t)) })).filter(({ rs, rt }) => rs.length > 0 && spineIsFaithful(rt) && startsWithTokens(spine, rs)).sort((a, b) => b.rs.length - a.rs.length);
+  const containers = (spineIsFaithful(containerTokens) ? pool : []).map((r) => ({ r, rs: recordSpine(r), rt: bare(recordTokens(r.citation)).filter((t) => !STRUCTURAL.has(t)) })).filter(({ rs, rt }) => rs.length > 0 && spineIsFaithful(rt) && startsWithTokens(spine, rs)).sort((a, b) => b.rs.length - a.rs.length);
   if (containers.length > 0) {
     const holders = [...new Set(containers.map(({ r }) => r.document_id))];
     if (holders.length > 1) {

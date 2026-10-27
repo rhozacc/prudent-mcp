@@ -18,6 +18,31 @@ export function citationTokens(text: string): string[] {
     .map((t) => CITATION_EXPANSIONS[t] ?? t);
 }
 
+const recordTokenCache = new WeakMap<object, Map<string, string[]>>();
+
+/**
+ * `citationTokens` for the strings a record set carries (citations and aliases),
+ * memoized per regulations array like the other per-corpus caches: a resolution
+ * tokenizes every record's citation once per attempt, and a derived-scope miss
+ * runs the attempt twice. The arrays are shared, so a caller must not mutate them.
+ */
+export function recordTokensOf(regulations: object): (text: string) => string[] {
+  let byText = recordTokenCache.get(regulations);
+  if (byText === undefined) {
+    byText = new Map();
+    recordTokenCache.set(regulations, byText);
+  }
+  const cache = byText;
+  return (text) => {
+    let tokens = cache.get(text);
+    if (tokens === undefined) {
+      tokens = citationTokens(text);
+      cache.set(text, tokens);
+    }
+    return tokens;
+  };
+}
+
 /**
  * Structural words: they say what KIND of node a citation names, not which one.
  * Dropped when comparing the numeric spine so "Chapter 5, paragraph 12",
