@@ -702,11 +702,11 @@ describe("eval I3/descriptive-instrument", () => {
       tools: [], surfaceTokens: 0, wireTokens: 0, instructions: "", traces: [],
       async close() {},
       async call(tool, args = {}) {
-        if (tool === "get_corpus_info") return trace(tool, args, { coverage: [], holdings: [] });
+        if (tool === "sources") return trace(tool, args, { documents: [] });
         const text = String(args["text"] ?? "");
         asked.push(text);
         return canonical.includes(text)
-          ? trace(tool, args, { match: null, candidates: [], coverage_note: `"${text}" names an instrument by description` })
+          ? trace(tool, args, { match: null, candidates: [], notes: [{ type: "outside_library", text: `"${text}" names an instrument by description` }] })
           : trace(tool, args, { match: null, candidates: [{ id: "regulation://other/p1" }] });
       },
     };
@@ -807,7 +807,7 @@ describe("eval I3/own-citation", () => {
       tools: [], surfaceTokens: 0, wireTokens: 0, instructions: "", traces: [],
       async close() {},
       async call(tool, args = {}) {
-        if (tool === "search_regulation") {
+        if (tool === "search") {
           return trace(tool, args, { results: records.map((r) => ({ id: r.id, citation: r.citation })) });
         }
         const text = String(args["text"] ?? "");
@@ -876,8 +876,8 @@ describe("eval I3/issuer-descriptor", () => {
       tools: [], surfaceTokens: 0, wireTokens: 0, instructions: "", traces: [],
       async close() {},
       async call(tool, args = {}) {
-        if (tool === "get_corpus_info") return trace(tool, args, { holdings: [{ document_id: "ecb-guide-x", framework: "ecb" }] });
-        if (tool === "search_regulation") {
+        if (tool === "sources") return trace(tool, args, { documents: [{ document_id: "ecb-guide-x", framework: "ecb" }] });
+        if (tool === "search") {
           return trace(tool, args, { results: ecbRecords.map((r) => ({ id: r.id, citation: r.citation, document_id: r.document_id })) });
         }
         const text = String(args["text"] ?? "");

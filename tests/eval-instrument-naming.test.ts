@@ -84,16 +84,16 @@ function leaky(leaks: { numberedShape?: RegExp; identifier?: boolean; englishNam
   const trace = (tool: string, args: Record<string, unknown>, json: unknown): CallTrace => ({
     tool, args, text: JSON.stringify(json), chars: 0, tokens: 0, ms: 0, isError: false, json,
   });
-  const declined = (note: string) => ({ match: null, confidence: "none", candidates: [], ambiguous: false, unmatched_segments: [], coverage_note: note });
+  const declined = (note: string) => ({ match: null, confidence: "none", candidates: [], ambiguous: false, unmatched_segments: [], notes: [{ type: "outside_library", text: note }] });
   const rec = (id: string) => ({ id, citation: "Article 10", document_id: "gl-a" });
   return {
     tools: [], surfaceTokens: 0, wireTokens: 0, instructions: "", traces: [],
     async close() {},
     async call(tool, args = {}) {
-      if (tool === "get_corpus_info") {
-        return trace(tool, args, { coverage: [], holdings: [{ document_id: "gl-a", framework: "acme", title: "Acme guidelines on alpha estimation", records: 3 }] });
+      if (tool === "sources") {
+        return trace(tool, args, { documents: [{ id: "source://acme/gl-a", document_id: "gl-a", framework: "acme", title: "Acme guidelines on alpha estimation", status: "current", held: "whole", provisions: 3 }] });
       }
-      if (tool === "search_regulation") {
+      if (tool === "search") {
         return trace(tool, args, {
           results: [10, 11, 12].flatMap((n) => [
             { id: `regulation://crr/article-${n}`, citation: `Article ${n}`, document_id: "crr" },
@@ -101,7 +101,7 @@ function leaky(leaks: { numberedShape?: RegExp; identifier?: boolean; englishNam
           ]),
         });
       }
-      if (tool !== "resolve_citation") return trace(tool, args, {});
+      if (tool !== "cite") return trace(tool, args, {});
       const text = String(args["text"] ?? "");
       // A title names its document: the honest answer is that document's record.
       const titled = /^Article (\d+) of Acme guidelines on alpha estimation|^Acme guidelines on alpha estimation, Article (\d+)$/.exec(text);
@@ -143,7 +143,7 @@ function leaky(leaks: { numberedShape?: RegExp; identifier?: boolean; englishNam
       }
       if (/EBA\/GL\/|ESMA\//.test(text)) {
         return leaks.identifier === true
-          ? trace(tool, args, { match: null, candidates: [rec("regulation://gl-a/article-1")], coverage_note: "container" })
+          ? trace(tool, args, { match: null, candidates: [rec("regulation://gl-a/article-1")], notes: [{ type: "outside_library", text: "container" }] })
           : trace(tool, args, declined("names a document by the number"));
       }
       if (leaks.numberedShape?.test(text) === true) return trace(tool, args, { match: { id: "regulation://gl-a/article-1" }, candidates: [] });
@@ -203,7 +203,7 @@ describe("eval I3 fails a server that leaks", () => {
   it("is not applicable to the title probe when no document has a title", async () => {
     const session = leaky({});
     const original = session.call.bind(session);
-    session.call = async (tool, args = {}) => (tool === "get_corpus_info" ? original(tool, args).then((t) => ({ ...t, text: JSON.stringify({ holdings: [] }), json: { holdings: [] } })) : original(tool, args));
+    session.call = async (tool, args = {}) => (tool === "sources" ? original(tool, args).then((t) => ({ ...t, text: JSON.stringify({ documents: [] }), json: { documents: [] } })) : original(tool, args));
     const r = await titledCitationsResolve(session);
     expect(r.applicable).toBe(false);
   });

@@ -110,20 +110,25 @@ function scripted(
     traces: [],
     close: async () => {},
     call: async (tool) => {
-      if (tool === "search_regulation") {
-        return trace(tool, { results: [{ citation: "Acme Article 180" }] });
+      if (tool === "search") {
+        return trace(tool, { results: [{ id: "regulation://acme/article-180", citation: "Acme Article 180" }] });
       }
-      if (tool === "get_regulation") {
-        return trace(tool, { id: "regulation://acme/article-180", text: claimText });
+      if (tool === "get") {
+        return trace(tool, { records: [{ id: "regulation://acme/article-180", text: claimText }] });
       }
       return trace(tool, {
         match: null,
         confidence: "none",
         unmatched_segments: unmatched,
         candidates,
-        coverage_note:
-          'It holds the provision containing it: "Acme Article 180" (regulation://acme/article-180), ' +
-          `whose text carries point ${claim}. Open it.`,
+        notes: [
+          {
+            type: "outside_library",
+            text:
+              'It holds the provision containing it: "Acme Article 180" (regulation://acme/article-180), ' +
+              `whose text carries point ${claim}. Open it.`,
+          },
+        ],
       });
     },
   };

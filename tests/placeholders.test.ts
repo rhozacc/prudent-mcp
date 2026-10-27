@@ -310,7 +310,8 @@ describe("eval I14", () => {
 
   // A stand-in session replaying a server that serves the record unflagged, or
   // flags a record that names nothing - an invariant that cannot fail measures nothing.
-  function stub(serve: (tool: string, id: string) => Record<string, unknown>): Session {
+  // `noteFor` is the text of the placeholder note the stand-in puts beside a record, or undefined for none.
+  function stub(noteFor: (id: string) => string | undefined): Session {
     const trace = (tool: string, args: Record<string, unknown>, json: unknown): CallTrace => ({
       tool, args, text: JSON.stringify(json), chars: 0, tokens: 0, ms: 0, isError: false, json,
     });
@@ -318,43 +319,40 @@ describe("eval I14", () => {
       tools: [], surfaceTokens: 0, wireTokens: 0, instructions: "", traces: [],
       async close() {},
       async call(tool, args = {}) {
-        if (tool === "search_regulation") {
+        if (tool === "search") {
           return trace(tool, args, { results: [{ id: flagged.id }, { id: numbered.id }] });
         }
-        return trace(tool, args, serve(tool, String(args["id"])));
+        const id = String(args["ids"]);
+        const note = noteFor(id);
+        return trace(tool, args, { ...(note === undefined ? {} : { notes: [{ type: "placeholder", text: note }] }), records: [bodyFor(id)] });
       },
     };
   }
   const bodyFor = (id: string) => (id === flagged.id ? flagged : numbered);
+  const SAYS = "The placeholder is not a citation. The placeholder is: \u201cRegulation (EU) xx/xx\u201d.";
 
   it("fails a server that serves the placeholder unmarked", async () => {
-    const r = await placeholdersAreMarked(stub((_t, id) => ({ ...bodyFor(id) })));
+    const r = await placeholdersAreMarked(stub(() => undefined));
     expect(r.applicable).toBe(true);
-    expect(r.findings.filter((f) => f.severity === "fatal").map((f) => f.id).sort()).toEqual(["I14/get_regulation"]);
+    expect(r.findings.filter((f) => f.severity === "fatal").map((f) => f.id).sort()).toEqual(["I14/get"]);
   });
 
-  it("fails a server whose flag carries no notice that it is not a citation", async () => {
-    const r = await placeholdersAreMarked(
-      stub((_t, id) => (id === flagged.id ? { pre_adoption_placeholders: ["Regulation (EU) xx/xx"], ...flagged } : { ...numbered })),
-    );
-    expect(r.findings.some((f) => f.severity === "fatal" && f.evidence.join(" ").includes("notice does not say"))).toBe(true);
+  it("fails a server whose note does not say it is not a citation, or quotes no span, or too many", async () => {
+    const quiet = await placeholdersAreMarked(stub((id) => (id === flagged.id ? "A reference is unresolved: \u201cRegulation (EU) xx/xx\u201d." : undefined)));
+    expect(quiet.findings.some((f) => f.severity === "fatal" && f.evidence.join(" ").includes("does not say the placeholder is not a citation"))).toBe(true);
+    const bare = await placeholdersAreMarked(stub((id) => (id === flagged.id ? "The placeholder is not a citation." : undefined)));
+    expect(bare.findings.some((f) => f.severity === "fatal" && f.evidence.join(" ").includes("quotes no span"))).toBe(true);
+    const many = await placeholdersAreMarked(stub((id) => (id === flagged.id ? "Not a citation: \u201ca\u201d \u201cb\u201d \u201cc\u201d \u201cd\u201d." : undefined)));
+    expect(many.findings.some((f) => f.severity === "fatal" && f.evidence.join(" ").includes("4 spans"))).toBe(true);
   });
 
   it("fails a server that flags a record naming only numbered acts", async () => {
-    const r = await placeholdersAreMarked(
-      stub((_t, id) => ({ ...bodyFor(id), pre_adoption_placeholders: ["Regulation (EU) 2021/930"], notice: "not a citation" })),
-    );
+    const r = await placeholdersAreMarked(stub(() => SAYS));
     expect(r.findings.some((f) => f.id.startsWith("I14/false-flag"))).toBe(true);
   });
 
   it("passes a server that marks the record and leaves the numbered one alone", async () => {
-    const r = await placeholdersAreMarked(
-      stub((_t, id) =>
-        id === flagged.id
-          ? { pre_adoption_placeholders: ["Regulation (EU) xx/xx"], notice: "the placeholder is not a citation", ...flagged }
-          : { ...numbered },
-      ),
-    );
+    const r = await placeholdersAreMarked(stub((id) => (id === flagged.id ? SAYS : undefined)));
     expect(r.applicable).toBe(true);
     expect(r.findings).toEqual([]);
   });

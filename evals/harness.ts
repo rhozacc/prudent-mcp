@@ -16,8 +16,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-import { isLegacyTool, legacyCall } from "./legacy.ts";
-
 // ============================================================================
 // Token accounting
 // ============================================================================
@@ -171,7 +169,11 @@ export async function openSession(opts: OpenOptions = {}): Promise<Session> {
 
   const traces: CallTrace[] = [];
 
-  const rawCall = async (tool: string, args: Record<string, unknown> = {}): Promise<CallTrace> => {
+  const published = new Set(tools.map((t) => t.name));
+  const call = async (tool: string, args: Record<string, unknown> = {}): Promise<CallTrace> => {
+    // An invariant that probes a tool the server does not publish would get an isError reply, which many probes skip,
+    // so it would bind on nothing and pass. Fail loudly instead: that is a bug in the eval, not a finding about the server.
+    if (!published.has(tool)) throw new Error(`eval probe calls "${tool}", which the server does not publish (${[...published].join(", ")})`);
     const t0 = performance.now();
     let text = "";
     let isError = false;
@@ -211,10 +213,6 @@ export async function openSession(opts: OpenOptions = {}): Promise<Session> {
     traces.push(trace);
     return trace;
   };
-  // Probes written in the 0.x vocabulary are answered by the 1.0 tools (evals/legacy.ts); `traces` keeps the real calls.
-  const call = (tool: string, args: Record<string, unknown> = {}): Promise<CallTrace> =>
-    isLegacyTool(tool) ? legacyCall(rawCall, tool, args) : rawCall(tool, args);
-
   return {
     tools,
     surfaceTokens,

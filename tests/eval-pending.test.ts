@@ -146,6 +146,9 @@ const sourceNamed = (change: Record<string, unknown>, namedIds: string[] | null)
 });
 const quietSource = { id: "source://quiet/quiet-doc", status: "current", document_id: "quiet-doc", framework: "quiet", title: "q", pending_changes: [] };
 const rowOf = (id: string, citation: string, doc: string) => ({ id, citation, document_id: doc });
+const amendment = (text: string) => [{ type: "amendment", text }];
+/** A `get` reply for one provision, with its notes when it has any. */
+const got = (id: unknown, citation: string, note?: string) => ({ ...(note === undefined ? {} : { notes: amendment(note) }), records: [{ id, citation }] });
 
 /**
  * What a correct server answers when the change names provision A of acme-reg, and
@@ -159,17 +162,17 @@ function good(
   const acme = sourceNamed(change, namedIds);
   const mapped = namedIds !== null;
   const rows = [rowOf(A, "Acme 1", "acme-reg"), rowOf(B, "Acme 2", "acme-reg"), rowOf(Q, "Quiet 1", "quiet-doc")];
-  const noteFor = (id: unknown, args: Record<string, unknown>): Record<string, unknown> =>
-    mapped && id === A && args["as_of"] === undefined ? { pending_changes_note: NOTE, id } : { id };
   return stub({
-    list_sources: () => ({ json: { sources: [{ id: acme.id }, { id: quietSource.id }] } }),
-    get_source: (a) => ({ json: a["id"] === acme.id ? acme : quietSource }),
-    get_corpus_info: () => ({ json: { pending_changes: [{ source: acme.id, document_id: "acme-reg", title: "Amending act", state: (change as { state?: string }).state }] } }),
-    // Both documents are on every page; the notice says what the named (or unmapped) rows need.
-    search_regulation: () => ({ json: { results: rows, notice: mapped ? NOTICE : DOC_NOTICE } }),
-    get_regulation: (a) => ({ json: { ...noteFor(a["id"], a), citation: a["id"] === A ? "Acme 1" : "x" } }),
-    related: (a) => ({ json: mapped && a["id"] === A ? { id: a["id"], notes: [{ type: "amendment", text: NOTE }] } : { id: a["id"] } }),
-    resolve_citation: () => ({ json: { match: { id: A }, ...(mapped ? { pending_changes_note: NOTE } : {}) } }),
+    // No id: the documents and the library-wide changes; with an id: that source.
+    sources: (a) =>
+      a["id"] === undefined
+        ? { json: { documents: [{ id: acme.id }, { id: quietSource.id }], changes: [{ source: acme.id, document_id: "acme-reg", title: "Amending act", state: (change as { state?: string }).state }] } }
+        : { json: a["id"] === acme.id ? acme : quietSource },
+    // Both documents are on every page; the amendment note says what the named (or unmapped) rows need.
+    search: () => ({ json: { results: rows, notes: amendment(mapped ? NOTICE : DOC_NOTICE) } }),
+    get: (a) => ({ json: got(a["ids"], a["ids"] === A ? "Acme 1" : "x", mapped && a["ids"] === A && a["as_of"] === undefined ? NOTE : undefined) }),
+    related: (a) => ({ json: mapped && a["id"] === A ? { id: a["id"], notes: amendment(NOTE) } : { id: a["id"] } }),
+    cite: () => ({ json: { match: { id: A }, ...(mapped ? { notes: amendment(NOTE) } : {}) } }),
     ...overrides,
   });
 }
@@ -187,24 +190,24 @@ describe("eval I15 on servers that get it wrong", () => {
   it("fails a server that serves a named provision and says nothing, on every tool", async () => {
     const r = await pendingChangesAreNeverSilent(
       good({
-        get_regulation: (a) => ({ json: { id: a["id"], citation: "Acme 1" } }),
+        get: (a) => ({ json: got(a["ids"], "Acme 1") }),
         related: (a) => ({ json: { id: a["id"] } }),
-        resolve_citation: () => ({ json: { match: { id: A } } }),
-        search_regulation: () => ({ json: { results: [rowOf(A, "Acme 1", "acme-reg")], notice: "Showing 1 of 9 matches." } }),
-        get_corpus_info: () => ({ json: {} }),
+        cite: () => ({ json: { match: { id: A } } }),
+        search: () => ({ json: { results: [rowOf(A, "Acme 1", "acme-reg")], notice: "Showing 1 of 9 matches." } }),
+        sources: (a) => ({ json: a["id"] === undefined ? { documents: [{ id: "source://acme/acme-reg" }, { id: quietSource.id }] } : a["id"] === "source://acme/acme-reg" ? sourceNamed({ ...open, state: "upcoming" }, [A]) : quietSource }),
       }),
     );
     const ids = fatalIds(r);
-    for (const want of ["I15/get_regulation", "I15/related", "I15/resolve_citation", "I15/search", "I15/corpus_info"]) {
+    for (const want of ["I15/get", "I15/related", "I15/cite", "I15/search", "I15/sources"]) {
       expect(ids, want).toContain(want);
     }
   });
 
   it("fails a note that omits the date of an upcoming change", async () => {
     const r = await pendingChangesAreNeverSilent(
-      good({ get_regulation: (a) => ({ json: a["id"] === A && a["as_of"] === undefined ? { pending_changes_note: "Something is pending.", id: a["id"], citation: "Acme 1" } : { id: a["id"] } }) }),
+      good({ get: (a) => ({ json: got(a["ids"], "Acme 1", a["ids"] === A && a["as_of"] === undefined ? "Something is pending." : undefined) }) }),
     );
-    const f = r.findings.find((x) => x.id === "I15/get_regulation/note");
+    const f = r.findings.find((x) => x.id === "I15/get/note");
     expect(f?.severity).toBe("fatal");
     expect(f?.summary).toContain(`does not give the date ${iso(20)}`);
   });
@@ -213,44 +216,44 @@ describe("eval I15 on servers that get it wrong", () => {
     const overdue = { ...open, effective_from: iso(-4), state: "in_force_not_ingested" };
     const r = await pendingChangesAreNeverSilent(
       good(
-        { get_regulation: (a) => ({ json: a["id"] === A && a["as_of"] === undefined ? { pending_changes_note: "Pending change to this provision: Amending act is coming.", id: a["id"], citation: "Acme 1" } : { id: a["id"] } }) },
+        { get: (a) => ({ json: got(a["ids"], "Acme 1", a["ids"] === A && a["as_of"] === undefined ? "Pending change to this provision: Amending act is coming." : undefined) }) },
         overdue,
       ),
     );
-    expect(r.findings.some((f) => f.id === "I15/get_regulation/note" && f.summary.includes("out of date"))).toBe(true);
+    expect(r.findings.some((f) => f.id === "I15/get/note" && f.summary.includes("out of date"))).toBe(true);
   });
 
   it("fails a server that puts the note on a sibling nothing names, because its document has an open change", async () => {
     const r = await pendingChangesAreNeverSilent(
-      good({ get_regulation: (a) => ({ json: { pending_changes_note: NOTE, id: a["id"], citation: "Acme 1" } }) }),
+      good({ get: (a) => ({ json: got(a["ids"], "Acme 1", NOTE) }) }),
     );
     expect(r.findings.some((f) => f.id === "I15/over-flag" && f.severity === "fatal")).toBe(true);
   });
 
   it("fails a server that puts the note on provisions of a document whose changes name none", async () => {
     const r = await pendingChangesAreNeverSilent(
-      good({ get_regulation: (a) => ({ json: { pending_changes_note: NOTE, id: a["id"] } }) }, { ...open, state: "upcoming" }, null),
+      good({ get: (a) => ({ json: got(a["ids"], "x", NOTE) }) }, { ...open, state: "upcoming" }, null),
     );
     expect(r.findings.some((f) => f.id === "I15/unmapped-note" && f.severity === "fatal")).toBe(true);
   });
 
   it("an unmapped document must still be said in the search notice", async () => {
     const r = await pendingChangesAreNeverSilent(
-      good({ search_regulation: () => ({ json: { results: [rowOf(A, "Acme 1", "acme-reg")], notice: "Showing 1 of 9 matches." } }) }, { ...open, state: "upcoming" }, null),
+      good({ search: () => ({ json: { results: [rowOf(A, "Acme 1", "acme-reg")], notice: "Showing 1 of 9 matches." } }) }, { ...open, state: "upcoming" }, null),
     );
     expect(r.findings.some((f) => f.id === "I15/search" && f.severity === "fatal")).toBe(true);
   });
 
   it("fails a server that warns on a provision of a document with nothing open", async () => {
     const r = await pendingChangesAreNeverSilent(
-      good({ get_regulation: (a) => ({ json: { pending_changes_note: NOTE, id: a["id"], citation: "Acme 1" } }) }),
+      good({ get: (a) => ({ json: got(a["ids"], "Acme 1", NOTE) }) }),
     );
     expect(r.findings.some((f) => f.id === "I15/false-flag" && f.severity === "fatal")).toBe(true);
   });
 
   it("fails a server that carries the note under an as_of earlier than the change", async () => {
     const r = await pendingChangesAreNeverSilent(
-      good({ get_regulation: (a) => ({ json: a["id"] === A ? { pending_changes_note: NOTE, id: a["id"], citation: "Acme 1" } : { id: a["id"] } }) }),
+      good({ get: (a) => ({ json: got(a["ids"], "Acme 1", a["ids"] === A ? NOTE : undefined) }) }),
     );
     expect(r.findings.some((f) => f.id === "I15/as_of" && f.severity === "fatal")).toBe(true);
   });
