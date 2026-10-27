@@ -1,6 +1,8 @@
 # Changes
 
-## Unreleased
+## 1.2.1
+
+Eval tooling only: no tool, schema or reply changes.
 
 **The evals speak 1.0.** Every invariant calls the eight tools and reads their replies as sent (the `notes` array by type, `documents` and `changes` from `sources`, `records` from `get`); `evals/legacy.ts`, which read 1.0 replies back in the 19-tool shapes, and its test are gone, and the stand-in sessions in the tests are 1.0-shaped. No change to the server. Finding ids that named a 0.x tool now name the 1.0 one (`I3/…` ids are unchanged; `I4/search/checks-monotonic`, `I6/search/provisions`, `I7/get/provision-silent`, `I11/get`, `I12/cite`, `I13/search/checks`, `I14/get`, `I15/get/note`, `I15/cite`, `I15/sources`, `I17/get amendment note`), so a baseline keyed by id is re-pinned. Behaviour of the suite: on the seeded demo and on a private corpus every invariant keeps its `applicable` flag and its count of fatal, warning and info findings. Three honest differences: I6's entry path is `topics` + `brief` (the old path had no 1.0 counterpart; the playbook is priced as the bundle), I7 names a tool only when it appears as a word, and I17 now reads the `notes` array (it used to read only `notice` and `*_note` keys, which 1.0 replies mostly do not carry).
 
