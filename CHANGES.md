@@ -1,6 +1,8 @@
 # Changes
 
-## Unreleased
+## 1.2.0
+
+Additive: no tool, schema or reply changes. The documentation site describes the eight 1.0 tools (it still described the nineteen of 0.x), and `tests/docs-surface.test.ts` keeps it that way.
 
 **The citation resolver has its own modules.** `src/file-adapter.ts` held the resolver (about 85% of the file) beside the file adapters. It now lives in `src/citation/` (tokens, points, names, instruments, described, aliases, resolve), moved without a change to a pass, its order or a message. `src/file-adapter.ts` re-exports every name it exported before, and `prudent-mcp/citation` is a new package export for the resolver's public names (with `numberedActKeys` and `numberedActPattern()`, a fresh copy of the act-number grammar). Two more exports for consumers: `prudent-mcp/pending` (`pendingState`) and `prudent-mcp/digest` (`contentDigest`, the content identity the factory writes as `corpus_sha256`, pinned by `tests/digest.test.ts`). Record citations and aliases are tokenized once per corpus load, so `cite` is about a quarter faster on a large corpus; results are unchanged.
 
