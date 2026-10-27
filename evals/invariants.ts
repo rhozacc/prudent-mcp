@@ -821,14 +821,15 @@ export async function titledCitationsResolve(s: Session): Promise<{ applicable: 
  */
 export async function totalsAreTruthful(s: Session): Promise<InvariantResult> {
   const findings: Finding[] = [];
+  // Each search scope, and the kind of entry it counts in `sources`.
   const surfaces: Array<[string, string]> = [
-    ["search_regulation", "regulation"],
-    ["search_checks", "check"],
-    ["search_tests", "test"],
+    ["provisions", "regulation"],
+    ["checks", "check"],
+    ["tests", "test"],
   ];
 
   // Corpus size comes from the server itself, so this stays corpus-agnostic.
-  const info = await s.call("get_corpus_info");
+  const info = await s.call("sources");
   const counts = new Map<string, number>();
   for (const m of info.text.matchAll(/"(regulation|check|test|playbook|source)"\s*:\s*(\d+)/g)) {
     counts.set(m[1] ?? "", Number(m[2]));
@@ -838,12 +839,14 @@ export async function totalsAreTruthful(s: Session): Promise<InvariantResult> {
     Number(/"total_matches"\s*:\s*(\d+)/.exec(text)?.[1] ?? NaN);
 
   let bound = 0;
-  for (const [tool, surface] of surfaces) {
+  for (const [scope, surface] of surfaces) {
+    const tool = `search/${scope}`;
     // Ranking scores a record if it matches ANY query token, so adding tokens
     // can only widen the match set. total_matches must be non-decreasing.
-    const narrow = await s.call(tool, { query: "default", limit: 100 });
-    const wide = await s.call(tool, {
+    const narrow = await s.call("search", { query: "default", scope, limit: 100 });
+    const wide = await s.call("search", {
       query: "default risk data model estimation exposure",
+      scope,
       limit: 100,
     });
     const nNarrow = total(narrow.text);
@@ -886,18 +889,18 @@ export async function totalsAreTruthful(s: Session): Promise<InvariantResult> {
 // ============================================================================
 
 /**
- * Ids move between tools: search hands them to get, overviews hand them to
- * traversal. An id that appears in one response and 404s in the next is a dead
+ * Ids move between tools: search hands them to get, topics hands them to
+ * playbook. An id that appears in one response and 404s in the next is a dead
  * end the model cannot predict, and it burns a call to discover.
  */
 export async function idsRoundTrip(s: Session): Promise<InvariantResult> {
   const seeds: Array<[string, Record<string, unknown>]> = [
-    ["search_regulation", { query: "default", limit: 5 }],
-    ["search_checks", { query: "default", limit: 5 }],
-    ["search_tests", { query: "default", limit: 5 }],
-    ["search_playbooks", { query: "default", limit: 5 }],
-    ["list_sources", {}],
-    ["get_coverage_gaps", {}],
+    ["search", { query: "default", scope: "provisions", limit: 5 }],
+    ["search", { query: "default", scope: "checks", limit: 5 }],
+    ["search", { query: "default", scope: "tests", limit: 5 }],
+    ["search", { query: "default", scope: "playbooks", limit: 5 }],
+    ["sources", {}],
+    ["topics", {}],
   ];
   const found = new Set<string>();
   for (const [tool, args] of seeds) {
@@ -934,13 +937,13 @@ export interface Budget {
   /** A search or single-record response. */
   call: number;
   /**
-   * A documented one-shot BUNDLE (get_area_overview), which exists to replace a
+   * A documented one-shot BUNDLE (a whole playbook), which exists to replace a
    * dozen calls and is priced accordingly. Higher than `call`, and still a
    * ceiling: the distinction is between a response that is large because it was
    * asked to be and one that is large because nothing bounds it.
    */
   bundle: number;
-  /** get_corpus_info → list_review_areas → get_area_overview. */
+  /** topics → brief: the menu and a question routed to its playbook, the first call a model makes. */
   entryPath: number;
 }
 
@@ -1037,41 +1040,37 @@ export async function costWithinBudget(
     });
   }
 
-  const info = await s.call("get_corpus_info");
-  const areas = await s.call("list_review_areas");
-  const firstArea = /"id"\s*:\s*"([^"]+)"/.exec(areas.text)?.[1];
-  let overview = { tokens: 0, tool: "get_area_overview" };
-  if (firstArea !== undefined) {
-    const t = await s.call("get_area_overview", { area: firstArea });
-    overview = { tokens: t.tokens, tool: "get_area_overview" };
-  }
-  const entry = info.tokens + areas.tokens + overview.tokens;
+  const menu = await s.call("topics");
+  const firstPlaybook = (((asObject(menu.json)?.["areas"] ?? []) as Array<{ playbooks?: Array<{ id?: string; title?: string }> }>)[0]?.playbooks ?? [])[0];
+  let routed = { tokens: 0 };
+  // The question a person would ask is the playbook's own title: brief routes it and renders the playbook it finds.
+  if (firstPlaybook?.id !== undefined) routed = await s.call("brief", { question: firstPlaybook.title ?? firstPlaybook.id, budget: "short" });
+  const entry = menu.tokens + routed.tokens;
   if (entry > budget.entryPath) {
     findings.push({
       id: "I6/entry-path",
       severity: "warn",
       summary: `The documented entry path costs ~${entry} tokens before the model has read a single provision (budget ${budget.entryPath}).`,
       evidence: [
-        `get_corpus_info ${info.tokens}`,
-        `list_review_areas ${areas.tokens}`,
-        `get_area_overview("${firstArea}") ${overview.tokens}`,
+        `topics ${menu.tokens}`,
+        `brief("${firstPlaybook?.title ?? ""}") ${routed.tokens}`,
       ],
     });
   }
 
   // Widest realistic single calls.
-  const wide: Array<[string, Record<string, unknown>]> = [
-    ["search_regulation", { query: "default", detail: "full" }],
-    ["search_checks", { query: "default", detail: "full" }],
+  const wide: Array<[string, string, Record<string, unknown>]> = [
+    ["search/provisions", "search", { query: "default", scope: "provisions", detail: "full" }],
+    ["search/checks", "search", { query: "default", scope: "checks", detail: "full" }],
   ];
-  if (firstArea !== undefined) wide.push(["get_area_overview", { area: firstArea, detail: "full" }]);
-  for (const [tool, args] of wide) {
+  if (firstPlaybook?.id !== undefined) wide.push(["playbook", "playbook", { id: firstPlaybook.id }]);
+  for (const [label, tool, args] of wide) {
     const t = await s.call(tool, args);
     if (t.isError) continue;
-    const ceiling = tool === "get_area_overview" ? budget.bundle : budget.call;
+    const ceiling = tool === "playbook" ? budget.bundle : budget.call;
     if (t.tokens > ceiling) {
       findings.push({
-        id: `I6/${tool}`,
+        id: `I6/${label}`,
         severity: "fatal",
         summary: `${tool}(${JSON.stringify(args)}) returns ~${t.tokens} tokens in one call (ceiling ${ceiling}).`,
         evidence: [`${t.chars} chars in ${t.ms}ms`],
@@ -1092,29 +1091,31 @@ export async function costWithinBudget(
  */
 export async function missesAreActionable(s: Session): Promise<InvariantResult> {
   const findings: Finding[] = [];
-  const probes: Array<[string, Record<string, unknown>]> = [
-    ["get_regulation", { id: "regulation://nope/nothing-here" }],
-    ["get_check", { id: "check://nope/nothing-here" }],
-    ["get_area_overview", { area: "no-such-area-at-all" }],
+  const probes: Array<[string, string, Record<string, unknown>]> = [
+    ["get/provision", "get", { ids: "regulation://nope/nothing-here" }],
+    ["get/check", "get", { ids: "check://nope/nothing-here" }],
+    ["playbook", "playbook", { id: "playbook://nope/nothing-here" }],
+    ["related", "related", { id: "regulation://nope/nothing-here" }],
   ];
   const routed = new Map<string, string>();
   let bound = 0;
-  for (const [tool, args] of probes) {
+  for (const [label, tool, args] of probes) {
     const t = await s.call(tool, args);
     bound++;
     if (!t.isError) {
       findings.push({
-        id: `I7/${tool}-silent`,
+        id: `I7/${label}-silent`,
         severity: "fatal",
         summary: `${tool} answered a nonsense id without signalling an error — the model cannot tell a miss from a hit.`,
         evidence: [t.text.slice(0, 160)],
       });
       continue;
     }
-    const routes = s.tools.filter((x) => x.name !== tool && t.text.includes(x.name)).map((x) => x.name);
+    // A tool is named when it appears as a word: "get" must not be found in "target".
+    const routes = s.tools.filter((x) => x.name !== tool && new RegExp(`\\b${x.name}\\b`).test(t.text)).map((x) => x.name);
     if (routes.length === 0) {
       findings.push({
-        id: `I7/${tool}-unrouted`,
+        id: `I7/${label}-unrouted`,
         severity: "warn",
         summary: `${tool}'s miss message does not name another tool to try.`,
         evidence: [t.text.slice(0, 160)],
@@ -1127,7 +1128,7 @@ export async function missesAreActionable(s: Session): Promise<InvariantResult> 
   // The route has to DIFFER by probe class. Satisfying "names some tool" with
   // one boilerplate string appended everywhere passes the check above while
   // telling a caller nothing — the miss reads the same whether they asked for a
-  // bad id, a bad area, or a citation into an instrument that does not exist.
+  // bad provision, a bad check, or a playbook that does not exist.
   // Without this the check degrades into "does a constant contain a substring".
   const distinct = new Set(routed.values());
   if (routed.size > 1 && distinct.size === 1) {
@@ -1136,7 +1137,7 @@ export async function missesAreActionable(s: Session): Promise<InvariantResult> 
       severity: "warn",
       summary:
         "Every miss routes to the same tools regardless of what was asked — the message is boilerplate, not guidance.",
-      evidence: [...routed].map(([tool, r]) => `${tool} → ${r}`),
+      evidence: [...routed].map(([label, r]) => `${label} → ${r}`),
     });
   }
 
@@ -1250,7 +1251,7 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
 
   const ids: string[] = [];
   for (const q of SEED_QUERIES) {
-    const seed = await s.call("search_regulation", { query: q, limit: 10 });
+    const seed = await s.call("search", { query: q, limit: 10 });
     for (const m of seed.text.matchAll(/"id"\s*:\s*"(regulation:\/\/[^"]+)"/g)) {
       const found = m[1];
       if (found !== undefined && !ids.includes(found)) ids.push(found);
@@ -1279,12 +1280,14 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
   let unusableExcerpts = 0;
 
   // Fetch the sample first, so a word can be judged against the others.
-  const sample: Array<{ id: string; rec: CallTrace; words: string[] }> = [];
+  // The record alone, as JSON: the notes that ride beside a provision (an amendment note quotes new wording) are not its words.
+  const sample: Array<{ id: string; recordJson: string; words: string[] }> = [];
   for (const id of ids.slice(0, PROBE_TARGET)) {
-    const rec = await s.call("get_regulation", { id });
+    const rec = await s.call("get", { ids: id });
     if (rec.isError) continue;
-    const text = /"text"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(rec.text)?.[1] ?? "";
-    sample.push({ id, rec, words: [...new Set(text.toLowerCase().match(/[a-z]{4,}/g) ?? [])].filter((w) => !STOP.has(w)) });
+    const recordJson = JSON.stringify(firstRecord(rec.json) ?? {});
+    const text = /"text"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(recordJson)?.[1] ?? "";
+    sample.push({ id, recordJson, words: [...new Set(text.toLowerCase().match(/[a-z]{4,}/g) ?? [])].filter((w) => !STOP.has(w)) });
   }
   // A word in more than one record in twenty is boilerplate ("article", "regulation",
   // "apply", "competent authorities"), not something a person describes a provision
@@ -1308,7 +1311,7 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
   }
   const boilerplate = (w: string): boolean => (docFrequency.get(w) ?? 0) > Math.max(1, Math.floor(population / 20));
 
-  for (const { id, rec, words: allWords } of sample) {
+  for (const { id, recordJson, words: allWords } of sample) {
     const rare = allWords.filter((w) => !boilerplate(w));
     const words = rare.length >= 4 ? rare : allWords;
     if (words.length < 4) continue;
@@ -1316,7 +1319,7 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
     const query = words.slice(Math.floor(words.length / 3), Math.floor(words.length / 3) + 5).join(" ");
     probes++;
 
-    const back = await s.call("search_regulation", { query, limit: 10 });
+    const back = await s.call("search", { query, limit: 10 });
     const returned = [...back.text.matchAll(/"id"\s*:\s*"(regulation:\/\/[^"]+)"/g)].map((m) => m[1]);
     const rank = returned.indexOf(id);
     if (rank >= 0) found++;
@@ -1343,12 +1346,12 @@ export async function selfRetrievalIsAffordable(s: Session): Promise<InvariantRe
       (own === -1
         ? /"matched_excerpt"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(back.text)
         : /"matched_excerpt"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(back.text.slice(own)))?.[1] ?? "";
-    const usable = excerptIsQuotable(excerpt, own === -1 ? undefined : rec.text);
+    const usable = excerptIsQuotable(excerpt, own === -1 ? undefined : recordJson);
     if (!usable) unusableExcerpts++;
     const topId = returned[0];
     let open = 0;
     if (!usable && topId !== undefined) {
-      const t = await s.call("get_regulation", { id: topId });
+      const t = await s.call("get", { ids: topId });
       open = t.tokens;
     }
     pathTokens += back.tokens + open;
