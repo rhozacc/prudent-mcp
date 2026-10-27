@@ -778,3 +778,15 @@ export const playbookSearchFields: SearchField<Playbook>[] = [
   { name: "requirement_statements", weight: 1, get: (p) => p.requirements.map((r) => r.statement) },
   { name: "pitfalls", weight: 0.5, get: (p) => p.pitfalls.map((x) => x.text) },
 ];
+
+/**
+ * The two halves of a playbook, for routing (`src/brief.ts`). The HEAD is what the playbook declares it is about: title,
+ * the questions it answers, summary, requirement titles. The BODY is what it says: requirement statements and pitfalls.
+ * Neighbouring topics share their body vocabulary (a margin-of-conservatism playbook and a calibration playbook both say
+ * "long-run average", "default rate", "category A"), and the body is the long part, so one ranking over everything is decided
+ * by the body; ranked apart, the head can say which topic a question is about. Same fields and weights as above, so
+ * `playbookSearchFields` stays the one definition; these are module constants because the index is cache-keyed on them.
+ */
+const HEAD_FIELDS: ReadonlySet<string> = new Set(["title", "questions", "summary", "requirement_titles"]);
+export const playbookHeadFields: SearchField<Playbook>[] = playbookSearchFields.filter((f) => HEAD_FIELDS.has(f.name));
+export const playbookBodyFields: SearchField<Playbook>[] = playbookSearchFields.filter((f) => !HEAD_FIELDS.has(f.name));
