@@ -16815,7 +16815,7 @@ var EMPTY_COMPLETION_RESULT = {
 // package.json
 var package_default = {
   name: "prudent-mcp",
-  version: "1.1.0",
+  version: "1.2.0",
   description: "MCP server exposing the prudent IRB validation knowledge base",
   type: "module",
   module: "src/server.ts",
