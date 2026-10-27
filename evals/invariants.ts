@@ -1526,7 +1526,7 @@ export async function humanRegisterCitationsResolve(s: Session): Promise<Invaria
   const findings: Finding[] = [];
   const seen = new Set<string>();
   for (const q of ["default", "estimation", "downturn", "validation"]) {
-    const t = await s.call("search_regulation", { query: q, limit: 10 });
+    const t = await s.call("search", { query: q, limit: 10 });
     for (const m of t.text.matchAll(/"citation"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
       const c = m[1];
       if (c !== undefined && /\d/.test(c) && !/\(/.test(c)) seen.add(c);
@@ -1543,7 +1543,7 @@ export async function humanRegisterCitationsResolve(s: Session): Promise<Invaria
           id: "I9/no-citations",
           severity: "info",
           summary: "No numbered, unbracketed citations were observed to deepen into a probe.",
-          evidence: ["searched 4 terms over search_regulation"],
+          evidence: ["searched 4 terms over search"],
         },
       ],
     };
@@ -1552,23 +1552,22 @@ export async function humanRegisterCitationsResolve(s: Session): Promise<Invaria
   let bound = 0;
   for (const base of bases) {
     const probe = `${base}(1)`;
-    const r = await s.call("resolve_citation", { text: probe });
+    const r = await s.call("cite", { text: probe });
     if (r.isError) continue;
     bound++;
     const body = (r.json ?? {}) as {
       match?: { id?: string } | null;
       candidates?: Array<{ id?: string; citation?: string }>;
-      coverage_note?: string;
     };
     const answered =
       (body.match ?? null) !== null ||
       (body.candidates ?? []).length > 0 ||
-      (body.coverage_note ?? "").length > 0;
+      (noteText(r.json, "outside_library") ?? "").length > 0;
     if (!answered) {
       findings.push({
         id: "I9/bare-miss",
         severity: "fatal",
-        summary: `resolve_citation("${probe}") returns nothing at all — no match, no candidate, no reason. The caller cannot tell "not in this corpus" from "I did not understand you".`,
+        summary: `cite("${probe}") returns nothing at all — no match, no candidate, no reason. The caller cannot tell "not in this corpus" from "I did not understand you".`,
         evidence: [r.text.slice(0, 200)],
       });
       continue;
@@ -1589,7 +1588,7 @@ export async function humanRegisterCitationsResolve(s: Session): Promise<Invaria
       findings.push({
         id: "I9/candidate-unrelated",
         severity: "fatal",
-        summary: `resolve_citation("${probe}") offers "${c.citation}" as a candidate, but its numbering neither contains nor sits under the citation asked for — a neighbouring provision presented as though it were related.`,
+        summary: `cite("${probe}") offers "${c.citation}" as a candidate, but its numbering neither contains nor sits under the citation asked for — a neighbouring provision presented as though it were related.`,
         evidence: [`probe numbers ${JSON.stringify(want)}`, `candidate numbers ${JSON.stringify(got)}`, `id ${c.id}`],
       });
     }
@@ -1608,7 +1607,7 @@ export async function humanRegisterCitationsResolve(s: Session): Promise<Invaria
 // ============================================================================
 
 /**
- * `resolve_citation` is allowed — required — to decline. What it may not do is
+ * `cite` is allowed — required — to decline. What it may not do is
  * decline in silence: `{match: null}` with no reason is indistinguishable from
  * a malformed request, and it is returned at the exact moment the caller is
  * deciding whether to look elsewhere or fill the gap from memory.
@@ -1627,17 +1626,17 @@ export async function declinesAreNeverEmpty(s: Session): Promise<InvariantResult
   ];
   let bound = 0;
   for (const probe of probes) {
-    const r = await s.call("resolve_citation", { text: probe });
+    const r = await s.call("cite", { text: probe });
     if (r.isError) continue;
-    const body = (r.json ?? {}) as { match?: unknown; coverage_note?: string };
+    const body = (r.json ?? {}) as { match?: unknown };
     if ((body.match ?? null) !== null) continue; // resolved; not a decline
     bound++;
-    const note = body.coverage_note ?? "";
+    const note = noteText(r.json, "outside_library") ?? "";
     if (note.length === 0) {
       findings.push({
         id: "I10/silent-decline",
         severity: "fatal",
-        summary: `resolve_citation("${probe}") declines with no reason at all — the caller cannot tell a coverage boundary from a malformed citation.`,
+        summary: `cite("${probe}") declines with no reason at all — the caller cannot tell a coverage boundary from a malformed citation.`,
         evidence: [r.text.slice(0, 200)],
       });
       continue;
@@ -1649,7 +1648,7 @@ export async function declinesAreNeverEmpty(s: Session): Promise<InvariantResult
       findings.push({
         id: "I10/generic-decline",
         severity: "warn",
-        summary: `resolve_citation("${probe}") declines with a note that never refers to what was asked — boilerplate satisfies "has a reason" while explaining nothing.`,
+        summary: `cite("${probe}") declines with a note that never refers to what was asked — boilerplate satisfies "has a reason" while explaining nothing.`,
         evidence: [note.slice(0, 200)],
       });
     }
