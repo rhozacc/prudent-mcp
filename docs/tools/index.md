@@ -1,88 +1,204 @@
-# Tools overview
+---
+title: Tools
+---
 
-19 tools across six files. Every tool has a title, a description, read-only annotations, a zod input schema, and a handler that delegates to the adapter layer.
+# Tools
 
-## All tools
+Eight tools, one prompt and five resource templates. Everything is read-only. The standing cost of the whole surface is about 1.9k tokens (`bun run evals` prints the current figure).
 
-| Tool | Surface | Description |
+The order a model follows, and the one the server's instructions give it:
+
+1. **`brief`** with the question. It returns the compiled playbook that answers it, the provisions that matter but the playbook does not cite, neighbouring playbooks and notes.
+2. **`playbook`** to open the whole playbook, or one requirement with the full text of its provisions.
+3. **`search`**, **`get`**, **`cite`** to open particular provisions, **`related`** for their neighbours, **`sources`** for what the library covers and what is changing.
+
+| Tool | Use it to | Inputs |
 |---|---|---|
-| `get_corpus_info` | meta | What's loaded — counts, coverage, stale sources |
-| `get_referrers` | meta | Everything that references a given ID |
-| `resolve_citation` | meta | Loose prose citation → structured Regulation |
-| `list_review_areas` | meta | Taxonomy of review areas — authored, or derived from the playbooks |
-| `expand_playbook` | meta | Playbook with all Phase.references resolved inline |
-| `get_area_overview` | meta | One-shot entry point: area node + expanded playbooks + deduplicated IDs |
-| `expand_regulation` | meta | Regulation with its children (sub-regs + checks/tests) resolved inline |
-| `get_regulation_tree` | meta | Recursive dossier: a branch of law with operationalizing checks/tests |
-| `get_coverage_gaps` | meta | Regulations with no check/test coverage — the aggregate inverse of get_referrers |
-| `search_regulation` | regulation | Ranked search over citation, text, and commentary |
-| `get_regulation` | regulation | Fetch a regulation paragraph by URI, with optional `as_of` |
-| `search_tests` | tests | Ranked search over test name, aliases, family, purpose, criteria |
-| `get_test` | tests | Fetch a test by ID |
-| `search_checks` | checks | Ranked search over check name, expectation, expected evidence |
-| `get_check` | checks | Fetch a check by ID |
-| `search_playbooks` | playbooks | Ranked search over area, subarea, phase names and descriptions |
-| `get_playbook` | playbooks | Fetch a playbook by ID (`detail: "steps"` drops the reference lists) |
-| `list_sources` | sources | The source-document registry with currency status, optionally filtered |
-| `get_source` | sources | Fetch a source document record by ID |
+| [`brief`](#brief) | answer a substantive question | `question`, `as_of?`, `budget?` |
+| [`playbook`](#playbook) | read a topic's playbook, or one requirement in full | `id`, `section?` |
+| [`topics`](#topics) | list the areas and the playbook for each topic | none |
+| [`search`](#search) | find passages for a specific wording | `query`, `scope?`, `document?`, `limit?`, `offset?`, `detail?` |
+| [`get`](#get) | open entries by id, up to 20 | `ids`, `as_of?` |
+| [`cite`](#cite) | resolve a citation written in prose | `text` |
+| [`related`](#related) | see what surrounds an entry | `id`, `as_of?` |
+| [`sources`](#sources) | say what the library holds and how current it is | `id?` |
 
-`list_sources` is deliberately a list, not a search: the registry is small and status-filterable, so enumerating beats matching.
+Replies below are real output from the seeded demo (`bun run evals:call <tool> '<json>'` prints one; `bun run inspect:demo` opens the MCP Inspector on it). A real corpus is larger; the shapes are the same.
 
-## Conventions every tool follows
+## Notes
 
-- **Annotations** — every tool declares `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: false`. The whole server reads a local knowledge base and nothing else.
-- **Structured output** — tools with an output schema return `structuredContent` plus a JSON text fallback (the spec requires text alongside structured content).
-- **Misses are `isError`** — an unknown id or slug comes back as an `isError` result with a pointer to the right search/list tool, never the literal string `"null"`. Resource reads miss with JSON-RPC error `-32002`.
-- **The search envelope** — the four `search_*` tools share `{ results, returned, total_matches, offset, truncated, next_offset, query_tokens, best_coverage, notice }` with `limit` (default 20, max 100) and `offset` paging. `returned` is this page; `total_matches` is the whole match set — ranking is uncapped, so page with `next_offset` until it is null before concluding anything is absent. Queries are ranked and field-scoped, minimum 2 characters — search never enumerates the corpus; that's what `list_*` tools and traversal are for.
-- **Rows say how much of the query they matched** — a concise row carries `coverage`, the number of the query's distinct meaningful terms (`query_tokens`, stopwords excluded exactly as ranking excludes them) it matched, and the envelope carries `best_coverage`, the highest over the whole ranked set rather than the page. When `best_coverage` is under half of `query_tokens`, `notice` says the best result matches only some of the terms, that the topic may not be in this corpus, and that a weak match is a statement about the corpus and not about the law. Ranking, `total_matches` and the page contents are unchanged: there is no relevance floor and no cap, only a statement of what the top of the list is worth. `coverage` counts whole-word matches, so a stem or fragment that places records on partial-word matches alone reports coverage 0; a single-term query never carries the notice, and a multi-term query whose hits are all partial-word gets a notice that says so instead of the topic-may-be-absent wording. Nothing matched means no `best_coverage` and no such notice.
-- **Responses are size-capped** — a page is shortened until its rows fit the per-response ceiling (~6,000 tokens), and a bundle whose `detail: 'full'` form does not fit is served as its summary instead. Either way `notice` says what happened and how to reach the rest. Nothing is dropped silently.
-- **Ranking is BM25F** — a rare, specific word decides the order, repetition saturates, and a long record does not win by being long. Headings are searched (`heading_path` outweighs the paragraph under it), word forms meet ("estimating" finds "estimated"), the corpus's abbreviations are expanded ("rds" also finds "reference data set"), and `search_regulation` leaves background material out unless `scope: "all"`. A multi-word query is still an OR for `total_matches`; what changed is the order. Practical consequence: **put the distinctive words of what you are after in the query** ("representativeness reference data set" beats "data"), and read `coverage` to see how much of it a row matched.
-- **`detail: "concise" | "full"`** — search and traversal tools are concise by default (per-surface projections, `{ type, id, label }` reference stubs); pass `detail: "full"` for complete records.
-- **Lenient ids** — id parameters tolerate surrounding whitespace, quotes, brackets, and trailing punctuation.
+A response that carries an edge-of-the-library fact carries it as a `notes` entry: `{ type, text, applies_to? }`. The text is written to be repeated to the user as it stands, in the library's own words (no tool names, no internal terms; see the language rule in [Architecture](/guide/architecture#the-language-rule)). `notes` is **absent, never empty**, when there is nothing to say: "no amendment recorded" is not "none is coming", so silence is not offered as reassurance.
 
-## URI scheme quick-reference
+| `type` | Means | Where it appears |
+|---|---|---|
+| `amendment` | A recorded change names this provision: who amends it, from when, how, and the new wording quoted | `brief`, `playbook`, `get`, `related`, `cite` (a match) |
+| `version` | `as_of` was answered with the current text because no version is recorded for that date; do not present it as the text of that date | `get`, `brief` |
+| `outside_library` | The instrument asked about is not held, or the document is held only in part | `cite` |
+| `placeholder` | The text names an instrument by a pre-adoption number ("Regulation (EU) xx/xx"), which is not a citation | `get`, `related`, `brief` |
+| `weak_match` | The best match covers little of the question; the topic may not be in the library | `brief`, `search` |
+
+## `brief`
+
+The first call for any substantive question.
+
+| Input | Type | |
+|---|---|---|
+| `question` | string, 3+ chars | The question in the user's own words, abbreviations and all |
+| `as_of` | ISO date, optional | When the question is about the text in force on a past day |
+| `budget` | `short` \| `standard` \| `long` | About 2.5k, 5k or 9k tokens (default `standard`) |
+
+It scores each playbook on its title, questions, summary and requirements and on the provisions the question finds that the playbook cites, and picks one only above a floor. The playbook is rendered within the budget; then come the provisions the question lands on that it does not cite, neighbouring playbooks and the notes. When a second playbook is nearly as good a fit it is rendered beside the first. When none clears the floor, `brief` says so and returns the best passages grouped by document.
+
+Returns text (also in `structuredContent.text`, so a client that shows the model only structured content still delivers the playbook) plus `playbook` (`id`, `title`, `status`, or null), `confidence`, `also_relevant`, `close_second`, `other_playbooks` and `notes`.
 
 ```
-regulation://{framework}/{article}[/{paragraph}[/{point}]]
-  e.g.  regulation://crr/178/1/a
-        regulation://eba/gl-2017-16/78
-
-test://[{family}/]{test-id}
-  e.g.  test://jeffreys
-        test://gl-2019-03/downturn-lgd-vs-reference-value-comparison
-
-check://{area}/{topic}[/{specific}]
-  e.g.  check://calibration/pd/lra-derived
-        check://default-definition/utp
-
-playbook://{area}[/{subarea}]
-  e.g.  playbook://calibration/pd
-        playbook://default-definition
-
-source://{framework}/{document-id}
-  e.g.  source://eba/gl-2017-16
-        source://crr/575-2013
+brief { "question": "How is the long-run average PD derived?", "budget": "short" }
 ```
 
-## Workflow patterns
+```text
+# Long-run average default rate for PD calibration
 
-**Starting a review area:** `list_review_areas` → `get_area_overview` (takes the slug or the area name) → work through expanded phases.
+Estimate each grade's PD from the long-run average of its one-year default rates (Art. 180(1)(a) CRR), and show that the average
+reflects the likely range of variability of those rates, including downturn periods relevant to the portfolio (EBA/GL/2017/16 para 78). ...
 
-**Resolving a bank citation:** `resolve_citation("Art. 178(1)(a)")` → `get_regulation` → `get_referrers` → checks + playbooks.
+## What it rests on
+- Art. 180(1)(a) CRR (law): PDs are estimated by obligor grade from long-run averages of one-year default rates.
+  > "Institutions shall estimate PDs by obligor grade from long-run averages of one-year default rates." (Art. 180(1)(a) CRR)
+...
+## What has to be shown
+### R1. Estimate PDs by grade from long-run averages
+...
+```
 
-**Checking test equivalence:** `search_tests("chi-squared decile")` → compare `family` field → read `acceptance_criteria`.
+A question the library has no playbook for:
 
-**Historical regulation lookup:** `get_regulation("regulation://crr/178/1/b", as_of: "2014-06-01")` → see what was in force when the model was built.
+```text
+No playbook answers this question directly. The best passages follow, grouped by document.
 
-## Which tool, when?
+Nothing in the library matches the question's terms. Not finding a match is a statement about what this library holds, not about the law.
+```
 
-Start from what you already have:
+## `playbook`
 
-| You have | Start with | Then |
+One playbook for one topic, as text.
+
+| Input | Type | |
 |---|---|---|
-| A review task | `list_review_areas` | `get_area_overview` |
-| A prose citation | `resolve_citation` | `get_regulation` → `get_referrers` |
-| A bank's test name | `search_tests` | `get_test` (compare `family`) |
-| A finding | `search_checks` | `resolve_citation` |
+| `id` | string | A playbook id from `topics` or `brief`, in full (`playbook://pd-long-run-average`) or just the name after the scheme |
+| `section` | `R1`, `R2`, … | One requirement, with the full text of its provisions |
 
-Most chains stop after one or two more calls — `get_referrers` after a regulation, `get_test` after a search hit, `expand_playbook` after `get_area_overview` if you skipped the overview.
+The rendering is deterministic (`src/render.ts`). A citation is always the provision's official citation, built from its id and its document's citation style, never the compiler's wording. Each source is labelled with its force (law, delegated act, EBA guideline, ECB supervisory expectation), methods are marked regulatory or market practice, and the library's gaps are listed under "Not in this library". Returns `text`, `id`, `title`, `status`, `requirements` (`id` and `title` of each), `abridged` when the budget shortened a section, and `notes`.
+
+An unknown id is a miss that lists the playbooks that exist.
+
+## `topics`
+
+No input. The areas of the library and the playbook under each topic: `areas[].playbooks[]` with `id`, `title` and a one-line `scope`. Only topics with a playbook appear.
+
+```json
+{"areas":[{"id":"calibration","title":"Calibration","playbooks":[{"id":"playbook://pd-long-run-average","title":"Long-run average default rate for PD calibration","scope":"How the long-run average one-year default rate is estimated and shown to be representative of the range of variability."}]}]}
+```
+
+## `search`
+
+Ranked passages for a specific wording. Ranking is BM25F over weighted fields (heading path, citation, text, commentary) with stemming and an abbreviation glossary the corpus can carry; checks, tests and playbooks have their own field sets.
+
+| Input | Type | |
+|---|---|---|
+| `query` | string, 2+ chars | Search phrase |
+| `scope` | `provisions` (default) \| `checks` \| `tests` \| `playbooks` | Which kind of entry to search |
+| `document` | string, optional | Provisions only: restrict to one document by its id (as `sources` lists them) |
+| `limit`, `offset` | int | Page size (default 20, max 100) and how many ranked matches to skip |
+| `detail` | `concise` (default) \| `full` | A per-kind projection, or complete entries |
+
+Returns `results`, `returned`, `total_matches` (every match, not the page), `offset`, `truncated`, `next_offset`, `query_tokens` (distinct meaningful terms in the query), `best_coverage` (the most terms any match covered) and, per row, `coverage`. Provision rows carry the official `citation` and a `matched_excerpt` made of whole sentences, so the excerpt can be quoted without reopening the provision. Read `best_coverage` against `query_tokens` before treating the top row as an answer: when it is under half, a `weak_match` note says the topic may not be in the library. Provisions that are background are never searched.
+
+```
+search { "query": "long-run average" }
+```
+
+```json
+{"results":[{"id":"regulation://crr/180/1/a","citation":"Art. 180(1)(a) CRR","matched_excerpt":"Institutions shall estimate PDs by obligor grade from long-run averages of one-year default rates.","document_id":"crr","coverage":3},{"id":"regulation://eba/gl-2017-16/78","citation":"EBA/GL/2017/16 para 78","matched_excerpt":"When calibrating PDs, institutions should ensure that the long-run average default rate ...","document_id":"eba-gl-2017-16","coverage":3}],"returned":2,"total_matches":2,"offset":0,"truncated":false,"next_offset":null,"query_tokens":3,"best_coverage":3}
+```
+
+## `get`
+
+Open entries by id: provisions (verbatim text and commentary), checks, tests and sources, mixed freely, up to 20 per call.
+
+| Input | Type | |
+|---|---|---|
+| `ids` | string or string[] | `regulation://`, `check://`, `test://` or `source://` ids, as `search`, `related` and `brief` return them |
+| `as_of` | ISO date, optional | Provisions only: the text in force on that date |
+
+Returns `records`, `missing` (each id with a reason; a miss on a part-held document says so, because the provision is absent from the library, not necessarily from the law) and `notes`. A page that would exceed the size ceiling is shortened (commentary first, then trailing entries) and says what it left out in `notice`.
+
+`as_of` selects the last recorded version at or before the date. A date before the document existed is a miss, never today's text relabelled. When the library records no version for the date, the current text is returned with a `version` note.
+
+```
+get { "ids": ["regulation://crr/178/1/a"], "as_of": "2020-01-01" }
+```
+
+```json
+{"notes":[{"type":"version","text":"This library has no version of this provision for the requested date (2020-01-01). The text below is the version dated 2024-01-09, which may differ from the text in force on that date. Do not present it as the text of that date.","applies_to":["Art. 178(1)(a) CRR"]}],"records":[{"id":"regulation://crr/178/1/a", ... }]}
+```
+
+## `cite`
+
+Resolve a citation as people write it (`"Art. 178(1)(a) CRR"`, `"EBA GL 2017/16 para 78"`, `"Chapter 3 paragraph 233"`) to the provision it names.
+
+| Input | Type | |
+|---|---|---|
+| `text` | string | A citation in prose |
+
+Returns `match` (the provision, or null), `confidence` (`exact`, `alias` or `none`), `candidates`, `ambiguous`, `unmatched_segments`, `official_citation` and `notes`.
+
+**Matching is exact, in a fixed order; there is no fuzzy fallback.** A confident wrong citation is the worst failure the server can produce, so `match` is null when nothing matches, when several provisions fit (they come back as `candidates`), when only a narrower or containing provision exists (reported as a candidate, `match` still null), and when the instrument is not in the library. An `alias` match means the caller used a loose spelling the provision declares (for example "Article 178" for a guideline paragraph 178) and the note names the real citation. An instrument is recognised by its number in every standard spelling, by its identifier and by its description ("the RTS on ..."), so a provision of another document that merely shares the number is never returned. The reason for a null match is an `outside_library` note.
+
+```
+cite { "text": "Article 5 of Regulation (EU) 2019/2033" }
+```
+
+```json
+{"notes":[{"type":"outside_library","text":"This library holds no Regulation (EU) 2019/2033. Nothing was matched, rather than sourcing a same-numbered provision from another document. The library's overview lists the documents it holds."}],"match":null,"confidence":"none","candidates":[],"ambiguous":false,"unmatched_segments":[]}
+```
+
+## `related`
+
+What surrounds an entry.
+
+| Input | Type | |
+|---|---|---|
+| `id` | string | A provision, check, test or playbook id |
+| `as_of` | ISO date, optional | Provisions only: amendments are read as of this day |
+
+For a provision: `citation`, `document_id`, `heading_path`, `parent`, `siblings`, `cites` and `cited_by` (provisions, from the citations the text makes), `checks` and `tests` that restate it (those naming it as their primary basis first), `playbooks` that rely on it with the requirement handles, and `notes` for amendments. For a check or test: the provisions it rests on and the playbooks that use it. For a playbook: the playbooks it points to. Every link is an id the library already holds; nothing is inferred.
+
+```
+related { "id": "regulation://crr/180/1/a" }
+```
+
+```json
+{"id":"regulation://crr/180/1/a","citation":"Art. 180(1)(a) CRR","document_id":"crr","parent":{"id":"regulation://crr/180","citation":"Art. 180 CRR"},"siblings":[],"cites":[],"cited_by":[],"checks":[{"id":"check://calibration/pd/lra-derived","name":"PD long-run average derived from sufficient history"}],"tests":[{"id":"test://jeffreys","name":"Jeffreys test"},{"id":"test://binomial","name":"Binomial test"},{"id":"test://hosmer-lemeshow","name":"Hosmer-Lemeshow test"}],"playbooks":[{"id":"playbook://pd-long-run-average","title":"Long-run average default rate for PD calibration","requirements":["R1"]}]}
+```
+
+## `sources`
+
+What the library holds and how current it is.
+
+| Input | Type | |
+|---|---|---|
+| `id` | string, optional | A source id or a document id |
+
+Without `id`: `documents` (each with `status`, `held` as `whole`, `part` or `undeclared`, `provisions` held, `verified`, `next_milestone`, `open_changes`), `counts`, `changes` (recorded changes the text does not yet include, each with its state today) and `overdue_for_check` (current documents not confirmed within 30 days). With `id`: the whole entry with each change and its computed `state`: `upcoming`, `in_force_not_ingested` ("the text served may no longer be the text in force") or `undated`.
+
+`held: "part"` means the document is declared partly held: not finding a provision there is not evidence it does not exist. `undeclared` means nobody declared either way, which is not the same as whole. See [Corpus structure](/corpus/#declaring-coverage).
+
+## Resources and the prompt
+
+One resource template per URI scheme, each reading an entry by id: `regulation://{+path}`, `test://{+path}`, `check://{+path}`, `playbook://{+path}` (rendered as text) and `source://{+path}`. Ids autocomplete.
+
+The prompt `walk_through(topic, focus?)` asks the model to call `brief`, go through the requirements in order citing provisions officially, keep law, guidelines, supervisory expectations and practice apart, repeat every note, and end with the pitfalls and the gaps.
+
+## Migrating from 0.x
+
+0.x had nineteen tools. 1.0 replaced them with the eight above; the old-to-new table is in [the 1.0 design](/design/1.0#migrating-from-0-x).

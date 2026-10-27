@@ -24,12 +24,18 @@ import { estimateTokens, type CallTrace, type Finding, type InvariantResult, typ
 const SCHEMES = ["regulation", "check", "test", "playbook", "source"] as const;
 type Scheme = (typeof SCHEMES)[number];
 
-const GETTER: Record<Scheme, string> = {
-  regulation: "get_regulation",
-  check: "get_check",
-  test: "get_test",
-  playbook: "get_playbook",
-  source: "get_source",
+/** The 1.0 call that opens a record of each scheme by its id. */
+const FETCH: Record<Scheme, (uri: string) => { tool: string; args: Record<string, unknown> }> = {
+  regulation: (uri) => ({ tool: "get", args: { ids: uri } }),
+  check: (uri) => ({ tool: "get", args: { ids: uri } }),
+  test: (uri) => ({ tool: "get", args: { ids: uri } }),
+  playbook: (uri) => ({ tool: "playbook", args: { id: uri } }),
+  source: (uri) => ({ tool: "sources", args: { id: uri } }),
+};
+
+const fetchRecord = (s: Session, scheme: Scheme, uri: string): Promise<CallTrace> => {
+  const { tool, args } = FETCH[scheme](uri);
+  return s.call(tool, args);
 };
 
 /** Every `scheme://…` token appearing in a string. */
@@ -62,28 +68,26 @@ const schemeOf = (uri: string): Scheme | null => {
  * it, and the model is handed a body it cannot rely on the shape of.
  */
 export async function envelopeIsJson(s: Session): Promise<InvariantResult> {
-  const probes: Array<[string, Record<string, unknown>]> = [
-    ["get_corpus_info", {}],
-    ["list_review_areas", {}],
-    ["list_sources", {}],
-    ["search_regulation", { query: "default", limit: 1 }],
-    ["search_checks", { query: "default", limit: 1 }],
-    ["search_tests", { query: "default", limit: 1 }],
-    ["search_playbooks", { query: "default", limit: 1 }],
-    ["get_coverage_gaps", {}],
+  const probes: Array<[string, string, Record<string, unknown>]> = [
+    ["sources", "sources", {}],
+    ["topics", "topics", {}],
+    ["search/provisions", "search", { query: "default", scope: "provisions", limit: 1 }],
+    ["search/checks", "search", { query: "default", scope: "checks", limit: 1 }],
+    ["search/tests", "search", { query: "default", scope: "tests", limit: 1 }],
+    ["search/playbooks", "search", { query: "default", scope: "playbooks", limit: 1 }],
   ];
   const findings: Finding[] = [];
   let bound = 0;
-  for (const [tool, args] of probes) {
+  for (const [label, tool, args] of probes) {
     const t = await s.call(tool, args);
     if (t.isError) continue;
     bound++;
     if (t.json === null) {
       const tail = t.text.slice(t.text.lastIndexOf("}") + 1).trim();
       findings.push({
-        id: `I1/${tool}`,
+        id: `I1/${label}`,
         severity: "fatal",
-        summary: `${tool} returns a body that is not valid JSON — a consumer that parses it fails.`,
+        summary: `${label} returns a body that is not valid JSON — a consumer that parses it fails.`,
         evidence: [
           `bytes after the final "}": ${JSON.stringify(tail.slice(0, 200))}`,
           `body length ${t.chars}c`,
@@ -119,13 +123,13 @@ export async function describedIdsResolve(s: Session): Promise<InvariantResult> 
       // Template placeholders are documentation, not claims about content.
       if (/[{}<>]|\.\.\./.test(uri)) continue;
       bound++;
-      const t = await s.call(GETTER[scheme], { id: uri });
+      const t = await fetchRecord(s, scheme, uri);
       if (t.isError) {
         findings.push({
           id: `I2/${tool.name}`,
           severity: "fatal",
           summary: `${tool.name}'s description gives ${uri} as an example, but that id does not resolve — the description teaches an addressing scheme the served corpus does not use.`,
-          evidence: [`${GETTER[scheme]}("${uri}") → ${t.text.slice(0, 160)}`],
+          evidence: [`${FETCH[scheme](uri).tool}("${uri}") → ${t.text.slice(0, 160)}`],
         });
       }
     }
@@ -873,12 +877,12 @@ export async function idsRoundTrip(s: Session): Promise<InvariantResult> {
     const scheme = schemeOf(uri);
     if (scheme === null) continue;
     bound++;
-    const t = await s.call(GETTER[scheme], { id: uri });
+    const t = await fetchRecord(s, scheme, uri);
     if (t.isError) {
       findings.push({
         id: `I5/${uri}`,
         severity: "fatal",
-        summary: `${uri} was handed to the model by a search result but ${GETTER[scheme]} cannot fetch it.`,
+        summary: `${uri} was handed to the model by a search result but ${FETCH[scheme](uri).tool} cannot fetch it.`,
         evidence: [t.text.slice(0, 160)],
       });
     }

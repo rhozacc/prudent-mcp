@@ -27,14 +27,15 @@ derive from law must name a real `regulation://`.
 
 | Surface | URI scheme | An entry asserts |
 |---|---|---|
-| Regulation | `regulation://{framework}/{article}[/{paragraph}[/{point}]]` | What the law says. Versioned; `get_regulation` takes an `as_of` date. |
+| Regulation | `regulation://{framework}/{article}[/{paragraph}[/{point}]]` | What the law says. Versioned; `get` takes an `as_of` date. |
 | Tests | `test://[{family}/]{test-id}` | What a statistical test measures and when to trust it. Described, never run. |
 | Checks | `check://{area}/{topic}[/{specific}]` | What a supervisor expects to see, traced to law via `derived_from`. |
-| Playbooks | `playbook://{area}[/{subarea}]` | How to walk a review area, phase by phase. |
+| Playbooks | `playbook://{topic}` | What one topic requires, compiled across documents, with every requirement cited. |
 | Sources | `source://{framework}/{document-id}` | Whether the regulatory context is current — verification dates, supersession, milestones. |
 
-On top sit 19 tools: search and get per surface, list and get for the registry, and nine
-cross-cutting ones for traversal, reverse lookup, citation resolution and coverage gaps. See the
+On top sit eight tools: `brief` routes a question to the playbook that answers it, `playbook` and
+`topics` expand and list playbooks, `search`, `get` and `cite` open provisions, `related` walks to
+their neighbours, and `sources` says what the library covers and what is changing. See the
 [tool reference](https://rhozacc.github.io/prudent-mcp/tools/).
 
 ## Install
@@ -62,7 +63,7 @@ MCP-compliant host — see [Clients](https://rhozacc.github.io/prudent-mcp/guide
 bun install
 bun run test:ci        # typecheck + tests + corpus linter
 bun run inspect:demo   # MCP Inspector, pre-seeded with demo content
-bun run build:mcpb     # produces mcpb.mcpb
+bun run build:mcpb     # produces mcpb.mcpb (gitignored; releases attach it)
 ```
 
 ## The corpus

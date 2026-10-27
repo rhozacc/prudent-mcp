@@ -19,7 +19,7 @@ console.log("Bundling server…");
 await bundleServer(join(SERVER_DIR, "index.mjs"));
 
 copyFileSync("manifest.json", join(OUT_DIR, "manifest.json"));
-copyFileSync("prudent-logo.png", join(OUT_DIR, "icon.png"));
+copyFileSync("docs/public/prudent-logo.png", join(OUT_DIR, "icon.png"));
 // The bundle is a redistribution, so it carries its own licence terms and the
 // notices for what is linked into it.
 copyFileSync("LICENSE", join(OUT_DIR, "LICENSE"));

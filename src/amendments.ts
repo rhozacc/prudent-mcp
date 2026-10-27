@@ -21,7 +21,7 @@
  *
  * A document with open changes and NEITHER is "unmapped": nothing is said on its
  * provisions, and the change is stated once, at document level, where a caller
- * asks about sources (`get_source`, `get_corpus_info`) and in a search page's
+ * asks about sources (`sources`) and in a search page's
  * notice. That is a deliberate loss — a provision of an unmapped document reads
  * as current — and it is the lesser one: the alternative is a note nobody reads
  * on provisions it does not concern.

@@ -30,7 +30,7 @@ type Provision = Doc & { id: string };
  * of the caller (src/amendments.ts). Undefined when nothing names it - which is
  * the usual answer, and is not a reassurance: "no amendment recorded" is not
  * "none is coming". A document with open changes that nothing maps to provisions
- * is stated at document level (`get_source`, `get_corpus_info`, a search page's
+ * is stated at document level (`sources`, a search page's
  * notice) and not here.
  */
 export async function pendingNoteFor(record: Provision, asOf?: string, now: Date = new Date()): Promise<string | undefined> {

@@ -86,7 +86,7 @@ export const declaresPendingChanges = (sources: Source[]): boolean =>
   sources.some((s) => s.pending_changes !== undefined);
 
 /**
- * The open changes as `get_corpus_info` lists them, or undefined when no source
+ * The open changes as `sources` lists them, or undefined when no source
  * declares the field at all (absent is not empty: `[]` would say the registry
  * looked and found nothing).
  */
@@ -199,7 +199,7 @@ export function pendingChangesNote(open: OpenPendingChange[], today: string): st
 /**
  * The sentence a search page adds to `notice` when some rows come from documents
  * with open changes. One line per page, not per row: the note on each record is
- * one get_regulation away.
+ * one `get` away.
  */
 export function pendingSearchNotice(docs: { title: string; open: OpenPendingChange[] }[]): string | undefined {
   const withOpen = docs.filter((d) => d.open.length > 0);

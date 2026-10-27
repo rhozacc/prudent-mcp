@@ -59,7 +59,7 @@
  * behavior is defined once and reused by the file adapter, the in-memory
  * demo, and any external backend that wants parity.
  */
-import type { Check, Playbook, Regulation, Source, Test } from "./schema.ts";
+import type { Check, Playbook, Regulation, Test } from "./schema.ts";
 
 // --- Core -----------------------------------------------------------------
 
@@ -777,11 +777,4 @@ export const playbookSearchFields: SearchField<Playbook>[] = [
   { name: "requirement_titles", weight: 2, get: (p) => p.requirements.map((r) => r.title) },
   { name: "requirement_statements", weight: 1, get: (p) => p.requirements.map((r) => r.statement) },
   { name: "pitfalls", weight: 0.5, get: (p) => p.pitfalls.map((x) => x.text) },
-];
-
-export const sourceSearchFields: SearchField<Source>[] = [
-  { name: "title", weight: 3, get: (s) => s.title },
-  { name: "document_id", weight: 2, get: (s) => s.document_id },
-  { name: "framework", weight: 1, get: (s) => s.framework },
-  { name: "notes", weight: 1, get: (s) => s.notes },
 ];

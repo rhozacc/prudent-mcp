@@ -43,8 +43,11 @@ interface SourceAdapter {
 interface MetaAdapter {
   info(): Promise<CorpusInfo>;
   referrers(id: string): Promise<Referrers>;
-  resolveCitation(text: string): Promise<Regulation | null>;
-  taxonomy(): Promise<ReviewArea[]>;
+  resolveCitation(text: string): Promise<CitationResolution>;
+  /** Optional: areas and topics, for the `topics` tool. */
+  topics?(): Promise<Topics | undefined>;
+  /** Optional: abbreviation -> phrases, so ranking can expand it. */
+  glossary?(): Promise<Record<string, string[]> | undefined>;
 }
 ```
 
@@ -52,14 +55,14 @@ interface MetaAdapter {
 
 Two different contracts on every content surface — do not conflate them:
 
-- **`list()` returns ALL records.** It is the internal enumeration and traversal contract: the cross-cutting tools (`get_coverage_gaps`, `get_area_overview`), corpus scripts, validators, and resource completions call it when they genuinely need everything.
+- **`list()` returns ALL records.** It is the internal enumeration and traversal contract: `related`, `sources` and `brief`, corpus scripts, validators and resource completions call it when they genuinely need everything.
 - **`search(query)` is ranked relevance search for a real query.** It never dumps the corpus: an empty or whitespace-only query returns `[]`. The old undocumented `search("")` → everything contract is gone — anything that leaned on it must call `list()` instead.
 
 Search semantics are defined once, in `src/search.ts` (`rankedSearch` plus per-surface field sets), and shared by the file adapter and the in-memory demo. The contract:
 
 - The query is tokenized (lowercased, split on non-alphanumerics, stopwords dropped) and each term stemmed (plurals and verb inflection). Only the declared fields are scanned, each with a weight — a query never matches JSON keys or URI scheme prefixes. For regulation, record ids join the field set (at low weight) only when the query itself looks URI-like, so a prose query like "regulation" no longer matches 100% of records.
 - Ranking is BM25F: each term's weighted, length-normalised frequency over the fields, saturated and multiplied by its inverse document frequency, summed over the query's terms. Results sort by score descending, ties by input order — fully deterministic. A term of four or more letters also reaches longer words that contain it at a quarter of the weight; such a match never counts toward coverage, and a record matched only that way never outranks one that matched a word. Optional knobs: a `glossary` (abbreviation → phrases, scored as pseudo-terms where the phrase's words run together), an `exclude` filter and a `prior` multiplier (see `regulationRanking`).
-- `rankedSearch` does not cap; the tool layer pages. Each match carries `{ record, score, coverage, query_tokens, matched: { field, excerpt } }`. The built-in adapters return the records and leave their ranking for the tool layer to read back (`rankedRecords` / `rankingOf`); for an adapter that does not, every `search_*` tool re-ranks the returned records locally (with the same field set and knobs) to attach `matched_excerpt` and each row's `coverage`, and to report `query_tokens` and `best_coverage` on the envelope. An outside adapter therefore needs no new method: its records are measured by the server's own definition of coverage. `RegulationAdapter.search` takes an optional `{ scope: "all" }` (include `role: background`), and `MetaAdapter.glossary?()` is the optional abbreviation table the tool layer needs to rank the same way.
+- `rankedSearch` does not cap; the tool layer pages. Each match carries `{ record, score, coverage, query_tokens, matched: { field, excerpt } }`. The built-in adapters return the records and leave their ranking for the tool layer to read back (`rankedRecords` / `rankingOf`); for an adapter that does not, `search` and `brief` re-rank the returned records locally (with the same field set and knobs) to attach `matched_excerpt` and each row's `coverage`, and to report `query_tokens` and `best_coverage` on the envelope. An outside adapter therefore needs no new method: its records are measured by the server's own definition of coverage. `RegulationAdapter.search` takes an optional `{ scope: "all" }` (include `role: background`), and `MetaAdapter.glossary?()` is the optional abbreviation table the tool layer needs to rank the same way.
 
 An external backend that wants ranking parity should call `rankedSearch` with the exported field sets rather than reinventing the scoring.
 
@@ -103,7 +106,7 @@ adapters.source     = fa.source;
 adapters.meta       = fa.meta;
 ```
 
-The JSON is validated against the full zod schemas on load. `createFileAdapters` returns all six adapters backed by in-memory maps — `search` delegates to the shared `rankedSearch`, `get` is a direct map lookup, `list` returns the surface array. The optional `regulation_history` corpus key powers `get(id, asOf)` — see [Corpus structure → Versioning](../corpus/#versioning) for the file shape and the resolution rule. The MCPB entry point additionally runs the structural linter at startup: violations abort with exit 1, staleness warnings print to stderr without blocking.
+The JSON is validated against the full zod schemas on load. `createFileAdapters` returns all six adapters backed by in-memory maps — `search` delegates to the shared `rankedSearch`, `get` is a direct map lookup, `list` returns the surface array. The optional `regulation_history` corpus key powers `get(id, asOf)` — see [Corpus structure → Versioning](/corpus/#versioning) for the file shape and the resolution rule. The MCPB entry point additionally runs the structural linter at startup: violations abort with exit 1, staleness warnings print to stderr without blocking.
 
 ## Saying which basis an `as_of` record was served on
 
@@ -118,9 +121,9 @@ The JSON is validated against the full zod schemas on load. `createFileAdapters`
 
 A miss is `{ record: null }`; it has no basis because nothing was served.
 
-When the basis is `"current"`, `get_regulation`, `expand_regulation` and `get_regulation_tree` attach an additive `as_of_note` string saying that the corpus records no version for the requested date, which version was served (by its `document_version`), that it may differ from the text in force on that date, and that it must not be presented as the historical text. `expand_regulation` also resolves its regulation children through `resolveAsOf` under the same date (up to 0.8 it embedded their latest text whatever the date) and counts those served from current text. A child, or a `get_regulation_tree` node, that the corpus holds but has no version of for the date resolves to nothing and comes back as a bare id, which reads like a dangling reference; the note counts those separately and says so. There is no note without `as_of`, when history covers the date (for the record and its children), or on a miss.
+When the basis is `"current"`, `get` and `brief` attach a `version` note saying that the library records no version for the requested date, which version was served (by its `document_version`), that it may differ from the text in force on that date, and that it must not be presented as the historical text. There is no note without `as_of`, when history covers the date, or on a miss.
 
-The pre-adoption placeholder flag (`pre_adoption_placeholders` + `notice` on `get_regulation` and `expand_regulation`) needs nothing from an adapter: the tool layer computes it from the served `text` (`src/placeholders.ts`), so every adapter, including an out-of-tree one, gets it.
+The `placeholder` note (on `get`, `related` and `brief`) needs nothing from an adapter: the tool layer computes it from the served `text` (`src/placeholders.ts`), so every adapter, including an out-of-tree one, gets it.
 
 Rules for implementers:
 
@@ -138,7 +141,7 @@ Rules for implementers:
 
 ## Saying what the corpus has not ingested
 
-A registry that knows an amendment is coming — or has come — and the corpus has not caught up, says so through `Source.pending_changes` (see [Corpus structure → Declaring pending changes](../corpus/#declaring-pending-changes)). The tool layer turns that into `pending_changes_note` on `get_regulation`, `expand_regulation`, `get_regulation_tree` (root) and a `resolve_citation` match, a sentence in a search page's `notice`, `get_corpus_info.pending_changes`, `open_pending_changes` on `list_sources` rows and a computed `state` on each change `get_source` serves.
+A registry that knows an amendment is coming — or has come — and the corpus has not caught up, says so through `Source.pending_changes` (see [Corpus structure → Declaring pending changes](/corpus/#declaring-pending-changes)). The tool layer turns that into an `amendment` note on the provisions a change names, a sentence in a search page's `notice`, the list of open changes and `open_changes` per document in `sources`, and a computed `state` on each change `sources` serves for one document.
 
 It needs **nothing new from an adapter**: the tool layer reads `adapters.source.list()` and joins on `framework` + `document_id`, so a backend that serves sources gets the signal with no extra method, and a backend with no sources serves none (an empty registry has nothing to say). What a state means and the words that describe one live once, in `src/pending.ts` (`pendingState`, `openPendingChanges`, `openPendingFor`, `pendingChangesNote`, `pendingSearchNotice`, `pendingChangeSummaries`); the tool-layer helpers that attach it are in `src/tools/pending.ts`.
 
@@ -157,11 +160,11 @@ Rules for implementers:
 Key things the demo shows:
 
 - **`search(query)`** — delegates to `rankedSearch` with the surface's exported field set
-- **`get(id, asOf?)`** — direct map lookup; `asOf` selects from per-id version history (the last entry whose `effectiveFrom` ≤ `asOf`; predating all entries → `null`; no history → current). It delegates to **`resolveAsOf`**, which reports `basis: "history" | "current"` so the tools can attach an `as_of_note`
+- **`get(id, asOf?)`** — direct map lookup; `asOf` selects from per-id version history (the last entry whose `effectiveFrom` ≤ `asOf`; predating all entries → `null`; no history → current). It delegates to **`resolveAsOf`**, which reports `basis: "history" | "current"` so the tools can attach a `version` note
 - **`list()`** — returns every record on the surface; the sources variant filters by status
 - **`resolveCitation(text)`** — delegates to `resolveCitationDetailed` from the file adapter, the deterministic citation matcher, passing `computeHoldings(...)` so a decline on a partly held document says so
 - **`info()`** — serves `holdings` from the same `computeHoldings`; the seed's CRR source declares `coverage: "partial"` (the demo holds a handful of articles) and the EBA guideline `"full"`, so both kinds of miss are exercised. It also serves `pending_changes` from `pendingChangeSummaries`: the CRR source carries one open change (not ingested, applying in 60 days) and the EBA guideline `pending_changes: []` ("looked, none"), so the note, the quiet case and the absence rule are all exercised
-- **`referrers(id)`** — delegates to `computeReferrers` from `src/referrers.ts`, the ONE reverse index over parent/children, `derived_from`, `regulatory_basis`, `regulatory_scope`, and playbook phase references
+- **`referrers(id)`** — delegates to `computeReferrers` from `src/referrers.ts`, the ONE reverse index over parent/children, `derived_from`, `regulatory_basis`, and the provisions, checks and tests a playbook cites
 
 For a production adapter, replace the in-memory maps with HTTP calls, a database, or whatever backs the corpus. The interface contract is the same.
 

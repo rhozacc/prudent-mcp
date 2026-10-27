@@ -131,8 +131,8 @@ export function findMarkup(value: string): string | undefined {
  *
  * NOT COVERED, on purpose:
  *   - Curated editorial prose written for this corpus rather than reproduced
- *     from a document — Test.name/purpose, Check.name, Playbook.gates,
- *     Phase.name/description, Source.title/notes, ReviewArea.name. Markup
+ *     from a document — Test.name/purpose, Check.name,
+ *     Source.title/notes. Markup
  *     there would be a formatting slip, not a broken quote.
  *   - Short enumerated labels — Check.expected_evidence, Test.aliases,
  *     Source.milestones[].event. Same reasoning, and nothing quotes them as
@@ -322,7 +322,7 @@ export function validateCorpus(corpus: CorpusInput, now: Date = new Date()): str
   // character that terminates a URI in ordinary text — a bracket, a quote, a
   // trailing "+" — gets eaten on the way, and the id that comes back is a
   // truncated one that resolves to nothing. Observed live: an id ending in
-  // "(part2)" reached get_check as "…/2(part2", which reads to the caller as
+  // "(part2)" reached `get` as "…/2(part2", which reads to the caller as
   // "that record does not exist".
   //
   // Fatal rather than advisory: the corpus decides its own ids, so this is

@@ -1,114 +1,39 @@
 # Quickstart
 
 ```bash
-# Install Bun (once)
-curl -fsSL https://bun.sh/install | bash
+curl -fsSL https://bun.sh/install | bash   # Bun 1.1 or later, once
 
-# Clone and install
 git clone https://github.com/rhozacc/prudent-mcp.git
 cd prudent-mcp
 bun install
-
-# Verify it builds and the in-memory demo runs
-bun run typecheck
-bun test
-bun run inspect:demo
+bun run test:ci        # typecheck, tests, corpus linter, context evals
+bun run inspect:demo   # MCP Inspector on the seeded demo
 ```
 
-The last command opens the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) in your browser, connected to a server pre-seeded with a small slice of PD-calibration content.
+`bun run inspect:demo` opens the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) on an in-memory server (`examples/inmemory-demo.ts`) seeded with a small synthetic slice of PD-calibration content: one compiled playbook, a handful of CRR and EBA provisions, three tests, four checks and a source registry with one pending amendment. The demo is the only data in this repository; the curated corpus is a separate proprietary product.
 
-## Dev environment setup
+## Things worth trying
 
-### 1. Bun
-
-Bun replaces npm/pnpm/yarn, tsx, and (optionally) vitest. One install:
-
-```bash
-# macOS / Linux
-curl -fsSL https://bun.sh/install | bash
-
-# Windows
-powershell -c "irm bun.sh/install.ps1 | iex"
-
-# verify
-bun --version    # should print 1.x
-```
-
-If you can't install Bun, the project will also work under Node 20+ with `tsx` — but the scripts in `package.json` assume Bun.
-
-### 2. Editor
-
-VSCode / Cursor / any editor with TypeScript LSP. The included `tsconfig.json` is what the LSP reads.
-
-Type-on-hover and go-to-definition are the day-to-day tools that make the abstraction tractable. Fix them before writing code.
-
-### 3. Install and verify
-
-```bash
-bun install
-bun run typecheck
-bun test
-```
-
-`typecheck` should be silent. `bun test` should pass the smoke test.
-
-### 4. Run the demo
-
-```bash
-bun run inspect:demo
-```
-
-This starts an in-memory server (`examples/inmemory-demo.ts`) seeded with a small slice of content and opens the MCP Inspector against it. Things worth poking at:
-
-| Try | What you'll see |
+| Call | What you see |
 |---|---|
-| `get_corpus_info` | counts, covered documents, and how much of each is held |
-| `list_review_areas` | the taxonomy tree |
-| `search_regulation` `"long-run average"` | hits CRR 180/1/a and EBA GL para 78 |
-| `get_regulation` `"regulation://crr/178/1/b"` | latest text + EBA commentary |
-| `get_regulation` with `as_of: "2018-01-01"` | the older 2013-vintage text |
-| `get_referrers` `"regulation://crr/180/1/a"` | check://calibration/pd/lra-derived + playbook://calibration/pd |
-| `get_playbook` `"playbook://calibration/pd"` | three phases with mixed-surface references |
-| `expand_playbook` `"playbook://calibration/pd"` | same, with every reference resolved inline |
-| `get_area_overview` `"calibration.pd"` | area node + expanded playbooks + deduplicated ID lists |
-| `expand_regulation` `"regulation://crr/180/1/a"` | the paragraph with its check/test children resolved inline |
-| `get_regulation_tree` `"regulation://crr/180"` | the article as a dossier — sub-paragraphs + operationalizing checks/tests |
-| `get_coverage_gaps` | regulations with no check/test coverage |
-| `get_check` `"check://calibration/pd/lra-derived"` | expectation + expected_evidence list |
-| `bun run list` | full corpus overview to stdout |
+| `topics` | the one area and its playbook |
+| `brief` `"How is the long-run average PD derived?"` | the playbook, rendered as text: what it rests on, what has to be shown, methods, pitfalls |
+| `playbook` `pd-long-run-average` with `section: "R2"` | one requirement with the full text of its provisions |
+| `search` `"long-run average"` | Art. 180(1)(a) CRR and EBA/GL/2017/16 para 78, with coverage |
+| `get` `regulation://crr/178/1/a` | the provision with a `notes` entry: a recorded amendment applying in 60 days, with the new wording |
+| `get` `regulation://crr/178/1/b` with `as_of: "2018-01-01"` | the 2013-vintage text; `document_version` differs |
+| `get` `regulation://crr/178/1/a` with `as_of: "2020-01-01"` | the current text and a `version` note saying it is not that date's text |
+| `cite` `"Art. 180(1)(a) CRR"` | the provision, `confidence: "exact"` |
+| `cite` `"Article 5 of Regulation (EU) 2019/2033"` | `match: null` and an `outside_library` note |
+| `related` `regulation://crr/180/1/a` | its check, its tests and the playbook requirement that rests on it |
+| `sources` | each document, held whole, in part or undeclared, and the open changes |
 
-### 5. Connect a real client
+The same calls from a shell, without a client: `bun run evals:call search '{"query":"long-run average"}'`. `bun run list` prints the demo's contents.
 
-For **Claude Desktop**, edit `claude_desktop_config.json`:
+## Connect a client
 
-```json
-{
-  "mcpServers": {
-    "prudent": {
-      "command": "bun",
-      "args": [
-        "run",
-        "/absolute/path/to/prudent-mcp/examples/inmemory-demo.ts"
-      ]
-    }
-  }
-}
-```
+See [Clients](/guide/clients) for Claude Desktop, Claude Code, Cursor and programmatic use, and for pointing the server at a corpus file.
 
-For **Claude Code**, a clone already carries a working `.mcp.json` — nothing to write. In any other project root, create one:
+## Working on the code
 
-```json
-{
-  "mcpServers": {
-    "prudent": {
-      "command": "bun",
-      "args": [
-        "run",
-        "/absolute/path/to/prudent-mcp/examples/inmemory-demo.ts"
-      ]
-    }
-  }
-}
-```
-
-Restart the client. The `prudent` server should appear in the tools list. Same shape works for Cursor and any other MCP-compliant host.
+`bun run test:ci` is the gate and what CI runs. The pieces, in the order to read them: `src/schema.ts` (the shapes), `src/tools/` (one file per tool), `src/search.ts` (ranking), `src/citation/` (citation resolution), `src/file-adapter.ts` (loading a corpus file), `evals/` (the context-quality invariants). [Architecture](/guide/architecture) is the map.

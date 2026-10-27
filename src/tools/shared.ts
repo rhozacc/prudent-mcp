@@ -11,7 +11,7 @@
  *   - search tools share one envelope: { results, total_matches, offset,
  *     truncated } with a text hint when truncated;
  *   - a regulation served under as_of from its CURRENT text says so
- *     (`as_of_note`), because the record alone cannot.
+ *     (a version note), because the record alone cannot.
  */
 import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -61,11 +61,6 @@ export function ok(structured: Record<string, unknown>): CallToolResult {
     content: [textBlock(serialize(structured))],
     structuredContent: structured,
   };
-}
-
-/** Success as plain JSON text (tools without an output schema). */
-export function okText(value: unknown): CallToolResult {
-  return { content: [textBlock(serialize(value))] };
 }
 
 /** Miss / bad input: an isError result carrying a next-step pointer. */
@@ -413,7 +408,7 @@ export interface ServedRegulation {
    * distinction, or it comes back as a bare id and reads as a broken link.
    */
   noVersion: boolean;
-  /** The `as_of_note` for this one record; undefined unless `fromCurrent`. */
+  /** The version-note text for this one record; undefined unless `fromCurrent`. */
   note: string | undefined;
 }
 
@@ -463,7 +458,7 @@ export function asOfNote(record: Regulation, asOf: string): string {
 /**
  * The tail every as_of miss shares. A miss is the one answer that carries no
  * text, so it says what the same call does elsewhere: a date the corpus holds no
- * version for is answered with the current text AND an as_of_note, not refused.
+ * version for is answered with the current text AND a version note, not refused.
  * Without that the miss reads as "as_of is unsupported" and a caller drops the
  * date, which loses the note too.
  */
@@ -481,19 +476,6 @@ const EDGE_NOISE = /^[\s"'<>()[\]{}`.,;:]+|[\s"'<>()[\]{}`.,;:]+$/g;
 /** Strip quote/bracket/punctuation noise from the edges of an id-ish string. */
 export function stripEdgeNoise(value: string): string {
   return value.replace(EDGE_NOISE, "");
-}
-
-/**
- * Wrap an id (or slug) schema so surrounding whitespace/quotes/punctuation are
- * tolerated before validation. Serialized to clients as the inner schema
- * (zod-to-json-schema renders effects with the input strategy as the wrapped
- * schema for preprocess).
- */
-export function lenient<T extends string>(schema: z.ZodType<T>): z.ZodType<T> {
-  return z.preprocess(
-    (v) => (typeof v === "string" ? stripEdgeNoise(v) : v),
-    schema,
-  ) as unknown as z.ZodType<T>;
 }
 
 // --- Projection helpers --------------------------------------------------------

@@ -1,7 +1,7 @@
 /**
  * `cite`: a loose citation in prose to the provision it names, or an honest refusal.
  *
- * The resolver is the one in src/file-adapter.ts and is unchanged: exact matching in a fixed order, no fuzzy fallback, a
+ * The resolver is the one in src/citation/ and is unchanged: exact matching in a fixed order, no fuzzy fallback, a
  * decline for an instrument the library does not hold. What changes is the envelope: the reason for a decline is a note
  * (`outside_library`) in the library's own words, and a match of an amended provision carries the amendment note.
  */

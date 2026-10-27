@@ -442,7 +442,7 @@ const SOURCES: Record<SourceId, Source> = {
 // ============================================================================
 
 // The one as-of selection, reporting the basis it served on. `get` delegates to
-// it, so the record a tool qualifies with an as_of_note is the record `get`
+// it, so the record a tool qualifies with a version note is the record `get`
 // would have returned.
 const resolveRegulationAsOf = async (id: RegulationId, asOf: string): Promise<AsOfResolution> => {
   const history = HISTORICAL_REGULATIONS[id];

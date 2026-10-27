@@ -109,7 +109,7 @@ jobs:
       # Every repo that pins this server by tag goes here. prudent-corpus
       # joined prudent-dashboard as a consumer once it split out of it — see
       # prudent-corpus#1 — and pins prudent-mcp for the same reason
-      # (scripts/build-corpus.ts, scripts/link2.ts import file-adapter and
+      # (scripts/build-corpus.ts, scripts/link.ts import file-adapter and
       # validate). CONSUMER_DISPATCH_TOKEN must carry Contents: read and write
       # on every repo listed here; a token scoped to only the old single
       # consumer will 403 on the new one, which the loop below reports but
