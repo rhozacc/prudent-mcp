@@ -10455,6 +10455,13 @@ function heldNeedles(instrument) {
   });
 }
 var heldDocumentsCache = /* @__PURE__ */ new WeakMap();
+function occursNotBeforeDigit(hay, needle) {
+  for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + 1)) {
+    const next = hay.charAt(at + needle.length);
+    if (next === "" || next < "0" || next > "9") return true;
+  }
+  return false;
+}
 function heldInstrumentDocuments(regulations, instrument) {
   const byInstrument = heldDocumentsCache.get(regulations) ?? /* @__PURE__ */ new Map();
   heldDocumentsCache.set(regulations, byInstrument);
@@ -10464,7 +10471,7 @@ function heldInstrumentDocuments(regulations, instrument) {
   const docs = /* @__PURE__ */ new Set();
   for (const r of regulations) {
     const hay = `${r.framework}${r.document_id}${idDocSegment(r.id)}`.toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (needles.some((n) => hay.includes(n))) docs.add(r.document_id);
+    if (needles.some((n) => occursNotBeforeDigit(hay, n))) docs.add(r.document_id);
   }
   byInstrument.set(instrument, docs);
   return docs;
@@ -16818,7 +16825,7 @@ var EMPTY_COMPLETION_RESULT = {
 // package.json
 var package_default = {
   name: "prudent-mcp",
-  version: "1.3.0",
+  version: "1.3.1",
   description: "MCP server exposing the prudent IRB validation knowledge base",
   type: "module",
   module: "src/server.ts",
