@@ -56,7 +56,7 @@ const ACT_FORMULA = String.raw`(?:\s+of\s+the\s+european\s+parliament\s+and\s+(?
  * Capture groups: 1 kind, 2 the institution before the number, 3 and 4 the two
  * halves of the number, 5 the institution after it.
  */
-const NUMBERED_ACT = new RegExp(
+export const NUMBERED_ACT = new RegExp(
   // Each run of white space follows a token of its own, so a long run can be split
   // between the quantifiers in only one way.
   String.raw`\b(regulation|directive|decision|guideline)s?\s*` +
@@ -161,7 +161,7 @@ export function numberedActs(text: string): NumberedAct[] {
 }
 
 /** One key per instrument, whichever numbering era the citation is written in. */
-const numberedActKeys = (text: string): string[] => numberedActs(text).map((a) => a.key);
+export const numberedActKeys = (text: string): string[] => numberedActs(text).map((a) => a.key);
 
 /** The key a numbered act is known by when a named instrument is the same thing. */
 const canonicalInstrument = (key: string): string =>
