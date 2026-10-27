@@ -8,3 +8,6 @@ docs/.vitepress/dist
 corpus.json
 *.corpus.json
 data/
+
+# Built by `bun run build:mcpb` and attached to releases by release.yml, never committed.
+*.mcpb

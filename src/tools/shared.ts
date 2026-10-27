@@ -63,11 +63,6 @@ export function ok(structured: Record<string, unknown>): CallToolResult {
   };
 }
 
-/** Success as plain JSON text (tools without an output schema). */
-export function okText(value: unknown): CallToolResult {
-  return { content: [textBlock(serialize(value))] };
-}
-
 /** Miss / bad input: an isError result carrying a next-step pointer. */
 export function miss(message: string): CallToolResult {
   return { content: [textBlock(message)], isError: true };
@@ -481,19 +476,6 @@ const EDGE_NOISE = /^[\s"'<>()[\]{}`.,;:]+|[\s"'<>()[\]{}`.,;:]+$/g;
 /** Strip quote/bracket/punctuation noise from the edges of an id-ish string. */
 export function stripEdgeNoise(value: string): string {
   return value.replace(EDGE_NOISE, "");
-}
-
-/**
- * Wrap an id (or slug) schema so surrounding whitespace/quotes/punctuation are
- * tolerated before validation. Serialized to clients as the inner schema
- * (zod-to-json-schema renders effects with the input strategy as the wrapped
- * schema for preprocess).
- */
-export function lenient<T extends string>(schema: z.ZodType<T>): z.ZodType<T> {
-  return z.preprocess(
-    (v) => (typeof v === "string" ? stripEdgeNoise(v) : v),
-    schema,
-  ) as unknown as z.ZodType<T>;
 }
 
 // --- Projection helpers --------------------------------------------------------

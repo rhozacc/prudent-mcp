@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "bun:test";
 import { zodToJsonSchema } from "zod-to-json-schema";
@@ -18,4 +18,10 @@ describe("JSON Schema drift", () => {
       expect(committed, `run 'bun run schemas' to regenerate ${name}.schema.json`).toBe(expected);
     });
   }
+
+  it("docs/schemas holds no schema the registry has dropped", () => {
+    const committed = readdirSync(resolve("docs/schemas")).filter((f) => f.endsWith(".schema.json"));
+    const registered = Object.keys(schemaRegistry).map((name) => `${name}.schema.json`);
+    expect(committed.filter((f) => !registered.includes(f)), "delete these: the generator never does").toEqual([]);
+  });
 });
