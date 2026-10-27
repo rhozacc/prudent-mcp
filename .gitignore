@@ -4,7 +4,7 @@ docs/.vitepress/cache
 docs/.vitepress/dist
 
 # Dashboard-emitted corpus artifacts must never enter this repo.
-# The corpus data is proprietary and lives in prudent-dashboard/.
+# The corpus data is proprietary and lives in the private prudent-corpus repository.
 corpus.json
 *.corpus.json
 data/
