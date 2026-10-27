@@ -1041,10 +1041,12 @@ export async function costWithinBudget(
   }
 
   const menu = await s.call("topics");
-  const firstPlaybook = (((asObject(menu.json)?.["areas"] ?? []) as Array<{ playbooks?: Array<{ id?: string; title?: string }> }>)[0]?.playbooks ?? [])[0];
+  // The first playbook in ANY area: an area without playbooks would otherwise price the entry path as topics alone.
+  const firstPlaybook = ((asObject(menu.json)?.["areas"] ?? []) as Array<{ playbooks?: Array<{ id?: string; title?: string }> }>).flatMap((a) => a.playbooks ?? [])[0];
   let routed = { tokens: 0 };
   // The question a person would ask is the playbook's own title: brief routes it and renders the playbook it finds.
-  if (firstPlaybook?.id !== undefined) routed = await s.call("brief", { question: firstPlaybook.title ?? firstPlaybook.id, budget: "short" });
+  // brief at its default budget: what a model's first call actually gets.
+  if (firstPlaybook?.id !== undefined) routed = await s.call("brief", { question: firstPlaybook.title ?? firstPlaybook.id });
   const entry = menu.tokens + routed.tokens;
   if (entry > budget.entryPath) {
     findings.push({
@@ -2497,7 +2499,8 @@ function answerBearingStrings(reply: unknown): Array<{ key: string; text: string
     if (Array.isArray(node)) return node.forEach(notices);
     if (node === null || typeof node !== "object") return;
     for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
-      if (typeof v === "string" && k === "notice") out.push({ key: k, text: v });
+      // `notice`, and any `*_note` key a future reply might add: both are written to be repeated to a user.
+      if (typeof v === "string" && (k === "notice" || k.endsWith("_note"))) out.push({ key: k, text: v });
       else notices(v);
     }
   };
