@@ -976,7 +976,7 @@ export interface Budget {
  *   - serve get_coverage_gaps as a resource rather than a tool      ~-250 tok
  *   - trim the input-schema `describe()` text, which is ~40% of the surface
  *
- * History, so a later raise has something to argue with:
+ * History, so a later raise has something to argue with (the tool names in it are the 0.x ones; 1.0 has eight):
  *   3,000  original, aspirational, never met
  *   6,100  measured 5,807 + 5% headroom — instructions gained the scope,
  *          boundary and legal-force rules; list_review_areas stopped
@@ -2419,7 +2419,8 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
  * - model-facing — the instructions, every tool and field description, and the
  *   miss that says what to call next. Tool and field names are allowed there
  *   (they have to be named) but are not scanned as prose.
- * - answer-bearing — every `notice` and `*_note` in a reply. These are written
+ * - answer-bearing — every `notice` in a reply and the text of every entry in its
+ *   `notes` array (what `brief` sends in its structured part too). These are written
  *   to be repeated to a user, so no identifier may appear in them either.
  *
  * Record text is data and is never scanned. Run across every call the earlier
@@ -2461,7 +2462,8 @@ export async function serverLanguageIsClean(s: Session): Promise<InvariantResult
       if (!trace.text.startsWith("MCP error")) scan(`${trace.tool} miss`, trace.text, false);
       continue;
     }
-    for (const note of answerBearingStrings(trace.json)) scan(`${trace.tool} ${note.key}`, note.text, true);
+    // A text-first tool (brief, playbook) carries its machine part, notes included, in the structured content.
+    for (const note of answerBearingStrings(trace.json ?? trace.structured)) scan(`${trace.tool} ${note.key}`, note.text, true);
   }
 
   return { id: "I17", title: "The server's own words are domain words", applicable: bound > 0, findings };
@@ -2484,13 +2486,24 @@ function descriptionsIn(node: unknown): string[] {
   );
 }
 
-/** The `notice` and `*_note` strings of a reply, wherever they sit. */
-function answerBearingStrings(node: unknown): Array<{ key: string; text: string }> {
-  if (Array.isArray(node)) return node.flatMap(answerBearingStrings);
-  if (node === null || typeof node !== "object") return [];
-  return Object.entries(node as Record<string, unknown>).flatMap(([k, v]) =>
-    typeof v === "string" && (k === "notice" || k.endsWith("_note")) ? [{ key: k, text: v }] : answerBearingStrings(v),
-  );
+/**
+ * What a reply says to be repeated to a user: every `notice` string wherever it sits, and the text of each entry of the
+ * reply's own `notes` array (labelled by its type). A `notes` that is a string, or sits inside a record, is data and is
+ * not read.
+ */
+function answerBearingStrings(reply: unknown): Array<{ key: string; text: string }> {
+  const out: Array<{ key: string; text: string }> = [];
+  const notices = (node: unknown): void => {
+    if (Array.isArray(node)) return node.forEach(notices);
+    if (node === null || typeof node !== "object") return;
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if (typeof v === "string" && k === "notice") out.push({ key: k, text: v });
+      else notices(v);
+    }
+  };
+  notices(reply);
+  for (const n of notesOf(reply)) if (typeof n.text === "string") out.push({ key: `${n.type ?? "unknown"} note`, text: n.text });
+  return out;
 }
 
 // ============================================================================
