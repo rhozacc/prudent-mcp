@@ -186,7 +186,7 @@ describe("pendingChangesNote", () => {
 
   it("quotes the registry's affects hint (capped) and never parses it", () => {
     const note = noteFor([change({ affects: ["para 23(d)", "paras 31-32", "x", "y", "z"] })]) ?? "";
-    expect(note).toContain("Said to concern para 23(d); paras 31-32; x; y; ....");
+    expect(note).toContain("Said to concern “para 23(d)”; “paras 31-32”; “x”; “y”; ....");
   });
 
   it("does not repeat a reference the title already carries, and adds one it lacks", () => {
@@ -214,7 +214,7 @@ describe("pendingSearchNotice", () => {
 
   it("names the document and the change once, and says the text shown is the version before it", () => {
     const n = pendingSearchNotice([{ title: "Acme Regulation", open: open(change({ title: "Amending act", effective_from: iso(9) })) }]) ?? "";
-    expect(n).toContain("Acme Regulation (Amending act, from " + iso(9) + ")");
+    expect(n).toContain("“Acme Regulation” (“Amending act”, from " + iso(9) + ")");
     expect(n).toContain("does not yet include");
     expect(n).toContain("version before it");
   });
@@ -230,14 +230,14 @@ describe("the linter", () => {
 
   it("warns, never fails, about a change in force that is not ingested", () => {
     expect(pendingChangeWarnings(withBehind)).toEqual([
-      `source://acme/acme-reg: Overdue has applied since ${iso(-4)} but is not ingested — the text this corpus serves for the document is out of date`,
+      `source://acme/acme-reg: “Overdue” has applied since ${iso(-4)} but is not ingested — the text this corpus serves for the document is out of date`,
     ]);
     expect(pendingChangeWarnings([src({ pending_changes: [change({ effective_from: iso(40) })] })])).toEqual([]);
   });
 
   it("corpusWarnings carries it and corpusInfo counts the open ones, in force or not", () => {
     const corpus = { regulation: [], tests: [], checks: [], playbooks: [], sources: withBehind };
-    expect(corpusWarnings(corpus).some((w) => w.includes("Overdue has applied"))).toBe(true);
+    expect(corpusWarnings(corpus).some((w) => w.includes("“Overdue” has applied"))).toBe(true);
     expect(corpusInfo(corpus).some((l) => l.includes("2 pending change(s)") && l.includes("1 already in force"))).toBe(true);
     expect(corpusInfo({ ...corpus, sources: [src({ pending_changes: [change({ ingested: true })] })] }).some((l) => l.includes("pending"))).toBe(false);
   });
@@ -360,7 +360,7 @@ describe("the pending-change signal on the tools", () => {
       const [n] = amendments(r.body);
       const note = String(n?.text);
       expect(note.startsWith("Pending change to this provision: ")).toBe(true);
-      expect(note).toContain(`Amending Act (Article 1) replaces this provision from ${iso(30)} (in 30 days)`);
+      expect(note).toContain(`“Amending Act” (“Article 1”) replaces this provision from ${iso(30)} (in 30 days)`);
       expect(note).toContain("the text below is the version before it");
       expect(note).toContain("New wording: “Mapped Article 1 is replaced by the following: new rule for the first article.");
       expect(n?.applies_to).toEqual(["Mapped Article 1"]);
@@ -370,7 +370,7 @@ describe("the pending-change signal on the tools", () => {
     it("one an amendment in force deletes says the text may be out of date, leads with it, and gives no new wording", async () => {
       const note = String(await noteOf(M(4)));
       expect(note.startsWith("Text may be out of date: ")).toBe(true);
-      expect(note).toContain(`Amending Act (Article 2) has deleted this provision since ${iso(-10)}`);
+      expect(note).toContain(`“Amending Act” (“Article 2”) has deleted this provision since ${iso(-10)}`);
       expect(note).toContain("may no longer be the text in force");
       expect(note).toContain("deleted, with no new wording");
       expect(note).not.toContain("New wording");
@@ -385,7 +385,7 @@ describe("the pending-change signal on the tools", () => {
     it("one a change names by id, with no amending provision held, says it in the change's own words", async () => {
       const note = String(await noteOf(M(2)));
       expect(note.startsWith("Pending change to this provision: ")).toBe(true);
-      expect(note).toContain(`Mapped amendment applies from ${iso(30)} (in 30 days)`);
+      expect(note).toContain(`“Mapped amendment” applies from ${iso(30)} (in 30 days)`);
       expect(note).toContain("the text below is the version before it");
       expect(note).not.toContain("New wording");
     });
@@ -487,7 +487,7 @@ describe("the pending-change signal on the tools", () => {
     it("one named provision on the page is said in the singular, by citation", async () => {
       const r = await call("search", { query: "coming" });
       expect((r.body["results"] as Array<{ id: string }>).map((x) => x.id)).toEqual([M(1)]);
-      expect(amendments(r.body)[0]?.text).toContain("One result is a provision that a recorded change affects: Mapped Article 1.");
+      expect(amendments(r.body)[0]?.text).toContain("One result is a provision that a recorded change affects: “Mapped Article 1”.");
     });
 
     it("keeps the truncation notice beside it instead of replacing it", async () => {

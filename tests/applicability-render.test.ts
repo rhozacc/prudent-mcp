@@ -29,7 +29,7 @@ describe("playbook banner", () => {
     expect(first).toContain("no longer apply");
     expect(first).toContain("after 2024-12-31");
     expect(first).toContain("The approach was abolished.");
-    expect(first).toContain("replaced by Art. 180(1)(a) CRR");
+    expect(first).toContain("replaced by “Art. 180(1)(a) CRR”");
     expect(blank).toBe("");
     expect(title).toBe(`# ${demo.title}`);
     expect(text).not.toContain("regulation://");

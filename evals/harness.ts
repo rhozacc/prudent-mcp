@@ -250,3 +250,33 @@ export interface InvariantResult {
 
 export const passed = (r: InvariantResult): boolean =>
   r.applicable && r.findings.every((f) => f.severity !== "fatal");
+
+/** What one invariant's probes cost: the calls it made and the tokens those replies put in a model's context. */
+export interface InvariantCost {
+  id: string;
+  calls: number;
+  tokens_observed: number;
+}
+
+/**
+ * Run the invariants in order against one session and account each for the traces ITS probes added. Invariants run
+ * one after another over one growing `session.traces`, so an invariant's own calls are exactly the traces appended
+ * while it ran; one that only reads the traces of earlier invariants (I17) makes none and costs 0. The per-invariant
+ * figures add up to the suite's totals (`calls`, `tokens_observed`), which keep their meaning: a ratchet that compares
+ * the totals sees a new probe as growth, one that compares an invariant's own figure sees which probe grew.
+ */
+export async function runInvariants(
+  session: Session,
+  invariants: readonly ((s: Session) => Promise<InvariantResult>)[],
+): Promise<{ results: InvariantResult[]; costs: InvariantCost[] }> {
+  const results: InvariantResult[] = [];
+  const costs: InvariantCost[] = [];
+  for (const invariant of invariants) {
+    const from = session.traces.length;
+    const result = await invariant(session);
+    const mine = session.traces.slice(from);
+    results.push(result);
+    costs.push({ id: result.id, calls: mine.length, tokens_observed: mine.reduce((n, t) => n + t.tokens, 0) });
+  }
+  return { results, costs };
+}

@@ -168,7 +168,7 @@ describe("applicability notes", () => {
       expect(n!.text).toContain("no longer applies");
       expect(n!.text).toContain("2024-12-31");
       expect(n!.text).toContain("The old approach was abolished.");
-      expect(n!.text).toContain(`replaced by ${newProvision.citation}`);
+      expect(n!.text).toContain(`replaced by “${newProvision.citation}”`);
       expect(n!.text).not.toContain("regulation://");
       expect(n!.applies_to).toEqual([oldProvision.citation]);
       expect(Object.keys(r.body)[0]).toBe("notes");
@@ -178,7 +178,7 @@ describe("applicability notes", () => {
       const r = await call("get", { ids: oldProvision.id, as_of: "2023-06-01" });
       expect((r.body["records"] as Array<{ applicability?: unknown }>)[0]!.applicability).toBeUndefined(); // the 2019 version declares nothing
       const [n] = of(r.notes, "historical");
-      expect(n!.text).toContain("On 2023-06-01, the date asked about, Synth Article 1 had not yet ceased to apply; it ceased to apply after 2024-12-31.");
+      expect(n!.text).toContain("On 2023-06-01, the date asked about, “Synth Article 1” had not yet ceased to apply; it ceased to apply after 2024-12-31.");
       expect(n!.text).not.toContain("applied on");
       expect(n!.text).not.toContain("no longer applies");
     });
@@ -187,7 +187,7 @@ describe("applicability notes", () => {
       const r = await call("get", { ids: ["check://synth/old-check", oldProvision.id] });
       const texts = of(r.notes, "historical").map((n) => n.text);
       expect(texts.some((t) => t.startsWith("The check “Old approach capital check” no longer applies"))).toBe(true);
-      expect(texts.some((t) => t.startsWith("Synth Article 1 no longer applies"))).toBe(true);
+      expect(texts.some((t) => t.startsWith("“Synth Article 1” no longer applies"))).toBe(true);
     });
 
     it("under as_of after `until`, says it did not apply then", async () => {

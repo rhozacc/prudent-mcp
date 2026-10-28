@@ -10261,6 +10261,26 @@ var adapters = {
 // src/file-adapter.ts
 import { readFileSync } from "node:fs";
 
+// src/language.ts
+var BANNED_TERMS = [
+  "corpus",
+  "corpora",
+  "ingest",
+  "ingested",
+  "ingesting",
+  "ingestion",
+  "registry",
+  "record",
+  "records",
+  "holdings",
+  "adapter",
+  "adapters",
+  "served",
+  "this server"
+];
+var BANNED = new RegExp(`\\b(?:${BANNED_TERMS.map((t) => t.replace(/ /g, "\\s+")).join("|")})\\b`, "gi");
+var quoted = (label) => `\u201C${label.replace(/[“"]/g, "\u2018").replace(/”/g, "\u2019")}\u201D`;
+
 // src/pending.ts
 var isoDay = (now) => now.toISOString().slice(0, 10);
 function pendingState(change, today) {
@@ -10313,8 +10333,8 @@ function whenPhrase(today, date3) {
   if (n > 1 && n <= 120) return ` (in ${n} days)`;
   return "";
 }
-var labelOf = (c) => c.reference !== void 0 && !c.title.includes(c.reference) ? `${c.title} (${c.reference})` : c.title;
-var affectsOf = (c) => c.affects === void 0 || c.affects.length === 0 ? "" : ` Said to concern ${c.affects.slice(0, MAX_AFFECTS).join("; ")}${c.affects.length > MAX_AFFECTS ? "; ..." : ""}.`;
+var labelOf = (c) => quoted(c.reference !== void 0 && !c.title.includes(c.reference) ? `${c.title} (${c.reference})` : c.title);
+var affectsOf = (c) => c.affects === void 0 || c.affects.length === 0 ? "" : ` Said to concern ${c.affects.slice(0, MAX_AFFECTS).map(quoted).join("; ")}${c.affects.length > MAX_AFFECTS ? "; ..." : ""}.`;
 function sentenceFor(o, today) {
   const { change: c, state } = o;
   const announced = c.status === "announced";
@@ -10335,9 +10355,9 @@ function pendingSearchNotice(docs) {
   if (withOpen.length === 0) return void 0;
   const items = withOpen.slice(0, MAX_PENDING_NAMED).map((d) => {
     const first = d.open[0];
-    if (first === void 0) return d.title;
+    if (first === void 0) return quoted(d.title);
     const when = first.change.effective_from === void 0 ? "no date recorded" : first.state === "in_force_not_ingested" ? `applied ${first.change.effective_from}` : `from ${first.change.effective_from}`;
-    return `${d.title} (${labelOf(first.change)}, ${when}${d.open.length > 1 ? `, +${d.open.length - 1} more` : ""})`;
+    return `${quoted(d.title)} (${labelOf(first.change)}, ${when}${d.open.length > 1 ? `, +${d.open.length - 1} more` : ""})`;
   });
   const rest = withOpen.length - items.length;
   return `Some results come from a document with a change its text does not yet include: ${items.join("; ")}${rest > 0 ? `; and ${rest} more` : ""}. The text shown is the version before it.`;
@@ -10353,12 +10373,11 @@ function pendingChangeWarnings(sources, now = /* @__PURE__ */ new Date()) {
 var HISTORICAL_PRIOR = 0.5;
 var applicabilityPrior = (record2) => record2.applicability?.status === "historical" ? HISTORICAL_PRIOR : 1;
 var isHistorical = (record2) => record2.applicability?.status === "historical";
-var quoted = (name) => `\u201C${name}\u201D`;
 var grammar = (subject, label) => {
   if (subject === "playbook") {
     return { subject: label === void 0 ? "The requirements in this playbook" : `The requirements in the playbook ${quoted(label)}`, applies: "apply", it: "they", is: "are", was: "were" };
   }
-  const named = label === void 0 ? void 0 : subject === "provision" ? label : `The ${subject} ${quoted(label)}`;
+  const named = label === void 0 ? void 0 : subject === "provision" ? quoted(label) : `The ${subject} ${quoted(label)}`;
   return { subject: named ?? (subject === "provision" ? "This text" : subject === "check" ? "This check" : "This test"), applies: "applies", it: "it", is: "is", was: "was" };
 };
 var reasonSentence = (reason) => {
@@ -10367,7 +10386,7 @@ var reasonSentence = (reason) => {
 };
 var midSentence = (s) => /^(This|The) /.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s;
 var cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-var list = (xs) => xs.join("; ");
+var list = (xs) => xs.map(quoted).join("; ");
 function applicabilityText(a, subject, words) {
   const g = grammar(subject, words.label);
   const { today, asOf } = words;
@@ -10420,7 +10439,7 @@ function computeHoldings(regulations, sources) {
     };
   });
 }
-var nameOf = (h) => h.title ?? h.document_id;
+var nameOf = (h) => quoted(h.title ?? h.document_id);
 var provisionsOf = (n) => `${n} provision${n === 1 ? "" : "s"}`;
 function partialClause(h) {
   return `This library holds only part of ${nameOf(h)} (${provisionsOf(h.records)}), so a provision not found here is not among the parts held, and may still be in the law.`;
@@ -11269,7 +11288,7 @@ function resolveCitationDetailed(regulations, text, holdings) {
       ...none(),
       match: hit ?? null,
       confidence: "alias",
-      coverage_note: hit === void 0 ? void 0 : `Matched an alias. This provision's own citation is "${hit.citation}" \u2014 quote that, not "${text}".`
+      coverage_note: hit === void 0 ? void 0 : `Matched an alias. This provision's own citation is ${quoted(hit.citation)} \u2014 quote that, not "${text}".`
     };
   }
   if (aliasHits.length > 1) return ambiguousResolution(text, aliasHits);
@@ -11281,7 +11300,7 @@ function resolveCitationDetailed(regulations, text, holdings) {
       ...none(),
       match: hit ?? null,
       confidence: "alias",
-      coverage_note: hit === void 0 ? void 0 : `Matched an alias. This provision's own citation is "${hit.citation}" \u2014 quote that, not "${text}".`
+      coverage_note: hit === void 0 ? void 0 : `Matched an alias. This provision's own citation is ${quoted(hit.citation)} \u2014 quote that, not "${text}".`
     };
   }
   if (coreAliasHits.length > 1) return ambiguousResolution(text, coreAliasHits);
@@ -11313,7 +11332,7 @@ function resolveCitationDetailed(regulations, text, holdings) {
     return frameworks.size === 1 && unheld.every((d) => frameworks.has(d.issuer ?? ""));
   })();
   if (unheld.length > 0 && placeable && !looselyDescribed) {
-    const quoted2 = unheld.map((d) => `"${d.quote}"`).join(" and ");
+    const mentioned = unheld.map((d) => `"${d.quote}"`).join(" and ");
     const identifiers = unheld.every((d) => d.identifier);
     const heldNames = [];
     if (instrumentName2 !== null) heldNames.push(instrumentName2);
@@ -11331,7 +11350,7 @@ function resolveCitationDetailed(regulations, text, holdings) {
     const sameIssuer = [...new Set(regulations.filter((r) => issuers.includes(r.framework.toLowerCase())).map((r) => r.document_id))];
     const issuerNote = sameIssuer.length === 0 ? "" : ` It does hold ${sameIssuer.length === 1 ? "a document" : "documents"} under the ${issuers.map((i) => i.toUpperCase()).join("/")} framework (${sameIssuer.slice(0, 5).join(", ")}${sameIssuer.length > 5 ? ", \u2026" : ""}); if one of those is what was meant, cite it by its id or title.`;
     return none({
-      coverage_note: heldNames.length === 0 ? identifiers ? `"${text}" names an instrument by an identifier (${quoted2}), and this library holds no document identified as such. Nothing was matched, rather than sourcing a same-numbered provision from another document. ${wayOut}` : `"${text}" names an instrument by description (${quoted2}), and this library holds no document identified as such. Nothing was matched, rather than sourcing a same-numbered provision from another document.${issuerNote} ${wayOut}` : `"${text}" names ${heldList} and also an instrument by ${how} (${quoted2}) that it holds no document identified as, so which of the two the provision belongs to cannot be told. Nothing was matched, rather than sourcing a same-numbered provision from either. Name one instrument per citation. ${wayOut}`
+      coverage_note: heldNames.length === 0 ? identifiers ? `"${text}" names an instrument by an identifier (${mentioned}), and this library holds no document identified as such. Nothing was matched, rather than sourcing a same-numbered provision from another document. ${wayOut}` : `"${text}" names an instrument by description (${mentioned}), and this library holds no document identified as such. Nothing was matched, rather than sourcing a same-numbered provision from another document.${issuerNote} ${wayOut}` : `"${text}" names ${heldList} and also an instrument by ${how} (${mentioned}) that it holds no document identified as, so which of the two the provision belongs to cannot be told. Nothing was matched, rather than sourcing a same-numbered provision from either. Name one instrument per citation. ${wayOut}`
     });
   }
   const unplaced = unplacedIdentifier(text, rest);
@@ -11390,7 +11409,7 @@ function resolveCitationDetailed(regulations, text, holdings) {
     const points = spine.slice(best.rs.length);
     const inside = points.join(".");
     const carries = textCarriesPoint(best.r.text, points);
-    const held = `It holds the provision containing it: "${best.r.citation}" (${best.r.id})`;
+    const held = `It holds the provision containing it: ${quoted(best.r.citation)} (${best.r.id})`;
     const tail2 = carries === "yes" ? `, whose text carries point ${inside}. Open it and quote the point from its text rather than citing this resolution.` : carries === "no" ? `, but no point ${inside} was found in its text; its numbering may differ. Open it and check before anything is cited from this resolution.` : `; whether its text has point ${inside} could not be established, as its numbering could not be read reliably. Open it.`;
     return none({
       unmatched_segments: spine,
@@ -16925,7 +16944,7 @@ var EMPTY_COMPLETION_RESULT = {
 // package.json
 var package_default = {
   name: "prudent-mcp",
-  version: "1.4.0",
+  version: "1.4.1",
   description: "MCP server exposing the prudent IRB validation knowledge base",
   type: "module",
   module: "src/server.ts",
@@ -17312,12 +17331,12 @@ function instrumentName(by, sources) {
 }
 function wording(by) {
   const flat = by.text.replace(/\s+/g, " ").trim();
-  if (flat.length <= MAX_WORDING_CHARS) return `\u201C${flat}\u201D`;
+  if (flat.length <= MAX_WORDING_CHARS) return quoted(flat);
   const cut = flat.slice(0, MAX_WORDING_CHARS);
-  return `\u201C${cut.slice(0, Math.max(cut.lastIndexOf(" "), MAX_WORDING_CHARS - 40))}\u2026\u201D`;
+  return quoted(`${cut.slice(0, Math.max(cut.lastIndexOf(" "), MAX_WORDING_CHARS - 40))}\u2026`);
 }
 function sentenceForAmendment(a, sources, today) {
-  const who = `${instrumentName(a.by, sources)} (${a.by.citation})`;
+  const who = `${quoted(instrumentName(a.by, sources))} (${quoted(a.by.citation)})`;
   const upcoming = a.state === "upcoming";
   const when = upcoming ? `from ${a.effective_from}${whenPhrase(today, a.effective_from)}` : `since ${a.effective_from}`;
   const behind = upcoming ? "the text below is the version before it" : "the text below may no longer be the text in force";
@@ -17404,7 +17423,7 @@ async function pendingPageNotice(records, now = /* @__PURE__ */ new Date()) {
 }
 function namedNotice(citations) {
   if (citations.length === 0) return void 0;
-  const shown = citations.slice(0, MAX_PENDING_NAMED).join("; ");
+  const shown = citations.slice(0, MAX_PENDING_NAMED).map(quoted).join("; ");
   const rest = citations.length - MAX_PENDING_NAMED;
   return `${citations.length === 1 ? "One result is a provision" : "Some results are provisions"} that a recorded change affects: ${shown}${rest > 0 ? `; and ${rest} more` : ""}. The text shown is the version before it.`;
 }
@@ -17620,7 +17639,7 @@ function applicabilityPageNotice(records, labelOf2, now = /* @__PURE__ */ new Da
       seen.add(r.id);
       const a = r.applicability;
       const when = a.status === "historical" ? `${a.until < today ? "ceased" : "ceases"} to apply after ${a.until}` : a.from === void 0 ? "date of application not yet fixed" : a.from > today ? `applies from ${a.from}` : `recorded as applying from ${a.from}`;
-      items[a.status].push({ label: labelOf2(r), said: `${labelOf2(r)} (${when})` });
+      items[a.status].push({ label: labelOf2(r), said: `${quoted(labelOf2(r))} (${when})` });
     }
     const notes = [];
     const say = (kind, one, many, tail2) => {
@@ -17647,7 +17666,7 @@ async function provisionNotes(record2, opts = {}) {
   if (amendment !== void 0) notes.push({ type: "amendment", text: amendment, applies_to: [cite] });
   const found = preAdoptionPlaceholders(record2.text);
   if (found !== null) {
-    const named = found.spans.map((x) => `\u201C${x}\u201D`).join("; ");
+    const named = found.spans.map(quoted).join("; ");
     notes.push({ type: "placeholder", text: `${placeholderNotice(found)} The placeholder${found.spans.length > 1 ? "s are" : " is"}: ${named}.`, applies_to: [cite] });
   }
   return notes;
@@ -17713,7 +17732,7 @@ async function playbookNotes(pb, ctxSources, opts = {}) {
 }
 function notesText(notes) {
   if (notes.length === 0) return "";
-  return ["## Notes", ...notes.map((n) => `- ${n.text}${n.applies_to === void 0 || n.applies_to.length === 0 ? "" : ` (${n.applies_to.join("; ")})`}`)].join("\n");
+  return ["## Notes", ...notes.map((n) => `- ${n.text}${n.applies_to === void 0 || n.applies_to.length === 0 ? "" : ` (${n.applies_to.map(quoted).join("; ")})`}`)].join("\n");
 }
 var slugOf = (id) => id.replace(/^playbook:\/\//, "");
 function registerPlaybookTool(server3) {

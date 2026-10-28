@@ -156,7 +156,7 @@ describe("resolve_citation: the containing-provision note", () => {
     expect(n).toContain("no point 9 was found in its text");
     expect(n).toContain("numbering may differ");
     expect(n).toContain("check before anything is cited from this resolution");
-    expect(n).toContain('"Article 180"');
+    expect(n).toContain("“Article 180”");
     expect(n).toContain("regulation://acme/article-180");
     // Nothing else about the decline changed.
     expect(r.match).toBeNull();

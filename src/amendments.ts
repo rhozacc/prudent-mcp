@@ -33,6 +33,7 @@
  *
  * Pure over the supplied arrays: no I/O, no adapter handles.
  */
+import { quoted } from "./language.ts";
 import {
   MAX_PENDING_NAMED,
   openPendingFor,
@@ -161,14 +162,14 @@ function instrumentName(by: Regulation, sources: Source[]): string {
 /** The amending provision's own text, whitespace collapsed and cut at a word. Quoted as a quotation. */
 function wording(by: Regulation): string {
   const flat = by.text.replace(/\s+/g, " ").trim();
-  if (flat.length <= MAX_WORDING_CHARS) return `“${flat}”`;
+  if (flat.length <= MAX_WORDING_CHARS) return quoted(flat);
   const cut = flat.slice(0, MAX_WORDING_CHARS);
-  return `“${cut.slice(0, Math.max(cut.lastIndexOf(" "), MAX_WORDING_CHARS - 40))}…”`;
+  return quoted(`${cut.slice(0, Math.max(cut.lastIndexOf(" "), MAX_WORDING_CHARS - 40))}…`);
 }
 
 /** What one amendment says about the provision it targets. */
 function sentenceForAmendment(a: OpenAmendment, sources: Source[], today: string): string {
-  const who = `${instrumentName(a.by, sources)} (${a.by.citation})`;
+  const who = `${quoted(instrumentName(a.by, sources))} (${quoted(a.by.citation)})`;
   const upcoming = a.state === "upcoming";
   const when = upcoming ? `from ${a.effective_from}${whenPhrase(today, a.effective_from)}` : `since ${a.effective_from}`;
   const behind = upcoming ? "the text below is the version before it" : "the text below may no longer be the text in force";

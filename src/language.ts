@@ -22,7 +22,9 @@
  *   no backtick.
  *
  * Record text — a provision, a check, a source's own notes — is data, never
- * scanned.
+ * scanned. A note that NAMES a record by its label (a citation, a check's name, a
+ * title) puts the label in the library's quotation marks (`quoted`), and a
+ * quotation is not scanned: the label is data, the words around it are the server's.
  */
 
 /**
@@ -60,6 +62,16 @@ const IDENTIFIER =
  * delimiters are straight and curly double quotes; an apostrophe is not one.
  */
 const QUOTATION = /"[^"\n]*"|“[^”\n]*”/g;
+
+/**
+ * A label taken from the library's data (a provision's citation, a check's or playbook's name, a source's title, a
+ * change's title) as a note names it: inside the library's quotation marks, so the language rule leaves it alone. The
+ * label is somebody else's words and may legitimately contain a word the server's own prose may not ("holdings" in
+ * the name of a requirement). ONE definition: every note that names an entry quotes it through this, and the rule
+ * above is what makes the quotation exempt. A quotation mark inside the label would end the quotation early, so it
+ * is replaced by the single curly mark, which is not a delimiter.
+ */
+export const quoted = (label: string): string => `“${label.replace(/[“"]/g, "‘").replace(/”/g, "’")}”`;
 
 /** `text` without its quotations. */
 export const withoutQuotations = (text: string): string => text.replace(QUOTATION, " ");

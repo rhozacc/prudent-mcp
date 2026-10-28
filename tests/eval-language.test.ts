@@ -148,4 +148,18 @@ describe("eval I17", () => {
     const r = await serverLanguageIsClean(session({ instructions: "", tools: [] }));
     expect(r.applicable).toBe(false);
   });
+
+  it("passes a note that quotes a label containing a banned word, and still fails the server's own", async () => {
+    const quotedLabel = "“Exclusion of own debt instrument holdings from default-risk requirement”";
+    const clean = await serverLanguageIsClean(
+      session({ traces: [trace("search", { notes: [{ type: "upcoming", text: `Some results are text that is not yet in application: ${quotedLabel} (applies from 2027-01-01).` }] })] }),
+    );
+    expect(clean.findings).toEqual([]);
+    const f = await fatal(
+      session({ traces: [trace("search", { notes: [{ type: "upcoming", text: `Not held in the corpus: ${quotedLabel} (applies from 2027-01-01).` }] })] }),
+    );
+    expect(f).toHaveLength(1);
+    expect(f[0]!.summary).toContain('"corpus"');
+    expect(f[0]!.summary).not.toContain("holdings");
+  });
 });
