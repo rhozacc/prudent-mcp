@@ -22,7 +22,7 @@ src/playbook-verify.ts   verifyPlaybook V1-V8, the gate between a compiled draft
 src/playbook-context.ts  the plain maps render and verify read (NOT src/tools/served-context.ts)
 src/search.ts            rankedSearch (BM25F) and the per-surface field sets: the ONE ranking definition
 src/citation-style.ts    citationOf / locatorOf: the ONE official-citation definition
-src/holdings.ts, pending.ts, amendments.ts, placeholders.ts, crossrefs.ts, referrers.ts
+src/holdings.ts, pending.ts, amendments.ts, applicability.ts, placeholders.ts, crossrefs.ts, referrers.ts
                          each the ONE definition of its concept, computed at serve time
 src/language.ts          BANNED_TERMS, the language rule
 src/tools/               one file per tool, plus shared.ts (paging, size, notes plumbing) and notes.ts
@@ -77,6 +77,9 @@ Bun, strict TypeScript (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`
 - `"alias"` confidence is distinct from `"exact"`: EBA guidelines number paragraphs, and "Article 178" is also a real CRR article.
 - The instrument gates decline a citation naming an instrument the library does not hold, by NUMBER (every standard spelling), by identifier, or by DESCRIPTION (`DESCRIBED_INSTRUMENTS`, one table, every spelling of a kind). A gate that reads one spelling is walked round by the next, so I3's probes carry the respellings. A derived instrument name scopes a citation only when it is accounted for (`accountedFor`); otherwise the ids alone decide. A note may only claim what it verified: `textCarriesPoint` is the ONE reader and returns `yes | no | unknown`. Both guards of the container rule (a faithful, non-empty spine; spine tokens joined on a separator) are load-bearing. Rationale and counts: comments in `src/citation/`, `CHANGES.md`.
 - Don't add curated facts about particular real instruments for descriptive names; a note states no requirements.
+
+**Applicability**
+- `applicability` (optional on Regulation, Check, Test, Playbook; `src/schema.ts`) is `historical` (`until` required, the last day it applied) or `upcoming` (`from` optional). ABSENT declares nothing: never defaulted. `src/applicability.ts` holds the words and the prior; `src/tools/notes.ts` attaches `historical` / `upcoming` notes on every tool that serves the entry, `render.ts` opens the playbook with a banner, eval I20 binds it. Historical ranks at ×0.5 in search (never dropped) and ×0.75 in `brief` routing; `today` is a parameter, so an `until` still ahead reads "ceasing", never "no longer applies". Under `as_of` the note reads the LATEST declaration (a past version carries none) and says it applied then. Why: a repealed provision reads exactly like a current one.
 
 **Pending changes and `as_of`**
 - `pendingState` is derived from `ingested` + `effective_from` and a `today` that is a PARAMETER, never stored. Only a CURRENT source speaks. The note is provision-level (`src/amendments.ts`): a provision is told only when an `amends` entry or an `affects_ids` names it. A document with open changes and neither says so once, at document level. Why: a document-wide note made a model repeat "may be out of date" about paragraphs the change never touched. `affects` is free text and is never parsed.

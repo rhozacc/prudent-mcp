@@ -1,5 +1,16 @@
 # Changes
 
+## Unreleased
+
+**`applicability`: text that no longer applies, or does not apply yet, is never served silently.** A repealed provision reads exactly like a current one, and text about a postponed regime reads like law in force. A corpus can now declare it: an optional `applicability` on a provision, check, test or playbook, `{ status: "historical", until, reason, replaced_by? }` (`until` is the last day it applied) or `{ status: "upcoming", from?, reason }` (no `from`: the date is not yet fixed). Absent declares nothing and is never defaulted. Additive: no existing field, tool or reply changes for a corpus that declares nothing.
+
+- **Notes.** Two new note types, `historical` and `upcoming`, in the library's own words (the date, the reason, and what replaced it by citation): on `get` (provisions, checks and tests; under `as_of` the note reads the latest declaration and says the text applied on that date and has since ceased, or did not apply then), `related` (the entry and every listed entry that declares it), a `cite` match, `brief` (the routed playbook, a close second, neighbours and the listed provisions), `playbook` (its own declaration and the provisions it rests on), `topics`, and one note per kind on every `search` page naming the rows. `today` is a parameter: an `until` still ahead reads "ceasing to apply", never "no longer applies".
+- **Ranking.** Historical records rank at half their score in search on every scope (never dropped; `total_matches` unchanged), so current law outranks repealed law on the same words. `brief` routes a historical playbook at 0.75 of its score (`ROUTING.historicalPrior`): it loses a tie to current law and is still chosen when it is the only match, so "what did the old approach require" works. Upcoming gets no prior, only the note. Playbooks that declare nothing route exactly as before.
+- **Render.** A historical or upcoming playbook opens with a one-line banner, on the whole playbook and on a single requirement.
+- **Linter.** Fatal: a malformed `until` / `from`, a blank `reason`, a `replaced_by` that does not resolve. Warnings: a historical `until` still ahead, an upcoming `from` already past, a playbook that is not itself historical resting on historical provisions.
+- **Evals.** I20 "Applicability is never silent" (fatal). The seeded demo gains an invented regime with a repealed article, its replacement, an upcoming article, two checks and a repealed playbook, so I20 binds in CI; the demo registry now lists seven sources.
+- Schemas: `Applicability` is a new supporting schema (`docs/schemas/Applicability.schema.json`); `Regulation`, `Check`, `Test` and `Playbook` gain the optional field.
+
 ## 1.3.1
 
 **`cite` no longer counts a shorter act number as held.** Whether the library holds a numbered act was decided by a substring test over the documents' squashed ids, so with a document id'd for an act numbered, say, 2099/123, a citation of Regulation 2099/12 (or 2099/1) counted as held and its article was answered out of the other act — a confident wrong citation. A match now counts only where no digit follows it. I3 gains a probe (`I3/prefix-number`) built from the numbered acts the library lists. No reply shape changes.

@@ -138,6 +138,7 @@ A specific paragraph of a specific regulation, frozen to a document version.
 | `citation_aliases` | `string[]` | no | Other spellings that name this record. An alias resolves with `confidence: "alias"`, never `"exact"`. |
 | `cites` | `ExternalCitation[]` | no | Citations the text makes, resolved by the server to the provisions they name (shown by `related`). |
 | `pages`, `anchor`, `is_metadata_only` | | no | Where the text was read from, a verbatim snippet locating it, and whether it carries no substantive obligation. |
+| `applicability` | `Applicability` | no | Whether the text applies: `historical` or `upcoming` (see [Applicability](#applicability)). Absent = the corpus declares nothing and the text is treated as applying. |
 
 **Every optional field above is optional, never defaulted: absent is not empty.** `pages: []` says the text was read from no page; a missing `pages` says it was never captured. A corpus that omits them all behaves exactly as before.
 
@@ -245,6 +246,7 @@ A statistical test described, not executed. The corpus tells Claude *what the te
 | `primary_basis` | `RegulationId[]` | no | The provisions this test actually implements, as against the span `regulatory_basis` covers. A subset of `regulatory_basis`. |
 | `parent` | `RegulationId` | no | Set when this test is listed as a child of a regulation. Must appear in `regulatory_basis` (the mirror invariant). |
 | `last_updated` | `string` (ISO date) | yes | |
+| `applicability` | `Applicability` | no | `historical` or `upcoming` (see [Applicability](#applicability)). |
 
 ### On aliases and family
 
@@ -281,6 +283,7 @@ A qualitative check with a concrete pass/fail expectation, traced back to law.
 | `expectation` | `string` | yes | What "pass" looks like, in plain language. |
 | `expected_evidence` | `string[]` | no, default `[]` | Artifacts the reviewer must gather to complete this check. |
 | `last_updated` | `string` (ISO date) | yes | |
+| `applicability` | `Applicability` | no | `historical` or `upcoming` (see [Applicability](#applicability)). |
 
 ### On `derived_from`
 
@@ -328,6 +331,7 @@ One playbook per **topic**, compiled across documents by the factory and checked
 | `related` | `PlaybookId[]` | |
 | `outside_library[]` | `{ name, why }` | Instruments the topic turns on that the library does not hold |
 | `excluded[]` | `{ id, reason }` | Member provisions deliberately not cited |
+| `applicability` | `Applicability` | `historical` or `upcoming` (see [Applicability](#applicability)); copied from the topic by the factory, never written by the compiler |
 | `provenance` | `{ status: draft \| approved \| exemplar, compiled_at, compiler?, inputs_sha, approved_by?, approved_at? }` | `inputs_sha` is what staleness compares |
 
 A citation in the rendered text is built from the provision id through its document's `citation_style`, never taken from the compiler's wording. The verifier's rules (V1 to V8) are each a failure actually seen: a quote the provision does not say, a provision named in prose but not cited, a member provision silently dropped, practice presented as a requirement. Invariant I18 runs it over every served playbook.
@@ -356,6 +360,25 @@ A citation in the rendered text is built from the provision id through its docum
   "provenance": { "status": "approved", "compiled_at": "2026-10-01T00:00:00Z", "inputs_sha": "..." }
 }
 ```
+
+## Applicability
+
+A text can stop applying (a repealed approach) or not apply yet (a regime whose application date was postponed), and from inside the text neither can be seen. A corpus says so with an optional `applicability` on a provision, check, test or playbook, a discriminated union on `status`:
+
+```json
+{ "status": "historical", "until": "2024-12-31", "reason": "…", "replaced_by": ["regulation://…"] }
+{ "status": "upcoming",   "from": "2027-01-01",  "reason": "…" }
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `status` | `historical` \| `upcoming` | `historical`: no longer applies. `upcoming`: not yet in application. |
+| `until` | ISO date | `historical` only, **required**: the LAST day the text applied. |
+| `from` | ISO date | `upcoming` only, optional: the first day it applies. Absent means the date is not yet fixed. |
+| `reason` | `string` | Required, not blank. The corpus's own sentence for why; the server repeats it as it stands. |
+| `replaced_by` | `RegulationId[]` | `historical` only, optional. Each must resolve (the linter checks); the note names them by citation. |
+
+**Absent is not "applies".** A record with no `applicability` declares nothing; it is never defaulted to a state, so the server never claims text applies that nobody said applies. Nothing is dropped or hidden: a historical record is served, ranked at half its score in search (`total_matches` unchanged) and told, every time, in a `historical` or `upcoming` note (see [notes](/tools/#notes)). A playbook that is historical or upcoming opens with a one-line banner. The linter checks the shapes and `replaced_by` (fatal) and warns when a historical `until` is still ahead, an upcoming `from` has passed, or a playbook that is not itself historical cites historical provisions. Invariant I20 requires the note on every tool that serves such an entry.
 
 ## Topics and glossary
 
@@ -480,7 +503,7 @@ These types exist in the schema but are computed at query time, not stored:
 
 - **`CorpusInfo`** — what's loaded right now, behind `sources`. The adapter exposes the data; the server computes the summary, including `holdings`.
 - **`Referrers`** — back-references for a given ID, behind `related`. The server computes this by scanning `Check.derived_from`, `Test.regulatory_basis` and the playbooks' provisions. Reverse indexes don't live in the corpus. Because a check/test listed in `Regulation.children` must mirror its `derived_from` / `regulatory_basis` (the mirror invariant), those forward links already cover it — `children` needs no separate scanning.
-- **Notes** — amendment, version, placeholder, outside-library and weak-match caveats, computed per response from the data above.
+- **Notes** — amendment, version, placeholder, outside-library, weak-match, historical and upcoming caveats, computed per response from the data above.
 
 ---
 
