@@ -12411,7 +12411,44 @@ function validateCorpus(corpus, now = /* @__PURE__ */ new Date()) {
       }
     }
   }
+  const isoDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && (/* @__PURE__ */ new Date(`${v}T00:00:00Z`)).toISOString().slice(0, 10) === v;
+  const applicable = (id, a) => {
+    if (a === void 0) return;
+    if (typeof a.reason !== "string" || a.reason.trim() === "") errors.push(`${id}: applicability.reason is empty; a reader is told why the text does not apply (applicability)`);
+    if (a.status === "historical") {
+      if (typeof a.until !== "string" || !isoDate(a.until)) errors.push(`${id}: applicability is historical but until ${String(a.until)} is not an ISO date (applicability)`);
+      for (const r of a.replaced_by ?? []) if (!regIds.has(r)) errors.push(`${id}: applicability.replaced_by ${r} does not resolve`);
+    } else if (a.from !== void 0 && !isoDate(a.from)) {
+      errors.push(`${id}: applicability is upcoming but from ${a.from} is not an ISO date (applicability)`);
+    }
+  };
+  for (const reg of regs) applicable(reg.id, reg.applicability);
+  for (const c of checks) applicable(c.id, c.applicability);
+  for (const t of tests) applicable(t.id, t.applicability);
+  for (const p of playbooks) applicable(p.id, p.applicability);
   return [...new Set(errors)];
+}
+function applicabilityWarnings(corpus, now = /* @__PURE__ */ new Date()) {
+  const today = isoDay(now);
+  const out = [];
+  const dated = (id, a) => {
+    if (a === void 0) return;
+    if (a.status === "historical" && a.until > today) out.push(`${id}: applicability is historical but until ${a.until} is still ahead; the text still applies until then`);
+    if (a.status === "upcoming" && a.from !== void 0 && a.from <= today) out.push(`${id}: applicability is upcoming but from ${a.from} has passed; check whether the text now applies`);
+  };
+  for (const r of corpus.regulation) dated(r.id, r.applicability);
+  for (const c of corpus.checks) dated(c.id, c.applicability);
+  for (const t of corpus.tests) dated(t.id, t.applicability);
+  for (const p of corpus.playbooks) dated(p.id, p.applicability);
+  const historical = new Set(corpus.regulation.filter((r) => r.applicability?.status === "historical").map((r) => r.id));
+  if (historical.size > 0) {
+    for (const p of corpus.playbooks) {
+      if (p.applicability?.status === "historical") continue;
+      const cited = [...playbookProvisions(p)].filter((id) => historical.has(id));
+      if (cited.length > 0) out.push(`${p.id}: rests on ${cited.length} historical provision(s) (${cited.slice(0, 3).join(", ")}${cited.length > 3 ? ", ..." : ""}) but is not itself marked historical`);
+    }
+  }
+  return out;
 }
 function corpusWarnings(corpus, now = /* @__PURE__ */ new Date()) {
   const sources = corpus.sources ?? [];
@@ -12420,7 +12457,7 @@ function corpusWarnings(corpus, now = /* @__PURE__ */ new Date()) {
     const s = byId.get(id);
     return `${id}: verified ${s.verified} is older than ${STALE_AFTER_DAYS} days (stale)`;
   });
-  return [...stale, ...holdingsWarnings(corpus.regulation, sources), ...pendingChangeWarnings(sources, now)];
+  return [...stale, ...holdingsWarnings(corpus.regulation, sources), ...pendingChangeWarnings(sources, now), ...applicabilityWarnings(corpus, now)];
 }
 function validateCorpusFile(corpus) {
   return validateCorpus({
