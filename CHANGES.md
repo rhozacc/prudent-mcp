@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 1.4.0
 
 **`applicability`: text that no longer applies, or does not apply yet, is never served silently.** A repealed provision reads exactly like a current one, and text about a postponed regime reads like law in force. A corpus can now declare it: an optional `applicability` on a provision, check, test or playbook, `{ status: "historical", until, reason, replaced_by? }` (`until` is the last day it applied) or `{ status: "upcoming", from?, reason }` (no `from`: the date is not yet fixed). Absent declares nothing and is never defaulted. Additive: no existing field, tool or reply changes for a corpus that declares nothing.
 
