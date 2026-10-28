@@ -10261,6 +10261,120 @@ var adapters = {
 // src/file-adapter.ts
 import { readFileSync } from "node:fs";
 
+// src/pending.ts
+var isoDay = (now) => now.toISOString().slice(0, 10);
+function pendingState(change, today) {
+  if (change.ingested) return "ingested";
+  if (change.effective_from === void 0) return "undated";
+  return change.effective_from > today ? "upcoming" : "in_force_not_ingested";
+}
+var URGENCY = { in_force_not_ingested: 0, upcoming: 1, undated: 2 };
+function byUrgency(a, b) {
+  const u = URGENCY[a.state] - URGENCY[b.state];
+  if (u !== 0) return u;
+  return (a.change.effective_from ?? "").localeCompare(b.change.effective_from ?? "");
+}
+function openPendingChanges(sources, today) {
+  const out = [];
+  for (const source of sources) {
+    if (source.status !== "current") continue;
+    for (const change of source.pending_changes ?? []) {
+      const state = pendingState(change, today);
+      if (state !== "ingested") out.push({ source, change, state });
+    }
+  }
+  return out.sort(byUrgency);
+}
+var declaresPendingChanges = (sources) => sources.some((s) => s.pending_changes !== void 0);
+function pendingChangeSummaries(sources, now = /* @__PURE__ */ new Date()) {
+  if (!declaresPendingChanges(sources)) return void 0;
+  return openPendingChanges(sources, isoDay(now)).map(({ source, change, state }) => ({
+    source: source.id,
+    document_id: source.document_id,
+    title: change.title,
+    ...change.reference === void 0 ? {} : { reference: change.reference },
+    status: change.status,
+    ...change.effective_from === void 0 ? {} : { effective_from: change.effective_from },
+    state
+  }));
+}
+function openPendingFor(doc, sources, today, asOf) {
+  const mine = sources.filter((s) => s.framework === doc.framework && s.document_id === doc.document_id);
+  return openPendingChanges(mine, today).filter(
+    ({ change }) => asOf === void 0 || change.effective_from === void 0 || asOf >= change.effective_from
+  );
+}
+var MAX_PENDING_NAMED = 3;
+var MAX_AFFECTS = 4;
+var daysBetween = (today, date3) => Math.round((Date.parse(`${date3}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 864e5);
+function whenPhrase(today, date3) {
+  const n = daysBetween(today, date3);
+  if (n === 1) return " (tomorrow)";
+  if (n > 1 && n <= 120) return ` (in ${n} days)`;
+  return "";
+}
+var labelOf = (c) => c.reference !== void 0 && !c.title.includes(c.reference) ? `${c.title} (${c.reference})` : c.title;
+var affectsOf = (c) => c.affects === void 0 || c.affects.length === 0 ? "" : ` Said to concern ${c.affects.slice(0, MAX_AFFECTS).join("; ")}${c.affects.length > MAX_AFFECTS ? "; ..." : ""}.`;
+function sentenceFor(o, today) {
+  const { change: c, state } = o;
+  const announced = c.status === "announced";
+  const label = labelOf(c);
+  const tail2 = affectsOf(c);
+  if (state === "in_force_not_ingested") {
+    const date3 = c.effective_from ?? "";
+    return announced ? `${label} was expected to apply from ${date3}; the text below may be out of date.${tail2}` : `${label} has applied since ${date3}; the text below may no longer be the text in force.${tail2}`;
+  }
+  if (state === "upcoming") {
+    const date3 = c.effective_from ?? "";
+    return `${label} ${announced ? "is expected to apply" : "applies"} from ${date3}${whenPhrase(today, date3)}; the text below is the version before it.${tail2}`;
+  }
+  return `${label} is ${announced ? "announced" : "adopted"} with no application date recorded; the text below does not reflect it.${tail2}`;
+}
+function pendingSearchNotice(docs) {
+  const withOpen = docs.filter((d) => d.open.length > 0);
+  if (withOpen.length === 0) return void 0;
+  const items = withOpen.slice(0, MAX_PENDING_NAMED).map((d) => {
+    const first = d.open[0];
+    if (first === void 0) return d.title;
+    const when = first.change.effective_from === void 0 ? "no date recorded" : first.state === "in_force_not_ingested" ? `applied ${first.change.effective_from}` : `from ${first.change.effective_from}`;
+    return `${d.title} (${labelOf(first.change)}, ${when}${d.open.length > 1 ? `, +${d.open.length - 1} more` : ""})`;
+  });
+  const rest = withOpen.length - items.length;
+  return `Some results come from a document with a change its text does not yet include: ${items.join("; ")}${rest > 0 ? `; and ${rest} more` : ""}. The text shown is the version before it.`;
+}
+function pendingChangeWarnings(sources, now = /* @__PURE__ */ new Date()) {
+  const today = isoDay(now);
+  return openPendingChanges(sources, today).filter((o) => o.state === "in_force_not_ingested").map(
+    (o) => `${o.source.id}: ${labelOf(o.change)} has applied since ${o.change.effective_from} but is not ingested \u2014 the text this corpus serves for the document is out of date`
+  );
+}
+
+// src/applicability.ts
+var HISTORICAL_PRIOR = 0.5;
+var applicabilityPrior = (record2) => record2.applicability?.status === "historical" ? HISTORICAL_PRIOR : 1;
+var grammar = (subject) => subject === "playbook" ? { subject: "The requirements in this playbook", applies: "apply", it: "they", is: "are" } : { subject: subject === "provision" ? "This text" : subject === "check" ? "This check" : "This test", applies: "applies", it: "it", is: "is" };
+var reasonSentence = (reason) => {
+  const r = reason.trim();
+  return /[.!?]$/.test(r) ? r : `${r}.`;
+};
+var list = (xs) => xs.join("; ");
+function applicabilityText(a, subject, words) {
+  const g = grammar(subject);
+  const { today, asOf } = words;
+  const replaced = words.replacedBy ?? [];
+  if (a.status === "historical") {
+    const over = a.until < today;
+    const lead = asOf === void 0 ? over ? `${g.subject} no longer ${g.applies}: ${g.it} ceased to apply after ${a.until}.` : `${g.subject} ${g.is} recorded as ceasing to apply after ${a.until}.` : asOf <= a.until ? `${g.subject} applied on ${asOf}, the date asked about, ${over ? `but ${g.it} has since ceased to apply: ${g.it} applied until ${a.until}` : `and ${g.it} ${g.is} recorded as ceasing to apply after ${a.until}`}.` : `${g.subject} did not apply on ${asOf}, the date asked about: ${g.it} ceased to apply after ${a.until}.`;
+    const tail2 = replaced.length === 0 ? "" : ` ${over ? "It was" : "It is to be"} replaced by ${list(replaced)}.`;
+    return `${lead} Reason: ${reasonSentence(a.reason)}${tail2}`;
+  }
+  const notYet = asOf !== void 0 && (a.from === void 0 || asOf < a.from) ? ` ${subject === "playbook" ? "They" : "It"} did not apply on ${asOf}, the date asked about.` : "";
+  if (a.from === void 0) return `${g.subject} ${g.is} not yet in application: the date from which ${g.it} ${g.applies} is not yet fixed.${notYet} Reason: ${reasonSentence(a.reason)}`;
+  if (a.from > today) return `${g.subject} ${g.is} not yet in application: ${g.it} ${g.applies} from ${a.from}${whenPhrase(today, a.from)}.${notYet} Reason: ${reasonSentence(a.reason)}`;
+  return `${g.subject} ${g.is} recorded as applying from ${a.from}, a date that has passed; whether ${g.it} now ${g.applies} is not confirmed here. Reason: ${reasonSentence(a.reason)}`;
+}
+var replacedByIds = (a) => a.status === "historical" ? a.replaced_by ?? [] : [];
+
 // src/holdings.ts
 var idDocSegment = (id) => id.replace(/^regulation:\/\//, "").split("/")[0] ?? "";
 function declaredPartial(current) {
@@ -11275,94 +11389,6 @@ function resolveCitationDetailed(regulations, text, holdings) {
   });
 }
 
-// src/pending.ts
-var isoDay = (now) => now.toISOString().slice(0, 10);
-function pendingState(change, today) {
-  if (change.ingested) return "ingested";
-  if (change.effective_from === void 0) return "undated";
-  return change.effective_from > today ? "upcoming" : "in_force_not_ingested";
-}
-var URGENCY = { in_force_not_ingested: 0, upcoming: 1, undated: 2 };
-function byUrgency(a, b) {
-  const u = URGENCY[a.state] - URGENCY[b.state];
-  if (u !== 0) return u;
-  return (a.change.effective_from ?? "").localeCompare(b.change.effective_from ?? "");
-}
-function openPendingChanges(sources, today) {
-  const out = [];
-  for (const source of sources) {
-    if (source.status !== "current") continue;
-    for (const change of source.pending_changes ?? []) {
-      const state = pendingState(change, today);
-      if (state !== "ingested") out.push({ source, change, state });
-    }
-  }
-  return out.sort(byUrgency);
-}
-var declaresPendingChanges = (sources) => sources.some((s) => s.pending_changes !== void 0);
-function pendingChangeSummaries(sources, now = /* @__PURE__ */ new Date()) {
-  if (!declaresPendingChanges(sources)) return void 0;
-  return openPendingChanges(sources, isoDay(now)).map(({ source, change, state }) => ({
-    source: source.id,
-    document_id: source.document_id,
-    title: change.title,
-    ...change.reference === void 0 ? {} : { reference: change.reference },
-    status: change.status,
-    ...change.effective_from === void 0 ? {} : { effective_from: change.effective_from },
-    state
-  }));
-}
-function openPendingFor(doc, sources, today, asOf) {
-  const mine = sources.filter((s) => s.framework === doc.framework && s.document_id === doc.document_id);
-  return openPendingChanges(mine, today).filter(
-    ({ change }) => asOf === void 0 || change.effective_from === void 0 || asOf >= change.effective_from
-  );
-}
-var MAX_PENDING_NAMED = 3;
-var MAX_AFFECTS = 4;
-var daysBetween = (today, date3) => Math.round((Date.parse(`${date3}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 864e5);
-function whenPhrase(today, date3) {
-  const n = daysBetween(today, date3);
-  if (n === 1) return " (tomorrow)";
-  if (n > 1 && n <= 120) return ` (in ${n} days)`;
-  return "";
-}
-var labelOf = (c) => c.reference !== void 0 && !c.title.includes(c.reference) ? `${c.title} (${c.reference})` : c.title;
-var affectsOf = (c) => c.affects === void 0 || c.affects.length === 0 ? "" : ` Said to concern ${c.affects.slice(0, MAX_AFFECTS).join("; ")}${c.affects.length > MAX_AFFECTS ? "; ..." : ""}.`;
-function sentenceFor(o, today) {
-  const { change: c, state } = o;
-  const announced = c.status === "announced";
-  const label = labelOf(c);
-  const tail2 = affectsOf(c);
-  if (state === "in_force_not_ingested") {
-    const date3 = c.effective_from ?? "";
-    return announced ? `${label} was expected to apply from ${date3}; the text below may be out of date.${tail2}` : `${label} has applied since ${date3}; the text below may no longer be the text in force.${tail2}`;
-  }
-  if (state === "upcoming") {
-    const date3 = c.effective_from ?? "";
-    return `${label} ${announced ? "is expected to apply" : "applies"} from ${date3}${whenPhrase(today, date3)}; the text below is the version before it.${tail2}`;
-  }
-  return `${label} is ${announced ? "announced" : "adopted"} with no application date recorded; the text below does not reflect it.${tail2}`;
-}
-function pendingSearchNotice(docs) {
-  const withOpen = docs.filter((d) => d.open.length > 0);
-  if (withOpen.length === 0) return void 0;
-  const items = withOpen.slice(0, MAX_PENDING_NAMED).map((d) => {
-    const first = d.open[0];
-    if (first === void 0) return d.title;
-    const when = first.change.effective_from === void 0 ? "no date recorded" : first.state === "in_force_not_ingested" ? `applied ${first.change.effective_from}` : `from ${first.change.effective_from}`;
-    return `${d.title} (${labelOf(first.change)}, ${when}${d.open.length > 1 ? `, +${d.open.length - 1} more` : ""})`;
-  });
-  const rest = withOpen.length - items.length;
-  return `Some results come from a document with a change its text does not yet include: ${items.join("; ")}${rest > 0 ? `; and ${rest} more` : ""}. The text shown is the version before it.`;
-}
-function pendingChangeWarnings(sources, now = /* @__PURE__ */ new Date()) {
-  const today = isoDay(now);
-  return openPendingChanges(sources, today).filter((o) => o.state === "in_force_not_ingested").map(
-    (o) => `${o.source.id}: ${labelOf(o.change)} has applied since ${o.change.effective_from} but is not ingested \u2014 the text this corpus serves for the document is out of date`
-  );
-}
-
 // src/referrers.ts
 function playbookProvisions(p) {
   const ids = /* @__PURE__ */ new Set();
@@ -11452,9 +11478,9 @@ function indexFor(items, fields) {
       }
     });
     for (const [term, tf] of local) {
-      const list = postings.get(term);
-      if (list === void 0) postings.set(term, [{ doc, tf }]);
-      else list.push({ doc, tf });
+      const list2 = postings.get(term);
+      if (list2 === void 0) postings.set(term, [{ doc, tf }]);
+      else list2.push({ doc, tf });
     }
   });
   const avgLen = lens.map((l) => items.length === 0 ? 0 : l.reduce((a, b) => a + b, 0) / items.length);
@@ -11642,10 +11668,10 @@ function rankedSearch(items, query, fields, limit = DEFAULT_LIMIT, options = {})
   };
   const idfOf = (docsWithTerm) => Math.log(1 + (index.n - docsWithTerm + 0.5) / (docsWithTerm + 0.5));
   for (const [term, qw] of weights) {
-    const list = index.postings.get(term);
-    if (list === void 0) continue;
-    const idf = idfOf(list.length);
-    for (const { doc, tf } of list) {
+    const list2 = index.postings.get(term);
+    if (list2 === void 0) continue;
+    const idf = idfOf(list2.length);
+    for (const { doc, tf } of list2) {
       const a = credit(doc, tf, idf, qw);
       if (qw === 1) a.present.add(term);
     }
@@ -11744,7 +11770,7 @@ function regulationRanking(opts) {
   return {
     glossary: opts.glossary,
     exclude: opts.scope === "all" ? void 0 : (r) => r.role === "background",
-    prior: (r) => (r.kind === "section" ? 0.35 : 1) * (r.is_metadata_only === true ? 0.5 : 1)
+    prior: (r) => (r.kind === "section" ? 0.35 : 1) * (r.is_metadata_only === true ? 0.5 : 1) * applicabilityPrior(r)
   };
 }
 var testSearchFields = [
@@ -12552,7 +12578,7 @@ function createFileAdapters(corpus) {
   };
   const test = {
     async search(query) {
-      return rankedRecords(corpus.tests, query, testSearchFields, void 0, { glossary: corpus.glossary });
+      return rankedRecords(corpus.tests, query, testSearchFields, void 0, { glossary: corpus.glossary, prior: applicabilityPrior });
     },
     async get(id) {
       return testMap.get(id) ?? null;
@@ -12563,7 +12589,7 @@ function createFileAdapters(corpus) {
   };
   const check2 = {
     async search(query) {
-      return rankedRecords(corpus.checks, query, checkSearchFields, void 0, { glossary: corpus.glossary });
+      return rankedRecords(corpus.checks, query, checkSearchFields, void 0, { glossary: corpus.glossary, prior: applicabilityPrior });
     },
     async get(id) {
       return checkMap.get(id) ?? null;
@@ -12574,7 +12600,7 @@ function createFileAdapters(corpus) {
   };
   const playbook = {
     async search(query) {
-      return rankedRecords(corpus.playbooks, query, playbookSearchFields, void 0, { glossary: corpus.glossary });
+      return rankedRecords(corpus.playbooks, query, playbookSearchFields, void 0, { glossary: corpus.glossary, prior: applicabilityPrior });
     },
     async get(id) {
       return playbookMap.get(id) ?? null;
@@ -16958,7 +16984,13 @@ var ROUTING = {
   /** The leader is "ambiguous" when it leads the runner-up by less than this share of its own score. */
   margin: 0.12,
   /** A playbook within this fraction of the leader's score is offered as a neighbour. */
-  neighbour: 0.5
+  neighbour: 0.5,
+  /**
+   * What a playbook on repealed text (`applicability: historical`) has its score multiplied by, so it is routed only when
+   * it is clearly the best match: current law wins a tie, and a question that is about the repealed regime still finds it.
+   * Playbooks that declare nothing are untouched, which is why the bank tuning above does not move.
+   */
+  historicalPrior: 0.75
 };
 function routePlaybooks(args) {
   const { question, playbooks } = args;
@@ -16988,7 +17020,8 @@ function routePlaybooks(args) {
   const routes = playbooks.map((playbook) => {
     const text = textOf.get(playbook.id) ?? 0;
     const v = Math.min(1, (vote.get(playbook.id) ?? 0) / yardstick);
-    return { playbook, text, vote: v, score: R.textWeight * text + (1 - R.textWeight) * v };
+    const prior = playbook.applicability?.status === "historical" ? R.historicalPrior : 1;
+    return { playbook, text, vote: v, score: (R.textWeight * text + (1 - R.textWeight) * v) * prior };
   }).filter((r) => r.score > 0).sort((a, b) => b.score - a.score || (a.playbook.id < b.playbook.id ? -1 : 1));
   const lead = routes[0];
   if (lead === void 0) return { routes, chosen: null, ambiguous: false, reason: "no_match", neighbours: [] };
@@ -17219,9 +17252,9 @@ function amendmentIndex(regulations) {
     for (const a of by.amends ?? []) {
       const target = byId.get(a.target);
       if (target === void 0) continue;
-      const list = byTarget.get(a.target) ?? [];
-      list.push({ target: a.target, op: a.op, effective_from: a.effective_from, ...a.point === void 0 ? {} : { point: a.point }, by });
-      byTarget.set(a.target, list);
+      const list2 = byTarget.get(a.target) ?? [];
+      list2.push({ target: a.target, op: a.op, effective_from: a.effective_from, ...a.point === void 0 ? {} : { point: a.point }, by });
+      byTarget.set(a.target, list2);
       targetedDocuments.add(docKey(target));
     }
   }
@@ -17351,14 +17384,14 @@ function namedNotice(citations) {
 }
 
 // src/tools/note-types.ts
-var NOTE_TYPES = ["amendment", "version", "outside_library", "placeholder", "weak_match"];
+var NOTE_TYPES = ["amendment", "version", "outside_library", "placeholder", "weak_match", "historical", "upcoming"];
 var NoteSchema = external_exports.object({
   type: external_exports.enum(NOTE_TYPES),
   text: external_exports.string().describe("Written to be repeated to the user as it stands."),
   applies_to: external_exports.array(external_exports.string()).optional().describe("Official citations of the provisions the note concerns.")
 });
 var notesShape = {
-  notes: external_exports.array(NoteSchema).optional().describe("Caveats the answer must carry: an amendment, a version, an instrument the library lacks, a placeholder, a weak match. Absent when there are none.")
+  notes: external_exports.array(NoteSchema).optional().describe("Caveats the answer must carry: an amendment, a version, an instrument the library lacks, a placeholder, a weak match, text that no longer applies (historical) or does not apply yet (upcoming). Absent when there are none.")
 };
 
 // src/tools/shared.ts
@@ -17515,10 +17548,74 @@ async function officialCitation(reg, sources) {
   const all = sources ?? await adapters.source.list();
   return citationOf(reg, sourceFor(reg, all));
 }
+var MAX_NAMED = 3;
+async function replacementCitations(a, sources) {
+  const found = await Promise.all(replacedByIds(a).map((id) => adapters.regulation.get(id)));
+  return found.flatMap((r) => r === null ? [] : [citationOf(r, sourceFor(r, sources))]);
+}
+async function applicabilityNote(a, subject, label, opts = {}) {
+  if (a === void 0) return void 0;
+  const sources = opts.sources ?? await adapters.source.list();
+  const text = applicabilityText(a, subject, { today: isoDay(opts.now ?? /* @__PURE__ */ new Date()), asOf: opts.asOf, replacedBy: await replacementCitations(a, sources) });
+  return { type: a.status, text, applies_to: [label] };
+}
+async function applicabilityNotesFor(ids, opts = {}) {
+  const sources = await adapters.source.list();
+  const notes = [];
+  for (const id of new Set(ids)) {
+    let note;
+    if (id.startsWith("regulation://")) {
+      const r = await adapters.regulation.get(id);
+      if (r !== null) note = await applicabilityNote(r.applicability, "provision", citationOf(r, sourceFor(r, sources)), { ...opts, sources });
+    } else if (id.startsWith("check://")) {
+      const c = await adapters.check.get(id);
+      if (c !== null) note = await applicabilityNote(c.applicability, "check", c.name, { ...opts, sources });
+    } else if (id.startsWith("test://")) {
+      const t = await adapters.test.get(id);
+      if (t !== null) note = await applicabilityNote(t.applicability, "test", t.name, { ...opts, sources });
+    } else if (id.startsWith("playbook://")) {
+      const p = await adapters.playbook.get(id);
+      if (p !== null) note = await applicabilityNote(p.applicability, "playbook", p.title, { ...opts, sources });
+    }
+    if (note !== void 0) notes.push(note);
+  }
+  return mergeNotes(notes);
+}
+function applicabilityPageNotice(records, labelOf2, now = /* @__PURE__ */ new Date()) {
+  const byId = new Map(records.filter((r) => r.applicability !== void 0).map((r) => [r.id, r]));
+  const today = isoDay(now);
+  return (pageRows) => {
+    const items = { historical: [], upcoming: [] };
+    const seen = /* @__PURE__ */ new Set();
+    for (const row of pageRows) {
+      const id = row.id;
+      const r = typeof id === "string" ? byId.get(id) : void 0;
+      if (r === void 0 || r.applicability === void 0 || seen.has(r.id)) continue;
+      seen.add(r.id);
+      const a = r.applicability;
+      const when = a.status === "historical" ? `${a.until < today ? "ceased" : "ceases"} to apply after ${a.until}` : a.from === void 0 ? "date of application not yet fixed" : a.from > today ? `applies from ${a.from}` : `recorded as applying from ${a.from}`;
+      items[a.status].push({ label: labelOf2(r), said: `${labelOf2(r)} (${when})` });
+    }
+    const notes = [];
+    const say = (kind, one, many, tail2) => {
+      const rows = items[kind];
+      if (rows.length === 0) return;
+      const shown = rows.slice(0, MAX_NAMED).map((x) => x.said).join("; ");
+      const rest = rows.length - MAX_NAMED;
+      notes.push({ type: kind, text: `${rows.length === 1 ? one : many}: ${shown}${rest > 0 ? `; and ${rest} more` : ""}. ${tail2}`, applies_to: rows.map((x) => x.label) });
+    };
+    say("historical", "One result is text that no longer applies", "Some results are text that no longer applies", "Do not present it as the law now in force; open it for the reason and what replaced it.");
+    say("upcoming", "One result is text that is not yet in application", "Some results are text that is not yet in application", "Do not present it as the law now in force; open it for the reason and the date.");
+    return notes;
+  };
+}
 async function provisionNotes(record2, opts = {}) {
   const sources = await adapters.source.list();
   const cite = citationOf(record2, sourceFor(record2, sources));
   const notes = [];
+  const latest = opts.asOf === void 0 ? record2 : await adapters.regulation.get(record2.id) ?? record2;
+  const applies = await applicabilityNote(latest.applicability ?? record2.applicability, "provision", cite, { asOf: opts.asOf, sources });
+  if (applies !== void 0) notes.push(applies);
   if (opts.versionNote !== void 0) notes.push({ type: "version", text: opts.versionNote, applies_to: [cite] });
   const amendment = await pendingNoteFor(record2, opts.asOf);
   if (amendment !== void 0) notes.push({ type: "amendment", text: amendment, applies_to: [cite] });
@@ -17558,9 +17655,28 @@ async function servedPlaybookContext() {
 }
 
 // src/tools/playbook.ts
-async function playbookNotes(pb, ctxSources) {
-  const ctx = ctxSources ?? await servedPlaybookContext();
+async function playbookApplicabilityNotes(pb, ctx, opts = {}) {
   const notes = [];
+  const own = await applicabilityNote(pb.applicability, "playbook", pb.title, { ...opts, sources: ctx.sources });
+  if (own !== void 0) notes.push(own);
+  for (const id of playbookProvisions(pb)) {
+    const reg = ctx.regulations.get(id);
+    if (reg === void 0 || pb.applicability?.status === "historical" && reg.applicability?.status === "historical") continue;
+    const n = await applicabilityNote(reg.applicability, "provision", citationOf(reg, sourceFor(reg, ctx.sources)), { ...opts, sources: ctx.sources });
+    if (n !== void 0) notes.push(n);
+  }
+  const cited = new Set(pb.requirements.flatMap((r) => [...r.checks, ...r.tests]));
+  for (const id of cited) {
+    const entry = id.startsWith("check://") ? ctx.checks?.get(id) : ctx.tests?.get(id);
+    if (entry === void 0) continue;
+    const n = await applicabilityNote(entry.applicability, id.startsWith("check://") ? "check" : "test", entry.name, { ...opts, sources: ctx.sources });
+    if (n !== void 0) notes.push(n);
+  }
+  return mergeNotes(notes);
+}
+async function playbookNotes(pb, ctxSources, opts = {}) {
+  const ctx = ctxSources ?? await servedPlaybookContext();
+  const notes = await playbookApplicabilityNotes(pb, ctx, opts);
   for (const id of playbookProvisions(pb)) {
     const reg = ctx.regulations.get(id);
     if (reg === void 0) continue;
@@ -17579,7 +17695,7 @@ function registerPlaybookTool(server3) {
     "playbook",
     {
       title: "Playbook",
-      description: "A whole playbook for one topic as text: what it rests on (law, EBA guideline, ECB supervisory expectation, each labelled), what has to be shown, methods (market practice is labelled as such), pitfalls, and what the library does not hold. With section (R1, R2, \u2026) one requirement with the full text of its provisions. Ids come from topics and brief.",
+      description: "A whole playbook for one topic as text: what it rests on (law, EBA guideline, ECB supervisory expectation, each labelled), what has to be shown, methods (market practice is labelled as such), pitfalls, and what the library does not hold. With section (R1, R2, \u2026) one requirement with the full text of its provisions. Ids come from topics and brief. A playbook on text that no longer applies, or does not apply yet, says so at the top and in a note: repeat it.",
       inputSchema: {
         id: external_exports.string().describe("A playbook id from topics or brief (the full id or just the name after the scheme)."),
         section: external_exports.string().regex(/^R\d+$/).optional().describe("A requirement handle: R1, R2, \u2026")
@@ -17674,12 +17790,14 @@ function registerBriefTool(server3) {
         parts.push(rendered?.text ?? "");
         const renderedSecond = second === void 0 ? null : renderPlaybook(second.playbook, ctx, { budget: Math.round(total * SECOND_SHARE) });
         if (renderedSecond !== null) parts.push(["## A close second", renderedSecond.text].join("\n"));
-        notes.push(...await playbookNotes(chosen.playbook, ctx));
+        notes.push(...await playbookNotes(chosen.playbook, ctx, { asOf: as_of }));
+        if (second !== void 0) notes.push(...await playbookApplicabilityNotes(second.playbook, ctx, { asOf: as_of }));
         if (as_of !== void 0) {
           notes.push({ type: "version", text: `This playbook is written from the current text of each source. It is not evidence of what applied on ${as_of}; open the provisions with their date to read that text.` });
         }
         if (extra.length > 0) parts.push(["## Also relevant (not in the playbook)", ...lines(extra)].join("\n"));
         const others = routing.neighbours.map((r) => r.playbook).filter((p) => p.id !== second?.playbook.id);
+        notes.push(...await applicabilityNotesFor(others.map((p) => p.id), { asOf: as_of }));
         if (others.length > 0) {
           parts.push(["## Other playbooks", ...others.map((p) => `- ${p.title} (playbook "${slugOf(p.id)}")`)].join("\n"));
         }
@@ -17696,6 +17814,7 @@ function registerBriefTool(server3) {
         else if (best !== void 0 && tokens >= 2 && best * 2 < tokens) notes.push({ type: "weak_match", text: weakMatchNotice(best, tokens) });
       }
       for (const r of extra.slice(0, 3)) notes.push(...(await provisionNotes(r, { asOf: as_of })).filter((n) => n.type === "amendment" || n.type === "placeholder"));
+      notes.push(...await applicabilityNotesFor(extra.map((r) => r.id), { asOf: as_of }));
       const merged = mergeNotes(notes);
       const text = [...parts, notesText(merged)].filter((t) => t !== "").join("\n\n");
       if (text.trim() === "") return miss("Nothing to return for that question.");
@@ -17735,6 +17854,8 @@ function registerCiteTool(server3) {
       let official;
       if (resolution.match !== null) {
         official = await officialCitation(resolution.match);
+        const applies = await applicabilityNote(resolution.match.applicability, "provision", official);
+        if (applies !== void 0) notes.push(applies);
         const amendment = await pendingNoteFor(resolution.match);
         if (amendment !== void 0) notes.push({ type: "amendment", text: amendment, applies_to: [official] });
       }
@@ -17765,7 +17886,7 @@ function registerGetTool(server3) {
     "get",
     {
       title: "Get",
-      description: "Open entries by id: full provisions (verbatim text, commentary), checks, tests, sources. Up to 20 per call. as_of (ISO date) gives a provision's text in force on that date; where the library holds no version for it the current text comes back with a version note and is not evidence of what applied then. Notes also flag a recorded amendment and a pre-adoption placeholder: repeat them with the text. Playbooks are opened with playbook.",
+      description: "Open entries by id: full provisions (verbatim text, commentary), checks, tests, sources. Up to 20 per call. as_of (ISO date) gives a provision's text in force on that date; where the library holds no version for it the current text comes back with a version note and is not evidence of what applied then. Notes also flag text that no longer applies or does not apply yet, a recorded amendment and a pre-adoption placeholder: repeat them with the text. Playbooks are opened with playbook.",
       inputSchema: {
         ids: idsInput,
         as_of: external_exports.string().date().optional().describe("ISO date, e.g. 2019-03-01. Provisions only.")
@@ -17801,11 +17922,17 @@ function registerGetTool(server3) {
         } else if (id.startsWith("check://")) {
           const c = await adapters.check.get(id);
           if (c === null) missing.push({ id, why: await missingWhy(id) });
-          else records.push(c);
+          else {
+            records.push(c);
+            notes.push(...await applicabilityNotesFor([c.id]));
+          }
         } else if (id.startsWith("test://")) {
           const t = await adapters.test.get(id);
           if (t === null) missing.push({ id, why: await missingWhy(id) });
-          else records.push(t);
+          else {
+            records.push(t);
+            notes.push(...await applicabilityNotesFor([t.id]));
+          }
         } else if (id.startsWith("source://")) {
           const s = await adapters.source.get(id);
           if (s === null) missing.push({ id, why: await missingWhy(id) });
@@ -17928,7 +18055,9 @@ function registerRelatedTool(server3) {
           tests: await named("test", tests),
           playbooks: citing.map((p) => ({ id: p.id, title: p.title, requirements: requirementsCiting(p, current.id) }))
         };
-        return ok(withNotes(body, await provisionNotes(current, { asOf: as_of })));
+        const listed = [parent?.id, ...siblings.map((r) => r.id), ...body.cites.map((r) => r.id), ...body.cited_by.map((r) => r.id), ...body.checks.map((r) => r.id), ...body.tests.map((r) => r.id), ...body.playbooks.map((p) => p.id)];
+        const beside = await applicabilityNotesFor(listed.filter((x) => x !== void 0 && x !== current.id));
+        return ok(withNotes(body, mergeNotes([...await provisionNotes(current, { asOf: as_of }), ...beside])));
       }
       if (id.startsWith("check://") || id.startsWith("test://")) {
         const isCheck = id.startsWith("check://");
@@ -17938,19 +18067,21 @@ function registerRelatedTool(server3) {
         const primary = entry.primary_basis;
         const regs = await Promise.all((primary !== void 0 && primary.length > 0 ? primary : basis).slice(0, MAX_LINKS).map((x) => adapters.regulation.get(x)));
         const playbooks = (await adapters.playbook.list()).filter((p) => p.requirements.some((r) => (isCheck ? r.checks : r.tests).includes(id)));
-        return ok({
+        const body = {
           id,
           name: entry.name,
           rests_on: await Promise.all(regs.flatMap((r) => r === null ? [] : [ref(r)])),
           playbooks: playbooks.map((p) => ({ id: p.id, title: p.title }))
-        });
+        };
+        return ok(withNotes(body, await applicabilityNotesFor([id, ...body.rests_on.map((r) => r.id), ...body.playbooks.map((p) => p.id)])));
       }
       if (id.startsWith("playbook://")) {
         const p = await adapters.playbook.get(id);
         if (p === null) return miss(`This library holds no playbook with the id ${id}. topics lists them.`);
         const all = await adapters.playbook.list();
         const titleOf = new Map(all.map((x) => [x.id, x.title]));
-        return ok({ id: p.id, title: p.title, related: p.related.filter((x) => titleOf.has(x)).map((x) => ({ id: x, title: titleOf.get(x) })) });
+        const body = { id: p.id, title: p.title, related: p.related.filter((x) => titleOf.has(x)).map((x) => ({ id: x, title: titleOf.get(x) })) };
+        return ok(withNotes(body, await applicabilityNotesFor([p.id, ...body.related.map((r) => r.id)])));
       }
       return miss(`'${raw}' is not an id this library uses. Pass a regulation://, check://, test:// or playbook:// id (search and brief return them).`);
     }
@@ -17982,7 +18113,8 @@ function registerSearchTool(server3) {
           ...common,
           records: records2,
           fields: checkSearchFields,
-          options: { glossary },
+          options: { glossary, prior: applicabilityPrior },
+          pageNotice: applicabilityPageNotice(records2, (c) => c.name),
           concise: (c, m) => ({ id: c.id, name: c.name, expectation: firstSentence(c.expectation), ...m?.matched.excerpt === void 0 ? {} : { matched_excerpt: m.matched.excerpt } })
         });
       }
@@ -17992,7 +18124,8 @@ function registerSearchTool(server3) {
           ...common,
           records: records2,
           fields: testSearchFields,
-          options: { glossary },
+          options: { glossary, prior: applicabilityPrior },
+          pageNotice: applicabilityPageNotice(records2, (t) => t.name),
           concise: (t, m) => ({ id: t.id, name: t.name, purpose: firstSentence(t.purpose), ...m?.matched.excerpt === void 0 ? {} : { matched_excerpt: m.matched.excerpt } })
         });
       }
@@ -18002,14 +18135,17 @@ function registerSearchTool(server3) {
           ...common,
           records: records2,
           fields: playbookSearchFields,
-          options: { glossary },
+          options: { glossary, prior: applicabilityPrior },
+          pageNotice: applicabilityPageNotice(records2, (p) => p.title),
           concise: (p) => ({ id: p.id, title: p.title, summary: firstSentence(p.summary) })
         });
       }
       const found = await adapters.regulation.search(query);
       const records = document === void 0 ? found : found.filter((r) => r.document_id === document);
       const sources = await adapters.source.list();
-      const pageNotice = await pendingPageNotice(records);
+      const pending = await pendingPageNotice(records);
+      const applies = applicabilityPageNotice(records, (r) => citationOf(r, sourceFor(r, sources)));
+      const pageNotice = (rows) => [...pending(rows), ...applies(rows)];
       return rankedSearchResult({
         ...common,
         records,
@@ -18102,7 +18238,7 @@ function registerTopicsTool(server3) {
       title: "Topics",
       description: "The areas the library covers and the playbook for each topic: id, title and a one-line scope. Use it to see what exists or to pick a playbook by name; for a question, brief finds the playbook itself.",
       inputSchema: {},
-      outputSchema: external_exports.object({ areas: external_exports.array(external_exports.object({ id: external_exports.string(), title: external_exports.string(), playbooks: external_exports.array(external_exports.object({ id: external_exports.string(), title: external_exports.string(), scope: external_exports.string() }).passthrough()) }).passthrough()) }).passthrough(),
+      outputSchema: external_exports.object({ areas: external_exports.array(external_exports.object({ id: external_exports.string(), title: external_exports.string(), playbooks: external_exports.array(external_exports.object({ id: external_exports.string(), title: external_exports.string(), scope: external_exports.string() }).passthrough()) }).passthrough()), ...notesShape }).passthrough(),
       annotations: READ_ONLY_HINTS
     },
     async () => {
@@ -18129,7 +18265,7 @@ function registerTopicsTool(server3) {
         }
         area.playbooks.push({ id: p.id, title: p.title, scope: firstSentence(p.summary) });
       }
-      return ok({ areas });
+      return ok(withNotes({ areas }, await applicabilityNotesFor(areas.flatMap((a) => a.playbooks.map((p) => p.id)))));
     }
   );
 }

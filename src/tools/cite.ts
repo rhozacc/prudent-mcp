@@ -10,7 +10,7 @@ import { z } from "zod";
 
 import { adapters } from "../adapters.ts";
 import { CitationResolutionSchema } from "../schema.ts";
-import { notesShape, officialCitation, withNotes, type Note } from "./notes.ts";
+import { applicabilityNote, notesShape, officialCitation, withNotes, type Note } from "./notes.ts";
 import { pendingNoteFor } from "./pending.ts";
 import { READ_ONLY_HINTS, ok } from "./shared.ts";
 
@@ -34,6 +34,8 @@ export function registerCiteTool(server: McpServer): void {
       let official: string | undefined;
       if (resolution.match !== null) {
         official = await officialCitation(resolution.match);
+        const applies = await applicabilityNote(resolution.match.applicability, "provision", official);
+        if (applies !== undefined) notes.push(applies);
         const amendment = await pendingNoteFor(resolution.match);
         if (amendment !== undefined) notes.push({ type: "amendment", text: amendment, applies_to: [official] });
       }

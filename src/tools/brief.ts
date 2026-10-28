@@ -16,8 +16,8 @@ import { playbookProvisions } from "../referrers.ts";
 import { renderPlaybook } from "../render.ts";
 import type { Regulation } from "../schema.ts";
 import { distinctQueryTokens, rankedSearch, rankingOf, regulationRanking, regulationSearchFields } from "../search.ts";
-import { mergeNotes, notesShape, provisionNotes, type Note } from "./notes.ts";
-import { notesText, playbookNotes, slugOf } from "./playbook.ts";
+import { applicabilityNotesFor, mergeNotes, notesShape, provisionNotes, type Note } from "./notes.ts";
+import { notesText, playbookApplicabilityNotes, playbookNotes, slugOf } from "./playbook.ts";
 import { servedPlaybookContext } from "./playbook-context.ts";
 import { READ_ONLY_HINTS, miss, searchGlossary, weakMatchNotice } from "./shared.ts";
 
@@ -91,12 +91,14 @@ export function registerBriefTool(server: McpServer): void {
         parts.push(rendered?.text ?? "");
         const renderedSecond = second === undefined ? null : renderPlaybook(second.playbook, ctx, { budget: Math.round(total * SECOND_SHARE) });
         if (renderedSecond !== null) parts.push(["## A close second", renderedSecond.text].join("\n"));
-        notes.push(...(await playbookNotes(chosen.playbook, ctx)));
+        notes.push(...(await playbookNotes(chosen.playbook, ctx, { asOf: as_of })));
+        if (second !== undefined) notes.push(...(await playbookApplicabilityNotes(second.playbook, ctx, { asOf: as_of })));
         if (as_of !== undefined) {
           notes.push({ type: "version", text: `This playbook is written from the current text of each source. It is not evidence of what applied on ${as_of}; open the provisions with their date to read that text.` });
         }
         if (extra.length > 0) parts.push(["## Also relevant (not in the playbook)", ...lines(extra)].join("\n"));
         const others = routing.neighbours.map((r) => r.playbook).filter((p) => p.id !== second?.playbook.id);
+        notes.push(...(await applicabilityNotesFor(others.map((p) => p.id), { asOf: as_of })));
         if (others.length > 0) {
           parts.push(["## Other playbooks", ...others.map((p) => `- ${p.title} (playbook "${slugOf(p.id)}")`)].join("\n"));
         }
@@ -116,6 +118,8 @@ export function registerBriefTool(server: McpServer): void {
       }
 
       for (const r of extra.slice(0, 3)) notes.push(...(await provisionNotes(r, { asOf: as_of })).filter((n) => n.type === "amendment" || n.type === "placeholder"));
+      // Every provision listed beside the answer that no longer applies or does not apply yet, not only the first few.
+      notes.push(...(await applicabilityNotesFor(extra.map((r) => r.id), { asOf: as_of })));
       const merged = mergeNotes(notes);
       const text = [...parts, notesText(merged)].filter((t) => t !== "").join("\n\n");
 

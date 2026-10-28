@@ -42,6 +42,12 @@ export const ROUTING = {
   margin: 0.12,
   /** A playbook within this fraction of the leader's score is offered as a neighbour. */
   neighbour: 0.5,
+  /**
+   * What a playbook on repealed text (`applicability: historical`) has its score multiplied by, so it is routed only when
+   * it is clearly the best match: current law wins a tie, and a question that is about the repealed regime still finds it.
+   * Playbooks that declare nothing are untouched, which is why the bank tuning above does not move.
+   */
+  historicalPrior: 0.75,
 } as const;
 
 export interface Route {
@@ -109,7 +115,8 @@ export function routePlaybooks(args: {
     .map((playbook) => {
       const text = textOf.get(playbook.id) ?? 0;
       const v = Math.min(1, (vote.get(playbook.id) ?? 0) / yardstick);
-      return { playbook, text, vote: v, score: R.textWeight * text + (1 - R.textWeight) * v };
+      const prior = playbook.applicability?.status === "historical" ? R.historicalPrior : 1;
+      return { playbook, text, vote: v, score: (R.textWeight * text + (1 - R.textWeight) * v) * prior };
     })
     .filter((r) => r.score > 0)
     .sort((a, b) => b.score - a.score || (a.playbook.id < b.playbook.id ? -1 : 1));
