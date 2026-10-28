@@ -70,7 +70,7 @@ describe("the seeded records", () => {
   });
 
   it("the source list holds the seeded registry, filters by status and chains supersession", async () => {
-    expect((await adapters.source.list()).length).toBe(6);
+    expect((await adapters.source.list()).length).toBe(7);
     expect((await adapters.source.list({ status: "pending" })).map((s) => s.id)).toEqual(["source://eba/cp-2025-14"]);
     const old = await adapters.source.get("source://eba/cp-2016-21");
     expect(old?.superseded_by).toBe("source://eba/gl-2017-16");
@@ -81,7 +81,7 @@ describe("the seeded records", () => {
 
   it("the library info counts sources and computes stale ones", async () => {
     const info = await adapters.meta.info();
-    expect(info.counts.source).toBe(6);
+    expect(info.counts.source).toBe(7);
     expect(info.stale_sources).toEqual(["source://eba/gl-2017-16"]);
   });
 });

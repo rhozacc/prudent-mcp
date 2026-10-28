@@ -22,6 +22,7 @@ import type {
   SourceAdapter,
   TestAdapter,
 } from "../src/adapters.ts";
+import { applicabilityPrior } from "../src/applicability.ts";
 import { resolveCitationDetailed } from "../src/file-adapter.ts";
 import { computeHoldings } from "../src/holdings.ts";
 import { pendingChangeSummaries } from "../src/pending.ts";
@@ -182,6 +183,53 @@ const REGULATIONS: Record<RegulationId, Regulation> = {
     amends: [{ target: "regulation://crr/178/1/a", op: "replace", effective_from: daysAgo(-60) }],
     children: [],
   },
+  // Applicability (eval I20). A small invented regime with a repealed rule, the rule that replaced it and a rule not yet
+  // in application, so every surface that serves text that does not apply (yet) has something to say it about. The
+  // wording is invented for the demo and describes no real instrument.
+  "regulation://demo-regime/legacy-charge": {
+    id: "regulation://demo-regime/legacy-charge",
+    framework: "demo",
+    document_id: "demo-regime",
+    document_version: "2023-01-01",
+    citation: "Demo regime Article 71",
+    text:
+      "Institutions that use the legacy internal approach shall hold own funds for model risk equal to the legacy " +
+      "charge, calculated from their own loss history over the preceding ten years.",
+    commentary: [],
+    kind: "article",
+    applicability: {
+      status: "historical",
+      until: "2024-12-31",
+      reason: "The legacy internal approach was abolished and institutions now use the standardised approach.",
+      replaced_by: ["regulation://demo-regime/standardised-charge"],
+    },
+    children: [],
+  },
+  "regulation://demo-regime/standardised-charge": {
+    id: "regulation://demo-regime/standardised-charge",
+    framework: "demo",
+    document_id: "demo-regime",
+    document_version: "2025-01-01",
+    citation: "Demo regime Article 72",
+    text:
+      "Institutions shall hold own funds for model risk equal to the standardised charge, calculated from their " +
+      "business indicator.",
+    commentary: [],
+    kind: "article",
+    children: [],
+  },
+  "regulation://demo-regime/revised-reporting": {
+    id: "regulation://demo-regime/revised-reporting",
+    framework: "demo",
+    document_id: "demo-regime",
+    document_version: "2025-01-01",
+    citation: "Demo regime Article 73",
+    text: "Institutions shall report their model risk exposure to the supervisor every quarter in the revised template.",
+    commentary: [],
+    kind: "article",
+    applicability: { status: "upcoming", from: "2099-01-01", reason: "The application of the revised reporting regime has been postponed." },
+    children: [],
+  },
 };
 
 // Historical regulation versions, ordered by effective_from ascending.
@@ -293,6 +341,29 @@ const CHECKS: Record<CheckId, Check> = {
     ],
     last_updated: "2024-09-01",
   },
+  "check://demo-regime/legacy-charge-computed": {
+    id: "check://demo-regime/legacy-charge-computed",
+    name: "Legacy model risk charge computed from ten years of losses",
+    derived_from: ["regulation://demo-regime/legacy-charge"],
+    expectation: "The legacy model risk charge is computed from the institution's own loss history over the preceding ten years.",
+    expected_evidence: ["ten-year loss history by year", "the computation of the legacy charge"],
+    last_updated: "2023-01-01",
+    applicability: {
+      status: "historical",
+      until: "2024-12-31",
+      reason: "The legacy internal approach was abolished and institutions now use the standardised approach.",
+      replaced_by: ["regulation://demo-regime/standardised-charge"],
+    },
+  },
+  "check://demo-regime/revised-reporting-quarterly": {
+    id: "check://demo-regime/revised-reporting-quarterly",
+    name: "Model risk exposure reported quarterly in the revised template",
+    derived_from: ["regulation://demo-regime/revised-reporting"],
+    expectation: "Model risk exposure is reported to the supervisor every quarter in the revised template.",
+    expected_evidence: ["the quarterly submissions in the revised template"],
+    last_updated: "2025-01-01",
+    applicability: { status: "upcoming", from: "2099-01-01", reason: "The application of the revised reporting regime has been postponed." },
+  },
   "check://default-definition/90dpd": {
     id: "check://default-definition/90dpd",
     name: "Default definition includes 90 DPD backstop",
@@ -373,6 +444,21 @@ const SOURCES: Record<SourceId, Source> = {
     coverage: "full",
     pending_changes: [],
     verified: daysAgo(3),
+    milestones: [],
+  },
+  "source://demo/demo-regime": {
+    id: "source://demo/demo-regime",
+    title: "Demo regime (invented)",
+    framework: "demo",
+    document_id: "demo-regime",
+    doc_type: "regulation",
+    status: "current",
+    published: "2022-01-01",
+    effective_from: "2023-01-01",
+    verified: daysAgo(2),
+    coverage: "full",
+    citation_style: { kind: "eu-regulation", short_name: "Demo regime" },
+    pending_changes: [],
     milestones: [],
   },
   "source://eba/gl-2017-16": {
@@ -462,7 +548,7 @@ const resolveRegulationAsOf = async (id: RegulationId, asOf: string): Promise<As
 
 const inMemoryRegulation: RegulationAdapter = {
   async search(query) {
-    return rankedSearch(Object.values(REGULATIONS), query, regulationSearchFields(query)).map(
+    return rankedSearch(Object.values(REGULATIONS), query, regulationSearchFields(query), undefined, { prior: applicabilityPrior }).map(
       (m) => m.record,
     );
   },
@@ -478,7 +564,7 @@ const inMemoryRegulation: RegulationAdapter = {
 
 const inMemoryTest: TestAdapter = {
   async search(query) {
-    return rankedSearch(Object.values(TESTS), query, testSearchFields).map((m) => m.record);
+    return rankedSearch(Object.values(TESTS), query, testSearchFields, undefined, { prior: applicabilityPrior }).map((m) => m.record);
   },
   async get(id) {
     return TESTS[id] ?? null;
@@ -490,7 +576,7 @@ const inMemoryTest: TestAdapter = {
 
 const inMemoryCheck: CheckAdapter = {
   async search(query) {
-    return rankedSearch(Object.values(CHECKS), query, checkSearchFields).map((m) => m.record);
+    return rankedSearch(Object.values(CHECKS), query, checkSearchFields, undefined, { prior: applicabilityPrior }).map((m) => m.record);
   },
   async get(id) {
     return CHECKS[id] ?? null;
@@ -502,7 +588,7 @@ const inMemoryCheck: CheckAdapter = {
 
 const inMemoryPlaybook: PlaybookAdapter = {
   async search(query) {
-    return rankedSearch(Object.values(DEMO_PLAYBOOKS), query, playbookSearchFields).map((m) => m.record);
+    return rankedSearch(Object.values(DEMO_PLAYBOOKS), query, playbookSearchFields, undefined, { prior: applicabilityPrior }).map((m) => m.record);
   },
   async get(id) {
     return DEMO_PLAYBOOKS[id] ?? null;
@@ -595,6 +681,50 @@ export const DEMO_TOPICS: Topics = {
       ],
     },
   ],
+};
+
+// A playbook on the repealed rule above, so `brief`, `playbook` and `topics` have a declaration to carry (eval I20).
+const LEGACY_PLAYBOOK: Playbook = {
+  id: "playbook://legacy-model-risk-charge",
+  title: "Legacy model risk charge",
+  area: "capital",
+  summary:
+    "Under the legacy internal approach an institution held own funds for model risk equal to a charge calculated from its own " +
+    "loss history over the preceding ten years. That approach has been abolished; this playbook is kept to answer what it required.",
+  questions: ["What did the legacy internal approach require for the model risk charge?", "How was the legacy model risk charge calculated?"],
+  basis: [
+    {
+      citation: "Demo regime Article 71",
+      force: "law",
+      role: "The legacy charge is calculated from the institution's own loss history over the preceding ten years.",
+      provisions: [{ id: "regulation://demo-regime/legacy-charge", quote: "calculated from their own loss history over the preceding ten years" }],
+    },
+  ],
+  requirements: [
+    {
+      id: "R1",
+      title: "Calculate the legacy charge from ten years of losses",
+      statement:
+        "Calculate the legacy model risk charge from the institution's own loss history over the preceding ten years, and keep " +
+        "the loss history and the calculation.",
+      provisions: [{ id: "regulation://demo-regime/legacy-charge" }],
+      evidence: ["the ten-year loss history", "the calculation of the legacy charge"],
+      checks: ["check://demo-regime/legacy-charge-computed"],
+      tests: [],
+    },
+  ],
+  methods: [],
+  pitfalls: [],
+  related: [],
+  outside_library: [],
+  excluded: [],
+  applicability: {
+    status: "historical",
+    until: "2024-12-31",
+    reason: "The legacy internal approach was abolished and institutions now use the standardised approach.",
+    replaced_by: ["regulation://demo-regime/standardised-charge"],
+  },
+  provenance: { status: "approved", compiled_at: "2026-10-01T00:00:00Z", inputs_sha: "1".repeat(64), approved_by: "demo", approved_at: "2026-10-02" },
 };
 
 export const DEMO_PLAYBOOKS: Record<PlaybookId, Playbook> = {
@@ -692,7 +822,11 @@ export const DEMO_PLAYBOOKS: Record<PlaybookId, Playbook> = {
       approved_at: "2026-10-02",
     },
   },
+  "playbook://legacy-model-risk-charge": LEGACY_PLAYBOOK,
 };
+
+/** The demo's seeded provisions, checks and tests, for the evals to read which of them declare applicability. */
+export const DEMO_RECORDS = { regulations: Object.values(REGULATIONS), checks: Object.values(CHECKS), tests: Object.values(TESTS) };
 
 /** What the renderer and verifier read, over the demo's seed. */
 export const demoPlaybookContext = (): PlaybookContext =>

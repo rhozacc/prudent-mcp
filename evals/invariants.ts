@@ -2434,6 +2434,193 @@ export async function pendingChangesAreNeverSilent(s: Session): Promise<Invarian
 }
 
 // ============================================================================
+// I20 - applicability is never silent
+// ============================================================================
+
+/**
+ * A corpus may declare that a provision, check, test or playbook no longer applies (`historical`, with the last day it
+ * applied) or does not apply yet (`upcoming`). A repealed provision reads exactly like a current one, and a text about a
+ * postponed regime reads like one in force, so the belief at stake is "what I was handed is the law as it stands". Every
+ * tool that serves such an entry must say so, in a note of the matching type, with the date (the day it ceased to apply,
+ * or the day it starts, or that the date is not yet fixed):
+ *
+ * - a provision: `get`, `related`, `cite` when it resolves to it, and a search page that returns it (naming it);
+ * - a check or test: `get`, `related`, and a search page of its scope;
+ * - a playbook: `playbook` (a note, and the banner that opens its text), `related`, `topics`, a search page of its scope,
+ *   and `brief` when it routes there.
+ *
+ * Under `as_of` a historical provision on or before the day it ceased to apply is told "applied on that date", never "no
+ * longer applies" as though the date asked about were today; after it, that it did not apply then. The converse is
+ * fatal too: an entry that declares nothing carries no such note on its own account (a warning that is always present
+ * is not read, and a note on a current provision says something false about it).
+ *
+ * Which entries declare it is structural and no reply states it in aggregate, so it is read from the corpus file when the
+ * session has one and from the seeded demo otherwise (ids and dates only, never content). Applicable only when some entry
+ * declares applicability.
+ */
+export async function applicabilityIsNeverSilent(s: Session): Promise<InvariantResult> {
+  const id = "I20";
+  const title = "Applicability is never silent";
+  const findings: Finding[] = [];
+
+  type Declared = { status: "historical"; until: string } | { status: "upcoming"; from?: string };
+  type Entry = { id: string; applicability?: Declared; name?: string; title?: string; citation?: string; questions?: string[] };
+  let regulation: Entry[];
+  let checks: Entry[];
+  let tests: Entry[];
+  let playbooks: Entry[];
+  if (s.corpusFile !== undefined) {
+    const file = loadCorpusFile(s.corpusFile);
+    regulation = file.regulation as Entry[];
+    checks = file.checks as Entry[];
+    tests = file.tests as Entry[];
+    playbooks = file.playbooks as Entry[];
+  } else {
+    const demo = await import("../examples/inmemory-demo.ts");
+    regulation = demo.DEMO_RECORDS.regulations as Entry[];
+    checks = demo.DEMO_RECORDS.checks as Entry[];
+    tests = demo.DEMO_RECORDS.tests as Entry[];
+    playbooks = Object.values(demo.DEMO_PLAYBOOKS) as Entry[];
+  }
+  const declaring = (xs: Entry[]): Entry[] => xs.filter((x) => x.applicability !== undefined).slice(0, 5);
+  const plain = (xs: Entry[]): Entry[] => xs.filter((x) => x.applicability === undefined).slice(0, 2);
+  const carriers = { regulation: declaring(regulation), check: declaring(checks), test: declaring(tests), playbook: declaring(playbooks) };
+  if (carriers.regulation.length + carriers.check.length + carriers.test.length + carriers.playbook.length === 0) return { id, title, applicable: false, findings };
+
+  const bodyOf = (t: CallTrace): unknown => t.json ?? t.structured;
+  const kinds = ["historical", "upcoming"];
+  const dated = (e: Entry): { type: string; says: (text: string) => boolean; want: string } => {
+    const a = e.applicability as Declared;
+    return a.status === "historical"
+      ? { type: "historical", says: (t) => t.includes(a.until), want: `the date ${a.until}` }
+      : { type: "upcoming", says: (t) => (a.from === undefined ? /not yet fixed/i.test(t) : t.includes(a.from)), want: a.from === undefined ? "that the date is not yet fixed" : `the date ${a.from}` };
+  };
+  const noteOfType = (t: CallTrace, type: string): Note[] => notesOf(bodyOf(t)).filter((n) => n.type === type && typeof n.text === "string");
+  let bound = 0;
+
+  /** The tool must carry a note of the entry's type, naming `label` when one is given, and giving the date. */
+  const mustSay = (e: Entry, tool: string, t: CallTrace, label?: string): void => {
+    const want = dated(e);
+    const notes = noteOfType(t, want.type).filter((n) => label === undefined || (n.applies_to ?? []).some((x) => x === label || x.includes(label) || label.includes(x)));
+    if (t.isError || notes.length === 0) {
+      findings.push({
+        id: `I20/${tool}`,
+        severity: "fatal",
+        summary: `${tool} served ${e.id}, which declares it is ${want.type}, and carried no ${want.type} note${label === undefined ? "" : ` naming it`}.`,
+        evidence: [`id ${e.id}`, `isError ${String(t.isError)}`, `notes: ${notesOf(bodyOf(t)).map((n) => n.type).join(", ") || "(none)"}`],
+      });
+      return;
+    }
+    if (!notes.some((n) => want.says(n.text as string)) && tool !== "search" && tool !== "topics") {
+      findings.push({
+        id: `I20/${tool}/note`,
+        severity: "fatal",
+        summary: `${tool}'s ${want.type} note does not give ${want.want}.`,
+        evidence: [`id ${e.id}`, `note: ${(notes[0]!.text as string).slice(0, 240)}`],
+      });
+    }
+  };
+
+  // Provisions.
+  for (const e of carriers.regulation) {
+    bound++;
+    const got = await s.call("get", { ids: e.id });
+    mustSay(e, "get", got);
+    const record = firstRecord(got.json);
+    const citation = typeof record?.["citation"] === "string" ? (record["citation"] as string) : undefined;
+    mustSay(e, "related", await s.call("related", { id: e.id }));
+    if (citation !== undefined) {
+      const cite = await s.call("cite", { text: citation });
+      if (asObject(asObject(cite.json)?.["match"])?.["id"] === e.id) mustSay(e, "cite", cite);
+      const page = await s.call("search", { query: citation, limit: 100 });
+      const row = searchRows(page.json).find((r) => r.id === e.id);
+      if (row !== undefined) mustSay(e, "search", page, typeof row["citation"] === "string" ? (row["citation"] as string) : undefined);
+    }
+    const a = e.applicability as Declared;
+    if (a.status === "historical") {
+      // The day it last applied: it applied then, and a caller who asks about that day is not told it no longer applies.
+      const on = await s.call("get", { ids: e.id, as_of: a.until });
+      if (!on.isError && firstRecord(on.json) !== null) {
+        const note = noteOfType(on, "historical").map((n) => n.text as string).join(" ");
+        if (!note.includes(a.until) || /no longer applies/i.test(note)) {
+          findings.push({ id: "I20/get/as_of", severity: "fatal", summary: "get under an as_of on the last day a provision applied did not say that it applied on that date (or said it no longer applies, as though the date were today).", evidence: [`id ${e.id}`, `as_of ${a.until}`, `note: ${note.slice(0, 240) || "(none)"}`] });
+        }
+      }
+      const after = new Date(Date.parse(`${a.until}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+      const later = await s.call("get", { ids: e.id, as_of: after });
+      if (!later.isError && firstRecord(later.json) !== null) {
+        const note = noteOfType(later, "historical").map((n) => n.text as string).join(" ");
+        if (!note.includes(after) || !/did not apply/i.test(note)) {
+          findings.push({ id: "I20/get/as_of", severity: "fatal", summary: "get under an as_of after the day a provision ceased to apply did not say that it did not apply on that date.", evidence: [`id ${e.id}`, `as_of ${after}`, `note: ${note.slice(0, 240) || "(none)"}`] });
+        }
+      }
+    }
+  }
+
+  // Checks and tests.
+  for (const [scope, list] of [["checks", carriers.check], ["tests", carriers.test]] as const) {
+    for (const e of list) {
+      bound++;
+      mustSay(e, "get", await s.call("get", { ids: e.id }));
+      mustSay(e, "related", await s.call("related", { id: e.id }));
+      const name = e.name;
+      if (name !== undefined) {
+        const page = await s.call("search", { query: name, scope, limit: 100 });
+        if (searchRows(page.json).some((r) => r.id === e.id)) mustSay(e, "search", page, name);
+      }
+    }
+  }
+
+  // Playbooks.
+  if (carriers.playbook.length > 0) {
+    const listed = await s.call("topics", {});
+    for (const e of carriers.playbook) {
+      bound++;
+      const shown = await s.call("playbook", { id: e.id });
+      mustSay(e, "playbook", shown, e.title);
+      const text = typeof plainRecord(bodyOf(shown))?.["text"] === "string" ? (plainRecord(bodyOf(shown))?.["text"] as string) : "";
+      if (!shown.isError && !text.startsWith("> ")) {
+        findings.push({ id: "I20/playbook/banner", severity: "fatal", summary: "playbook rendered an entry that declares it does not apply (yet) without the banner that opens its text.", evidence: [`id ${e.id}`, `first line: ${text.split("\n")[0]?.slice(0, 160) ?? "(none)"}`] });
+      }
+      mustSay(e, "related", await s.call("related", { id: e.id }));
+      mustSay(e, "topics", listed, e.title);
+      if (e.title !== undefined) {
+        const page = await s.call("search", { query: e.title, scope: "playbooks", limit: 100 });
+        if (searchRows(page.json).some((r) => r.id === e.id)) mustSay(e, "search", page, e.title);
+      }
+      const question = e.questions?.[0];
+      if (question !== undefined) {
+        const routed = await s.call("brief", { question, budget: "short" });
+        const chosen = plainRecord(plainRecord(bodyOf(routed))?.["playbook"]);
+        const second = plainRecord(plainRecord(bodyOf(routed))?.["close_second"]);
+        if (chosen?.["id"] === e.id || second?.["id"] === e.id) mustSay(e, "brief", routed, e.title);
+      }
+    }
+  }
+
+  // The converse: an entry that declares nothing carries no such note on its own account.
+  for (const e of plain(regulation)) {
+    const got = await s.call("get", { ids: e.id });
+    bound++;
+    const stray = kinds.flatMap((k) => noteOfType(got, k));
+    if (!got.isError && stray.length > 0) {
+      findings.push({ id: "I20/false-flag", severity: "fatal", summary: "get carried an applicability note on a provision that declares nothing: it says something false of a current provision.", evidence: [`id ${e.id}`, `note: ${(stray[0]!.text as string).slice(0, 200)}`] });
+    }
+  }
+  for (const e of plain(playbooks)) {
+    const shown = await s.call("playbook", { id: e.id });
+    bound++;
+    const stray = kinds.flatMap((k) => noteOfType(shown, k)).filter((n) => (n.applies_to ?? []).includes(e.title ?? "\u0000"));
+    const text = typeof plainRecord(bodyOf(shown))?.["text"] === "string" ? (plainRecord(bodyOf(shown))?.["text"] as string) : "";
+    if (!shown.isError && (stray.length > 0 || text.startsWith("> "))) {
+      findings.push({ id: "I20/false-flag", severity: "fatal", summary: "playbook carried an applicability note or banner on a playbook that declares nothing.", evidence: [`id ${e.id}`] });
+    }
+  }
+
+  return { id, title, applicable: bound > 0, findings };
+}
+
+// ============================================================================
 // I17 — the server's own words are domain words
 // ============================================================================
 
@@ -2651,6 +2838,7 @@ export const ALL = [
   weakBestMatchIsDeclared,
   placeholdersAreMarked,
   pendingChangesAreNeverSilent,
+  applicabilityIsNeverSilent,
   serverLanguageIsClean,
   servedPlaybooksVerify,
   playbooksRouteToThemselves,
