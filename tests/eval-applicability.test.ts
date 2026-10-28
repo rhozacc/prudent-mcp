@@ -146,4 +146,61 @@ describe("eval I20 on a synthetic corpus", () => {
     );
     expect(ids).toContain("I20/false-flag");
   });
+
+  const rewriteNotes = (body: Record<string, unknown>, f: (n: Record<string, unknown>) => Record<string, unknown>) => ({ ...body, notes: ((body["notes"] ?? []) as Array<Record<string, unknown>>).map(f) });
+
+  it("fails a note that names a different entry than the one served", async () => {
+    const ids = await failing("other-entry", (t, _a, body) => (t === "get" ? rewriteNotes(body, (n) => ({ ...n, applies_to: ["Something Else"] })) : body));
+    expect(ids).toContain("I20/get");
+  });
+
+  it("fails a note whose text does not say which entry it concerns", async () => {
+    const ids = await failing("anonymous", (t, _a, body) =>
+      t === "related" ? rewriteNotes(body, (n) => ({ ...n, text: "This text no longer applies: it ceased to apply after 2024-12-31. Reason: x." })) : body,
+    );
+    expect(ids).toContain("I20/related/named");
+  });
+
+  it("fails a search page or topics note that leaves out the date", async () => {
+    const dateless = (tool: string) =>
+      failing(`dateless-${tool}`, (t, _a, body) =>
+        t === tool ? rewriteNotes(body, (n) => (n["type"] === "historical" || n["type"] === "upcoming" ? { ...n, text: `${(n["applies_to"] as string[]).join("; ")}: does not apply.` } : n)) : body,
+      );
+    expect(await dateless("search")).toContain("I20/search/note");
+    expect(await dateless("topics")).toContain("I20/topics/note");
+  });
+
+  it("fails a server that says an upcoming provision applied on a date, or leaves the date out", async () => {
+    for (const text of ["This text applied on 2098-12-31, the date asked about.", "This text is not yet in application."]) {
+      const ids = await failing("as-of-upcoming", (t, a, body) => (t === "get" && a["as_of"] !== undefined && a["ids"] === "regulation://acme/soon" ? rewriteNotes(body, (n) => ({ ...n, text })) : body));
+      expect(ids).toContain("I20/get/as_of");
+    }
+  });
+
+  it("fails a server that tells a caller a repealed provision applied on a date: the declaration does not say when it started", async () => {
+    const ids = await failing("applied-on", (t, a, body) =>
+      t === "get" && a["as_of"] === "2024-12-31" ? rewriteNotes(body, (n) => ({ ...n, text: "Acme Article 1 applied on 2024-12-31, the date asked about, but it has since ceased to apply." })) : body,
+    );
+    expect(ids).toContain("I20/get/as_of");
+  });
+
+  it("probes every entry of a kind up to the cap, not the first few", async () => {
+    const many = Array.from({ length: 12 }, (_v, i) => reg(`bulk-${i}`, `Acme Bulk ${i}`, { applicability: HIST }));
+    const s = await open("many.json", { ...base, regulation: [...base.regulation, ...many] });
+    try {
+      let silentOn = "";
+      const wrapped = tampered(s, (t, a, body) => {
+        if (t === "get" && a["ids"] === "regulation://acme/bulk-11") {
+          silentOn = String(a["ids"]);
+          return withoutNotes(body, ["historical"]);
+        }
+        return body;
+      });
+      const r = await applicabilityIsNeverSilent(wrapped);
+      expect(silentOn).toBe("regulation://acme/bulk-11");
+      expect(fatalIds(r)).toContain("I20/get");
+    } finally {
+      await s.close();
+    }
+  });
 });

@@ -40,10 +40,21 @@ interface Grammar {
   was: string;
 }
 
-const grammar = (subject: ApplicabilitySubject): Grammar =>
-  subject === "playbook"
-    ? { subject: "The requirements in this playbook", applies: "apply", it: "they", is: "are", was: "were" }
-    : { subject: subject === "provision" ? "This text" : subject === "check" ? "This check" : "This test", applies: "applies", it: "it", is: "is", was: "was" };
+/** A name in a note is quoted: somebody else's words (a title, a check's name), and exempt from the language rule. */
+const quoted = (name: string): string => `“${name}”`;
+
+/**
+ * The grammatical subject of a sentence. With a `label` the sentence names what it is about (a citation, a check's name,
+ * a playbook's title): in a list of results a note that says "this text" beside a current entry does not say which entry
+ * it means, and `applies_to` is not read by a person.
+ */
+const grammar = (subject: ApplicabilitySubject, label: string | undefined): Grammar => {
+  if (subject === "playbook") {
+    return { subject: label === undefined ? "The requirements in this playbook" : `The requirements in the playbook ${quoted(label)}`, applies: "apply", it: "they", is: "are", was: "were" };
+  }
+  const named = label === undefined ? undefined : subject === "provision" ? label : `The ${subject} ${quoted(label)}`;
+  return { subject: named ?? (subject === "provision" ? "This text" : subject === "check" ? "This check" : "This test"), applies: "applies", it: "it", is: "is", was: "was" };
+};
 
 /** The corpus's reason as a sentence of its own. */
 const reasonSentence = (reason: string): string => {
@@ -51,57 +62,74 @@ const reasonSentence = (reason: string): string => {
   return /[.!?]$/.test(r) ? r : `${r}.`;
 };
 
+/** A subject placed after "On <date>, …": "This text" and "The check …" lose their capital, a citation keeps its own. */
+const midSentence = (s: string): string => (/^(This|The) /.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s);
+
+const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+
 export interface ApplicabilityWords {
   /** The date `today` is read against, ISO. */
   today: string;
-  /** The past date the caller asked about (`as_of`), when they did. */
+  /**
+   * The past date the caller asked about (`as_of`), when they did AND this library holds a version of the text for it.
+   * Leave it out when no version existed then: the sentence then says what the declaration says about now and claims
+   * nothing about that date (the declaration records when text stopped applying, never when it started).
+   */
   asOf?: string | undefined;
   /** What the declaration names as the replacement, as official citations. */
   replacedBy?: readonly string[] | undefined;
+  /** What the sentence is about, by citation, name or title. */
+  label?: string | undefined;
+  /** "(in 17 days)" beside a future date. Off for a rendered playbook, whose text must not change from one day to the next. */
+  relative?: boolean | undefined;
 }
 
-const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 const list = (xs: readonly string[]): string => xs.join("; ");
 
 /**
  * What a declaration says about the text in front of the caller.
  *
- * - historical, past `until`: no longer applies, since the day after `until`; under an `as_of` on or before `until` it
- *   applied then and has since ceased to, and after `until` it did not apply then.
+ * - historical, past `until`: no longer applies, since the day after `until`. Under an `as_of` on or before `until` the
+ *   sentence says only what the declaration supports, that on that date the text had not yet ceased to apply and that it
+ *   ceased after `until`: the declaration does not say when the text STARTED, so "it applied on that date" would be a
+ *   claim about a date that may precede the text. After `until`, it did not apply then.
  * - historical, `until` not yet reached: still applies, and is recorded as ceasing to. Saying "no longer applies" of
  *   text that still applies would be wrong, which is why `today` is an input and not an assumption.
  * - upcoming with a future `from`: does not apply yet, from that date; with no date, the date is not yet fixed; with a
  *   `from` that has passed, the declaration is behind and the sentence says it cannot say whether it now applies.
  */
 export function applicabilityText(a: Applicability, subject: ApplicabilitySubject, words: ApplicabilityWords): string {
-  const g = grammar(subject);
+  const g = grammar(subject, words.label);
   const { today, asOf } = words;
   const replaced = words.replacedBy ?? [];
+  const reason = `Reason: ${reasonSentence(a.reason)}`;
   if (a.status === "historical") {
     const over = a.until < today;
+    const ceased = over ? `${g.it} ceased to apply after ${a.until}` : `${g.it} ${g.is} recorded as ceasing to apply after ${a.until}`;
     const lead =
       asOf === undefined
         ? over
-          ? `${g.subject} no longer ${g.applies}: ${g.it} ceased to apply after ${a.until}.`
+          ? `${g.subject} no longer ${g.applies}: ${ceased}.`
           : `${g.subject} ${g.is} recorded as ceasing to apply after ${a.until}.`
         : asOf <= a.until
-          ? `${g.subject} applied on ${asOf}, the date asked about, ${over ? `but ${g.it} has since ceased to apply: ${g.it} applied until ${a.until}` : `and ${g.it} ${g.is} recorded as ceasing to apply after ${a.until}`}.`
+          ? `On ${asOf}, the date asked about, ${midSentence(g.subject)} had not yet ceased to apply; ${ceased}.`
           : `${g.subject} did not apply on ${asOf}, the date asked about: ${g.it} ceased to apply after ${a.until}.`;
     const tail = replaced.length === 0 ? "" : ` ${cap(g.it)} ${over ? g.was : `${g.is} to be`} replaced by ${list(replaced)}.`;
-    return `${lead} Reason: ${reasonSentence(a.reason)}${tail}`;
+    return `${lead} ${reason}${tail}`;
   }
   const notYet = asOf !== undefined && (a.from === undefined || asOf < a.from) ? ` ${cap(g.it)} did not apply on ${asOf}, the date asked about.` : "";
-  if (a.from === undefined) return `${g.subject} ${g.is} not yet in application: the date from which ${g.it} ${g.applies} is not yet fixed.${notYet} Reason: ${reasonSentence(a.reason)}`;
-  if (a.from > today) return `${g.subject} ${g.is} not yet in application: ${g.it} ${g.applies} from ${a.from}${whenPhrase(today, a.from)}.${notYet} Reason: ${reasonSentence(a.reason)}`;
-  return `${g.subject} ${g.is} recorded as applying from ${a.from}, a date that has passed; whether ${g.it} now ${g.applies} is not confirmed here. Reason: ${reasonSentence(a.reason)}`;
+  if (a.from === undefined) return `${g.subject} ${g.is} not yet in application: the date from which ${g.it} ${g.applies} is not yet fixed.${notYet} ${reason}`;
+  if (a.from > today) return `${g.subject} ${g.is} not yet in application: ${g.it} ${g.applies} from ${a.from}${words.relative === false ? "" : whenPhrase(today, a.from)}.${notYet} ${reason}`;
+  return `${g.subject} ${g.is} recorded as applying from ${a.from}, a date that has passed; whether ${g.it} now ${g.applies} is not confirmed here.${notYet} ${reason}`;
 }
 
 /**
  * The one-line banner at the top of a rendered playbook: the same declaration, as a quoted line a reader sees before
- * the summary. No `as_of`: a rendered playbook is written from current text and says what it is today.
+ * the summary. No `as_of` and no "(in N days)": a rendered playbook is written from current text, and its bytes must
+ * not change from one day to the next (the date only decides whether `until` has passed).
  */
-export function applicabilityBanner(a: Applicability, words: Omit<ApplicabilityWords, "asOf">): string {
-  return `> ${applicabilityText(a, "playbook", words).replace(/\s+/g, " ")}`;
+export function applicabilityBanner(a: Applicability, words: Pick<ApplicabilityWords, "today" | "replacedBy">): string {
+  return `> ${applicabilityText(a, "playbook", { ...words, relative: false }).replace(/\s+/g, " ")}`;
 }
 
 /** `regulation://` ids a declaration names as the replacement. */

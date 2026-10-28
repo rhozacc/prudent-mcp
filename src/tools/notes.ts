@@ -56,7 +56,7 @@ export async function applicabilityNote(
 ): Promise<Note | undefined> {
   if (a === undefined) return undefined;
   const sources = opts.sources ?? (await adapters.source.list());
-  const text = applicabilityText(a, subject, { today: isoDay(opts.now ?? new Date()), asOf: opts.asOf, replacedBy: await replacementCitations(a, sources) });
+  const text = applicabilityText(a, subject, { today: isoDay(opts.now ?? new Date()), asOf: opts.asOf, replacedBy: await replacementCitations(a, sources), label });
   return { type: a.status, text, applies_to: [label] };
 }
 
@@ -139,13 +139,21 @@ export function applicabilityPageNotice<T extends { id: string; applicability?: 
  * when a recorded change names it (as of the date asked for), the placeholder note when its text names an instrument by a
  * pre-adoption number.
  */
-export async function provisionNotes(record: Regulation, opts: { asOf?: string | undefined; versionNote?: string | undefined } = {}): Promise<Note[]> {
+export async function provisionNotes(
+  record: Regulation,
+  opts: {
+    asOf?: string | undefined;
+    versionNote?: string | undefined;
+    /** False when this library holds no version of the provision for `asOf`: the applicability note then claims nothing about that date. */
+    existed?: boolean | undefined;
+  } = {},
+): Promise<Note[]> {
   const sources = await adapters.source.list();
   const cite = citationOf(record, sourceFor(record, sources));
   const notes: Note[] = [];
   // The declaration that counts is the library's latest: a past version served under `as_of` carries none of its own.
   const latest = opts.asOf === undefined ? record : ((await adapters.regulation.get(record.id)) ?? record);
-  const applies = await applicabilityNote(latest.applicability ?? record.applicability, "provision", cite, { asOf: opts.asOf, sources });
+  const applies = await applicabilityNote(latest.applicability ?? record.applicability, "provision", cite, { asOf: opts.existed === false ? undefined : opts.asOf, sources });
   if (applies !== undefined) notes.push(applies);
   if (opts.versionNote !== undefined) notes.push({ type: "version", text: opts.versionNote, applies_to: [cite] });
   const amendment = await pendingNoteFor(record, opts.asOf);

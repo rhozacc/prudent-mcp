@@ -220,7 +220,7 @@ export function verifyPlaybook(pb: Playbook, ctx: PlaybookContext, opts: VerifyO
     if (n > STATEMENT_WORDS) err("V6", `requirements.${r.id}.statement`, `${n} words; the limit is ${STATEMENT_WORDS}`);
   }
   // Rendered with room to spare, so what is measured is the playbook and not what the renderer chose to abridge.
-  const full = renderPlaybook(pb, ctx, { budget: Number.MAX_SAFE_INTEGER });
+  const full = renderPlaybook(pb, ctx, { budget: Number.MAX_SAFE_INTEGER, banner: false });
   if (full !== null && full.tokens > FULL_RENDER_BUDGET) err("V6", "render", `the full render is about ${full.tokens} tokens; the limit is ${FULL_RENDER_BUDGET}`);
 
   // V7: force against basis.

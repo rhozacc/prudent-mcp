@@ -98,7 +98,7 @@ export function registerRelatedTool(server: McpServer): void {
         // The entry itself, and every entry listed beside it that declares it does not apply (or not yet).
         const listed: (string | undefined)[] = [parent?.id, ...siblings.map((r) => r.id), ...body.cites.map((r) => r.id), ...body.cited_by.map((r) => r.id), ...body.checks.map((r) => r.id), ...body.tests.map((r) => r.id), ...body.playbooks.map((p) => p.id)];
         const beside = await applicabilityNotesFor(listed.filter((x): x is string => x !== undefined && x !== current.id));
-        return ok(withNotes(body, mergeNotes([...(await provisionNotes(current, { asOf: as_of })), ...beside])));
+        return ok(withNotes(body, mergeNotes([...(await provisionNotes(current, { asOf: as_of, existed: as_of === undefined || record !== null })), ...beside])));
       }
 
       if (id.startsWith("check://") || id.startsWith("test://")) {

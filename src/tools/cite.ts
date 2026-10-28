@@ -14,6 +14,9 @@ import { applicabilityNote, notesShape, officialCitation, withNotes, type Note }
 import { pendingNoteFor } from "./pending.ts";
 import { READ_ONLY_HINTS, ok } from "./shared.ts";
 
+/** Candidates checked for a declaration; a citation that fits more than this many is vague enough already. */
+const MAX_CANDIDATE_NOTES = 10;
+
 export function registerCiteTool(server: McpServer): void {
   server.registerTool(
     "cite",
@@ -38,6 +41,13 @@ export function registerCiteTool(server: McpServer): void {
         if (applies !== undefined) notes.push(applies);
         const amendment = await pendingNoteFor(resolution.match);
         if (amendment !== undefined) notes.push({ type: "amendment", text: amendment, applies_to: [official] });
+      }
+      // A candidate the citation might mean that is itself repealed or not yet in application: the caller is choosing
+      // between provisions, and one of them should not be chosen unawares.
+      for (const c of resolution.candidates.slice(0, MAX_CANDIDATE_NOTES)) {
+        const candidate = await adapters.regulation.get(c.id);
+        const applies = candidate === null ? undefined : await applicabilityNote(candidate.applicability, "provision", await officialCitation(candidate));
+        if (applies !== undefined) notes.push(applies);
       }
       if (coverage_note !== undefined) notes.push({ type: "outside_library", text: coverage_note });
       return ok(withNotes({ ...resolution, ...(official === undefined ? {} : { official_citation: official }) }, notes));

@@ -10352,30 +10352,41 @@ function pendingChangeWarnings(sources, now = /* @__PURE__ */ new Date()) {
 // src/applicability.ts
 var HISTORICAL_PRIOR = 0.5;
 var applicabilityPrior = (record2) => record2.applicability?.status === "historical" ? HISTORICAL_PRIOR : 1;
-var grammar = (subject) => subject === "playbook" ? { subject: "The requirements in this playbook", applies: "apply", it: "they", is: "are", was: "were" } : { subject: subject === "provision" ? "This text" : subject === "check" ? "This check" : "This test", applies: "applies", it: "it", is: "is", was: "was" };
+var isHistorical = (record2) => record2.applicability?.status === "historical";
+var quoted = (name) => `\u201C${name}\u201D`;
+var grammar = (subject, label) => {
+  if (subject === "playbook") {
+    return { subject: label === void 0 ? "The requirements in this playbook" : `The requirements in the playbook ${quoted(label)}`, applies: "apply", it: "they", is: "are", was: "were" };
+  }
+  const named = label === void 0 ? void 0 : subject === "provision" ? label : `The ${subject} ${quoted(label)}`;
+  return { subject: named ?? (subject === "provision" ? "This text" : subject === "check" ? "This check" : "This test"), applies: "applies", it: "it", is: "is", was: "was" };
+};
 var reasonSentence = (reason) => {
   const r = reason.trim();
   return /[.!?]$/.test(r) ? r : `${r}.`;
 };
+var midSentence = (s) => /^(This|The) /.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s;
 var cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 var list = (xs) => xs.join("; ");
 function applicabilityText(a, subject, words) {
-  const g = grammar(subject);
+  const g = grammar(subject, words.label);
   const { today, asOf } = words;
   const replaced = words.replacedBy ?? [];
+  const reason = `Reason: ${reasonSentence(a.reason)}`;
   if (a.status === "historical") {
     const over = a.until < today;
-    const lead = asOf === void 0 ? over ? `${g.subject} no longer ${g.applies}: ${g.it} ceased to apply after ${a.until}.` : `${g.subject} ${g.is} recorded as ceasing to apply after ${a.until}.` : asOf <= a.until ? `${g.subject} applied on ${asOf}, the date asked about, ${over ? `but ${g.it} has since ceased to apply: ${g.it} applied until ${a.until}` : `and ${g.it} ${g.is} recorded as ceasing to apply after ${a.until}`}.` : `${g.subject} did not apply on ${asOf}, the date asked about: ${g.it} ceased to apply after ${a.until}.`;
+    const ceased = over ? `${g.it} ceased to apply after ${a.until}` : `${g.it} ${g.is} recorded as ceasing to apply after ${a.until}`;
+    const lead = asOf === void 0 ? over ? `${g.subject} no longer ${g.applies}: ${ceased}.` : `${g.subject} ${g.is} recorded as ceasing to apply after ${a.until}.` : asOf <= a.until ? `On ${asOf}, the date asked about, ${midSentence(g.subject)} had not yet ceased to apply; ${ceased}.` : `${g.subject} did not apply on ${asOf}, the date asked about: ${g.it} ceased to apply after ${a.until}.`;
     const tail2 = replaced.length === 0 ? "" : ` ${cap(g.it)} ${over ? g.was : `${g.is} to be`} replaced by ${list(replaced)}.`;
-    return `${lead} Reason: ${reasonSentence(a.reason)}${tail2}`;
+    return `${lead} ${reason}${tail2}`;
   }
   const notYet = asOf !== void 0 && (a.from === void 0 || asOf < a.from) ? ` ${cap(g.it)} did not apply on ${asOf}, the date asked about.` : "";
-  if (a.from === void 0) return `${g.subject} ${g.is} not yet in application: the date from which ${g.it} ${g.applies} is not yet fixed.${notYet} Reason: ${reasonSentence(a.reason)}`;
-  if (a.from > today) return `${g.subject} ${g.is} not yet in application: ${g.it} ${g.applies} from ${a.from}${whenPhrase(today, a.from)}.${notYet} Reason: ${reasonSentence(a.reason)}`;
-  return `${g.subject} ${g.is} recorded as applying from ${a.from}, a date that has passed; whether ${g.it} now ${g.applies} is not confirmed here. Reason: ${reasonSentence(a.reason)}`;
+  if (a.from === void 0) return `${g.subject} ${g.is} not yet in application: the date from which ${g.it} ${g.applies} is not yet fixed.${notYet} ${reason}`;
+  if (a.from > today) return `${g.subject} ${g.is} not yet in application: ${g.it} ${g.applies} from ${a.from}${words.relative === false ? "" : whenPhrase(today, a.from)}.${notYet} ${reason}`;
+  return `${g.subject} ${g.is} recorded as applying from ${a.from}, a date that has passed; whether ${g.it} now ${g.applies} is not confirmed here.${notYet} ${reason}`;
 }
 function applicabilityBanner(a, words) {
-  return `> ${applicabilityText(a, "playbook", words).replace(/\s+/g, " ")}`;
+  return `> ${applicabilityText(a, "playbook", { ...words, relative: false }).replace(/\s+/g, " ")}`;
 }
 var replacedByIds = (a) => a.status === "historical" ? a.replaced_by ?? [] : [];
 
@@ -11302,7 +11313,7 @@ function resolveCitationDetailed(regulations, text, holdings) {
     return frameworks.size === 1 && unheld.every((d) => frameworks.has(d.issuer ?? ""));
   })();
   if (unheld.length > 0 && placeable && !looselyDescribed) {
-    const quoted = unheld.map((d) => `"${d.quote}"`).join(" and ");
+    const quoted2 = unheld.map((d) => `"${d.quote}"`).join(" and ");
     const identifiers = unheld.every((d) => d.identifier);
     const heldNames = [];
     if (instrumentName2 !== null) heldNames.push(instrumentName2);
@@ -11320,7 +11331,7 @@ function resolveCitationDetailed(regulations, text, holdings) {
     const sameIssuer = [...new Set(regulations.filter((r) => issuers.includes(r.framework.toLowerCase())).map((r) => r.document_id))];
     const issuerNote = sameIssuer.length === 0 ? "" : ` It does hold ${sameIssuer.length === 1 ? "a document" : "documents"} under the ${issuers.map((i) => i.toUpperCase()).join("/")} framework (${sameIssuer.slice(0, 5).join(", ")}${sameIssuer.length > 5 ? ", \u2026" : ""}); if one of those is what was meant, cite it by its id or title.`;
     return none({
-      coverage_note: heldNames.length === 0 ? identifiers ? `"${text}" names an instrument by an identifier (${quoted}), and this library holds no document identified as such. Nothing was matched, rather than sourcing a same-numbered provision from another document. ${wayOut}` : `"${text}" names an instrument by description (${quoted}), and this library holds no document identified as such. Nothing was matched, rather than sourcing a same-numbered provision from another document.${issuerNote} ${wayOut}` : `"${text}" names ${heldList} and also an instrument by ${how} (${quoted}) that it holds no document identified as, so which of the two the provision belongs to cannot be told. Nothing was matched, rather than sourcing a same-numbered provision from either. Name one instrument per citation. ${wayOut}`
+      coverage_note: heldNames.length === 0 ? identifiers ? `"${text}" names an instrument by an identifier (${quoted2}), and this library holds no document identified as such. Nothing was matched, rather than sourcing a same-numbered provision from another document. ${wayOut}` : `"${text}" names an instrument by description (${quoted2}), and this library holds no document identified as such. Nothing was matched, rather than sourcing a same-numbered provision from another document.${issuerNote} ${wayOut}` : `"${text}" names ${heldList} and also an instrument by ${how} (${quoted2}) that it holds no document identified as, so which of the two the provision belongs to cannot be told. Nothing was matched, rather than sourcing a same-numbered provision from either. Name one instrument per citation. ${wayOut}`
     });
   }
   const unplaced = unplacedIdentifier(text, rest);
@@ -16990,9 +17001,13 @@ var ROUTING = {
   /** A playbook within this fraction of the leader's score is offered as a neighbour. */
   neighbour: 0.5,
   /**
-   * What a playbook on repealed text (`applicability: historical`) has its score multiplied by, so it is routed only when
-   * it is clearly the best match: current law wins a tie, and a question that is about the repealed regime still finds it.
-   * Playbooks that declare nothing are untouched, which is why the bank tuning above does not move.
+   * What a playbook on repealed text (`applicability: historical`) has its ORDER multiplied by (`Route.priority`), so it
+   * leads only when it is clearly the best match: current law wins a tie, and a question about the repealed regime still
+   * finds it. It moves the ordering, the margin and the neighbour test and nothing else: the floor is read against the
+   * playbook's own `score`, so a repealed playbook is not held to a higher bar than a current one, and the vote it
+   * reports is not discounted a second time (the provisions it cites are already ranked down by the search prior, which
+   * `tools/brief.ts` takes back out before the vote is read). Playbooks that declare nothing are untouched, which is why
+   * the bank tuning above does not move.
    */
   historicalPrior: 0.75
 };
@@ -17025,14 +17040,15 @@ function routePlaybooks(args) {
     const text = textOf.get(playbook.id) ?? 0;
     const v = Math.min(1, (vote.get(playbook.id) ?? 0) / yardstick);
     const prior = playbook.applicability?.status === "historical" ? R.historicalPrior : 1;
-    return { playbook, text, vote: v, score: (R.textWeight * text + (1 - R.textWeight) * v) * prior };
-  }).filter((r) => r.score > 0).sort((a, b) => b.score - a.score || (a.playbook.id < b.playbook.id ? -1 : 1));
+    const score = R.textWeight * text + (1 - R.textWeight) * v;
+    return { playbook, text, vote: v, score, priority: score * prior };
+  }).filter((r) => r.score > 0).sort((a, b) => b.priority - a.priority || (a.playbook.id < b.playbook.id ? -1 : 1));
   const lead = routes[0];
   if (lead === void 0) return { routes, chosen: null, ambiguous: false, reason: "no_match", neighbours: [] };
   if (lead.score < R.floor) return { routes, chosen: null, ambiguous: false, reason: "below_floor", neighbours: [] };
   const second = routes[1];
-  const ambiguous = second !== void 0 && lead.score - second.score < R.margin * lead.score;
-  return { routes, chosen: lead, ambiguous, neighbours: routes.slice(1).filter((r) => r.score >= R.neighbour * lead.score).slice(0, 2) };
+  const ambiguous = second !== void 0 && lead.priority - second.priority < R.margin * lead.priority;
+  return { routes, chosen: lead, ambiguous, neighbours: routes.slice(1).filter((r) => r.priority >= R.neighbour * lead.priority).slice(0, 2) };
 }
 
 // src/citation-style.ts
@@ -17132,13 +17148,13 @@ function provisionQuotes(refs, ctx) {
     return reg === void 0 || r.quote === void 0 ? [] : [quoteLine(r.quote, citationOf(reg, sourceFor(reg, ctx.sources)))];
   });
 }
-function banner(pb, ctx, today) {
+function banner(pb, ctx, today, on) {
   const a = pb.applicability;
-  if (a === void 0) return [];
+  if (a === void 0 || !on) return [];
   return [applicabilityBanner(a, { today, replacedBy: citationsOf(replacedByIds(a), ctx) }), ""];
 }
-function header(pb, ctx, today) {
-  const out = [...banner(pb, ctx, today), `# ${pb.title}`, "", pb.summary, "", "## What it rests on", ""];
+function header(pb, ctx, today, withBanner) {
+  const out = [...banner(pb, ctx, today, withBanner), `# ${pb.title}`, "", pb.summary, "", "## What it rests on", ""];
   for (const b of pb.basis) {
     const lead = b.provisions[0];
     const first = lead === void 0 ? void 0 : ctx.regulations.get(lead.id);
@@ -17202,10 +17218,10 @@ function cutAtBoundary(text, max) {
   const space = head.lastIndexOf(" ");
   return head.slice(0, space > 0 ? space : max);
 }
-function renderSection(pb, handle, ctx, budget, today) {
+function renderSection(pb, handle, ctx, budget, today, withBanner) {
   const r = pb.requirements.find((x) => x.id === handle);
   if (r === void 0) return null;
-  const out = [...banner(pb, ctx, today), `# ${r.id}. ${r.title}`, `From: ${pb.title}`, "", r.statement, ""];
+  const out = [...banner(pb, ctx, today, withBanner), `# ${r.id}. ${r.title}`, `From: ${pb.title}`, "", r.statement, ""];
   if (r.evidence.length > 0) out.push(`A reviewer will ask to see: ${r.evidence.join("; ")}.`, "");
   const checks = r.checks.flatMap((id) => ctx.checks?.get(id) === void 0 ? [] : [ctx.checks.get(id)]);
   for (const c of checks) out.push(`Check: ${c.name}. ${c.expectation}`);
@@ -17231,9 +17247,9 @@ function renderSection(pb, handle, ctx, budget, today) {
 }
 function renderPlaybook(pb, ctx, opts = {}) {
   const today = opts.today ?? isoDay(/* @__PURE__ */ new Date());
-  if (opts.section !== void 0) return renderSection(pb, opts.section, ctx, opts.budget ?? SECTION_RENDER_BUDGET, today);
+  if (opts.section !== void 0) return renderSection(pb, opts.section, ctx, opts.budget ?? SECTION_RENDER_BUDGET, today, opts.banner !== false);
   const budget = opts.budget ?? FULL_RENDER_BUDGET;
-  const head = header(pb, ctx, today);
+  const head = header(pb, ctx, today, opts.banner !== false);
   const foot = tail(pb, ctx);
   const handles = pb.requirements.map((r) => r.id);
   const compact = /* @__PURE__ */ new Set();
@@ -17566,7 +17582,7 @@ async function replacementCitations(a, sources) {
 async function applicabilityNote(a, subject, label, opts = {}) {
   if (a === void 0) return void 0;
   const sources = opts.sources ?? await adapters.source.list();
-  const text = applicabilityText(a, subject, { today: isoDay(opts.now ?? /* @__PURE__ */ new Date()), asOf: opts.asOf, replacedBy: await replacementCitations(a, sources) });
+  const text = applicabilityText(a, subject, { today: isoDay(opts.now ?? /* @__PURE__ */ new Date()), asOf: opts.asOf, replacedBy: await replacementCitations(a, sources), label });
   return { type: a.status, text, applies_to: [label] };
 }
 async function applicabilityNotesFor(ids, opts = {}) {
@@ -17624,7 +17640,7 @@ async function provisionNotes(record2, opts = {}) {
   const cite = citationOf(record2, sourceFor(record2, sources));
   const notes = [];
   const latest = opts.asOf === void 0 ? record2 : await adapters.regulation.get(record2.id) ?? record2;
-  const applies = await applicabilityNote(latest.applicability ?? record2.applicability, "provision", cite, { asOf: opts.asOf, sources });
+  const applies = await applicabilityNote(latest.applicability ?? record2.applicability, "provision", cite, { asOf: opts.existed === false ? void 0 : opts.asOf, sources });
   if (applies !== void 0) notes.push(applies);
   if (opts.versionNote !== void 0) notes.push({ type: "version", text: opts.versionNote, applies_to: [cite] });
   const amendment = await pendingNoteFor(record2, opts.asOf);
@@ -17779,7 +17795,7 @@ function registerBriefTool(server3) {
       const ranking = regulationRanking({ scope: "default", glossary });
       const ranked = rankingOf(found) ?? rankedSearch(found, question, regulationSearchFields(question), void 0, ranking);
       const excerptOf = new Map(ranked.map((m) => [m.record.id, m]));
-      const routing = routePlaybooks({ question, playbooks, rankedProvisions: found.slice(0, ROUTING.voteDepth).map((r) => r.id), glossary });
+      const routing = routePlaybooks({ question, playbooks, rankedProvisions: voteOrder(found, ranked).slice(0, ROUTING.voteDepth), glossary });
       const ctx = await servedPlaybookContext();
       const total = BUDGETS[budget];
       const cite = (r) => citationOf(r, sourceFor(r, ctx.sources));
@@ -17800,14 +17816,14 @@ function registerBriefTool(server3) {
         parts.push(rendered?.text ?? "");
         const renderedSecond = second === void 0 ? null : renderPlaybook(second.playbook, ctx, { budget: Math.round(total * SECOND_SHARE) });
         if (renderedSecond !== null) parts.push(["## A close second", renderedSecond.text].join("\n"));
-        notes.push(...await playbookNotes(chosen.playbook, ctx, { asOf: as_of }));
-        if (second !== void 0) notes.push(...await playbookApplicabilityNotes(second.playbook, ctx, { asOf: as_of }));
+        notes.push(...await playbookNotes(chosen.playbook, ctx));
+        if (second !== void 0) notes.push(...await playbookApplicabilityNotes(second.playbook, ctx));
         if (as_of !== void 0) {
           notes.push({ type: "version", text: `This playbook is written from the current text of each source. It is not evidence of what applied on ${as_of}; open the provisions with their date to read that text.` });
         }
         if (extra.length > 0) parts.push(["## Also relevant (not in the playbook)", ...lines(extra)].join("\n"));
         const others = routing.neighbours.map((r) => r.playbook).filter((p) => p.id !== second?.playbook.id);
-        notes.push(...await applicabilityNotesFor(others.map((p) => p.id), { asOf: as_of }));
+        notes.push(...await applicabilityNotesFor(others.map((p) => p.id)));
         if (others.length > 0) {
           parts.push(["## Other playbooks", ...others.map((p) => `- ${p.title} (playbook "${slugOf(p.id)}")`)].join("\n"));
         }
@@ -17824,7 +17840,7 @@ function registerBriefTool(server3) {
         else if (best !== void 0 && tokens >= 2 && best * 2 < tokens) notes.push({ type: "weak_match", text: weakMatchNotice(best, tokens) });
       }
       for (const r of extra.slice(0, 3)) notes.push(...(await provisionNotes(r, { asOf: as_of })).filter((n) => n.type === "amendment" || n.type === "placeholder"));
-      notes.push(...await applicabilityNotesFor(extra.map((r) => r.id), { asOf: as_of }));
+      notes.push(...await applicabilityNotesFor(extra.map((r) => r.id)));
       const merged = mergeNotes(notes);
       const text = [...parts, notesText(merged)].filter((t) => t !== "").join("\n\n");
       if (text.trim() === "") return miss("Nothing to return for that question.");
@@ -17845,9 +17861,17 @@ function registerBriefTool(server3) {
     }
   );
 }
+function voteOrder(found, ranked) {
+  const order = found.map((r) => r.id);
+  if (!found.some(isHistorical)) return order;
+  const sorted = [...ranked].map((m, i) => ({ m, i, score: m.score / applicabilityPrior(m.record) })).sort((x, y) => Number(y.m.coverage > 0) - Number(x.m.coverage > 0) || y.score - x.score || x.i - y.i).map((x) => x.m.record.id);
+  const placed = new Set(sorted);
+  return [...sorted, ...order.filter((id) => !placed.has(id))];
+}
 var round = (n) => Math.round(n * 100) / 100;
 
 // src/tools/cite.ts
+var MAX_CANDIDATE_NOTES = 10;
 function registerCiteTool(server3) {
   server3.registerTool(
     "cite",
@@ -17868,6 +17892,11 @@ function registerCiteTool(server3) {
         if (applies !== void 0) notes.push(applies);
         const amendment = await pendingNoteFor(resolution.match);
         if (amendment !== void 0) notes.push({ type: "amendment", text: amendment, applies_to: [official] });
+      }
+      for (const c of resolution.candidates.slice(0, MAX_CANDIDATE_NOTES)) {
+        const candidate = await adapters.regulation.get(c.id);
+        const applies = candidate === null ? void 0 : await applicabilityNote(candidate.applicability, "provision", await officialCitation(candidate));
+        if (applies !== void 0) notes.push(applies);
       }
       if (coverage_note !== void 0) notes.push({ type: "outside_library", text: coverage_note });
       return ok(withNotes({ ...resolution, ...official === void 0 ? {} : { official_citation: official } }, notes));
@@ -18067,7 +18096,7 @@ function registerRelatedTool(server3) {
         };
         const listed = [parent?.id, ...siblings.map((r) => r.id), ...body.cites.map((r) => r.id), ...body.cited_by.map((r) => r.id), ...body.checks.map((r) => r.id), ...body.tests.map((r) => r.id), ...body.playbooks.map((p) => p.id)];
         const beside = await applicabilityNotesFor(listed.filter((x) => x !== void 0 && x !== current.id));
-        return ok(withNotes(body, mergeNotes([...await provisionNotes(current, { asOf: as_of }), ...beside])));
+        return ok(withNotes(body, mergeNotes([...await provisionNotes(current, { asOf: as_of, existed: as_of === void 0 || record2 !== null }), ...beside])));
       }
       if (id.startsWith("check://") || id.startsWith("test://")) {
         const isCheck = id.startsWith("check://");

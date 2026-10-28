@@ -7,6 +7,8 @@ import { applicabilityText } from "../src/applicability.ts";
 import { CorpusFileSchema, createFileAdapters } from "../src/file-adapter.ts";
 import { bannedTermsIn, identifiersIn } from "../src/language.ts";
 import { routePlaybooks } from "../src/brief.ts";
+import { rankedSearch, regulationRanking, regulationSearchFields } from "../src/search.ts";
+import { voteOrder } from "../src/tools/brief.ts";
 import type { Applicability } from "../src/schema.ts";
 import { createServer } from "../src/server.ts";
 
@@ -123,11 +125,29 @@ describe("applicability notes", () => {
       for (const a of [HIST, { ...HIST, until: "2999-01-01" } as Applicability, SOON, UNDATED, { ...SOON, from: "2020-01-01" } as Applicability]) {
         for (const subject of subjects) {
           for (const asOf of [undefined, "2023-06-01", "2025-06-01"]) {
-            const text = applicabilityText(a, subject, { today: "2026-08-26", asOf, replacedBy: ["Art. 2 Synth"] });
+            const text = applicabilityText(a, subject, { today: "2026-08-26", asOf, label: "Art. 2 Synth", replacedBy: ["Art. 2 Synth"] });
             expect(bannedTermsIn(text)).toEqual([]);
             expect(identifiersIn(text)).toEqual([]);
           }
         }
+      }
+    });
+    it("agree in number: a playbook is plural everywhere, never 'they has' or 'they is'", () => {
+      for (const a of [HIST, { ...HIST, until: "2999-01-01" } as Applicability, SOON, UNDATED, { ...SOON, from: "2020-01-01" } as Applicability]) {
+        for (const asOf of [undefined, "2023-06-01", "2025-06-01", "1990-01-01"]) {
+          for (const label of [undefined, "Old approach capital"]) {
+            const text = applicabilityText(a, "playbook", { today: "2026-08-26", asOf, label, replacedBy: ["Art. 2 Synth"] });
+            expect(text, text).not.toMatch(/\b[Tt]hey (has|is|was|does|applies|recorded as ceasing)\b/);
+            expect(text, text).not.toMatch(/\b[Ii]t (have|are|were|apply)\b/);
+          }
+        }
+      }
+    });
+    it("claim nothing about when the text started: no 'applied on', and the date asked about is only said not to be past the end", () => {
+      for (const subject of ["provision", "check", "test", "playbook"] as const) {
+        const text = applicabilityText(HIST, subject, { today: "2026-08-26", asOf: "1990-01-01" });
+        expect(text).not.toMatch(/\bapplied on\b/);
+        expect(text).toContain("had not yet ceased to apply");
       }
     });
     it("do not say that text which still applies no longer applies", () => {
@@ -154,13 +174,20 @@ describe("applicability notes", () => {
       expect(Object.keys(r.body)[0]).toBe("notes");
     });
 
-    it("under as_of on or before `until`, says it applied then and has since ceased: from the latest declaration, not the past version's", async () => {
+    it("under as_of on or before `until`, says only what the declaration supports, from the latest declaration and not the past version's", async () => {
       const r = await call("get", { ids: oldProvision.id, as_of: "2023-06-01" });
       expect((r.body["records"] as Array<{ applicability?: unknown }>)[0]!.applicability).toBeUndefined(); // the 2019 version declares nothing
       const [n] = of(r.notes, "historical");
-      expect(n!.text).toContain("applied on 2023-06-01");
-      expect(n!.text).toContain("has since ceased to apply");
+      expect(n!.text).toContain("On 2023-06-01, the date asked about, Synth Article 1 had not yet ceased to apply; it ceased to apply after 2024-12-31.");
+      expect(n!.text).not.toContain("applied on");
       expect(n!.text).not.toContain("no longer applies");
+    });
+
+    it("names the entry it concerns, in the text and not only in applies_to", async () => {
+      const r = await call("get", { ids: ["check://synth/old-check", oldProvision.id] });
+      const texts = of(r.notes, "historical").map((n) => n.text);
+      expect(texts.some((t) => t.startsWith("The check “Old approach capital check” no longer applies"))).toBe(true);
+      expect(texts.some((t) => t.startsWith("Synth Article 1 no longer applies"))).toBe(true);
     });
 
     it("under as_of after `until`, says it did not apply then", async () => {
@@ -190,6 +217,45 @@ describe("applicability notes", () => {
     });
   });
 
+  describe("as_of before the text existed", () => {
+    // The source of the document starts in 2023: nothing the library holds applied, or did not, on an earlier date.
+    const young = () =>
+      CorpusFileSchema.parse({
+        ...corpus(true),
+        regulation: [oldProvision, newProvision],
+        regulation_history: [],
+        sources: [{ ...source, published: "2023-01-01" }],
+        checks: [],
+        tests: [],
+        playbooks: [playbook("old-approach", "Old approach capital", "What did the old approach require for capital?", oldProvision.id, { applicability: HIST })],
+      });
+    const claims = (notes: N[]) => notes.filter((n) => n.type === "historical").map((n) => n.text);
+
+    it("get declines; related and brief state the declaration as of now and claim nothing about that date", async () => {
+      Object.assign(adapters, createFileAdapters(young()));
+      const got = await call("get", { ids: oldProvision.id, as_of: "1990-01-01" });
+      expect(got.isError).toBe(true);
+      for (const r of [await call("related", { id: oldProvision.id, as_of: "1990-01-01" }), await call("brief", { question: "What did the old approach require for capital?", as_of: "1990-01-01" })]) {
+        const said = claims(r.notes);
+        expect(said.length).toBeGreaterThan(0);
+        for (const t of said) {
+          expect(t).not.toContain("1990-01-01");
+          expect(t).not.toMatch(/\bapplied on\b/);
+          expect(t).toContain("ceased to apply after 2024-12-31");
+        }
+      }
+    });
+
+    it("never sits beside a version note that says the text is not evidence for the date: neither says it applied then", async () => {
+      Object.assign(adapters, createFileAdapters(young()));
+      const r = await call("get", { ids: oldProvision.id, as_of: "2023-06-01" });
+      const version = of(r.notes, "version")[0]!.text;
+      expect(version).toContain("may differ from the text in force");
+      expect(claims(r.notes)[0]).toContain("had not yet ceased to apply");
+      expect(claims(r.notes)[0]).not.toMatch(/\bapplied on\b/);
+    });
+  });
+
   describe("related", () => {
     it("tells the root, and any listed entry that declares it", async () => {
       const root = await call("related", { id: oldProvision.id });
@@ -212,6 +278,19 @@ describe("applicability notes", () => {
       const r = await call("cite", { text: "Synth Article 1" });
       expect((r.body["match"] as { id: string }).id).toBe(oldProvision.id);
       expect(of(r.notes, "historical")[0]!.text).toContain("no longer applies");
+    });
+    it("tells a candidate that is repealed when the citation fits several provisions", async () => {
+      const two = (doc: string, extra: Record<string, unknown> = {}) => ({ ...reg(`${doc}/9`, "Article 9", `Synthetic text of ${doc}.`, { document_id: doc, ...extra }), id: `regulation://${doc}/9` });
+      Object.assign(adapters, createFileAdapters(CorpusFileSchema.parse({
+        regulation: [two("doc-a", { applicability: HIST }), two("doc-b")],
+        sources: [{ ...source, id: "source://synth/doc-a", document_id: "doc-a" }, { ...source, id: "source://synth/doc-b", document_id: "doc-b" }],
+      })));
+      const r = await call("cite", { text: "Article 9" });
+      expect(r.body["match"]).toBeNull();
+      expect((r.body["candidates"] as unknown[]).length).toBe(2);
+      expect(of(r.notes, "historical")).toHaveLength(1);
+      expect(of(r.notes, "historical")[0]!.text).toContain("no longer applies");
+      expect(of(r.notes, "historical")[0]!.applies_to).toEqual(["Article 9"]);
     });
     it("is silent on a match that declares nothing", async () => {
       const r = await call("cite", { text: "Synth Article 5" });
@@ -263,7 +342,7 @@ describe("applicability notes", () => {
     it("playbook: the note on a repealed playbook, and none on a current one", async () => {
       const old = await call("playbook", { id: "old-approach" });
       expect(of(old.notes, "historical").map((n) => n.applies_to)).toEqual([["Old approach capital"]]);
-      expect(of(old.notes, "historical")[0]!.text).toContain("requirements in this playbook no longer apply");
+      expect(of(old.notes, "historical")[0]!.text).toContain("The requirements in the playbook “Old approach capital” no longer apply");
       expect((old.body["text"] as string).startsWith("> ")).toBe(true); // the banner, above the title
       const fresh = await call("playbook", { id: "new-approach" });
       expect(fresh.notes).toEqual([]);
@@ -296,6 +375,25 @@ describe("applicability notes", () => {
   });
 });
 
+describe("routing: the vote is not discounted twice", () => {
+  it("takes the search prior back out of the order the vote reads, and only when something found declares applicability", () => {
+    const records = CorpusFileSchema.parse(corpus(true)).regulation;
+    const fields = regulationSearchFields("old approach new approach capital operational loss");
+    const ranking = regulationRanking({ scope: "default" });
+    const ranked = rankedSearch(records, "old approach new approach capital operational loss", fields, undefined, ranking);
+    const found = ranked.map((m) => m.record);
+    const ids = (xs: Array<{ id: string }>) => xs.map((x) => x.id);
+    expect(ids(found).indexOf(newProvision.id)).toBeLessThan(ids(found).indexOf(oldProvision.id)); // the search prior ranks the repealed one down ...
+    const vote = voteOrder(found, ranked);
+    expect(vote.indexOf(oldProvision.id)).toBeLessThan(vote.indexOf(newProvision.id)); // ... and the vote does not count that again
+    expect([...vote].sort()).toEqual(ids(found).sort());
+    // Nothing declares anything: the order is the search's own, untouched.
+    const plain = CorpusFileSchema.parse(corpus(false)).regulation;
+    const rankedPlain = rankedSearch(plain, "old approach new approach capital operational loss", fields, undefined, ranking);
+    expect(voteOrder(rankedPlain.map((m) => m.record), rankedPlain)).toEqual(rankedPlain.map((m) => m.record.id));
+  });
+});
+
 describe("routing: a repealed playbook is routed only when it is clearly the best", () => {
   const pb = (slug: string, title: string, extra: Record<string, unknown> = {}) =>
     CorpusFileSchema.parse({
@@ -305,10 +403,27 @@ describe("routing: a repealed playbook is routed only when it is clearly the bes
   const b = pb("same-b", "Capital approach", { applicability: HIST });
   const route = (question: string, list: typeof a[]) => routePlaybooks({ question, playbooks: list, rankedProvisions: [] });
 
-  it("loses a tie to current law", () => {
+  it("loses a tie to current law: ordering, not score", () => {
     const r = route("What does the capital approach require?", [b, a]);
     expect(r.chosen?.playbook.id).toBe(a.id);
-    expect(r.routes[1]!.score).toBeLessThan(r.routes[0]!.score);
+    expect(r.routes[1]!.priority).toBeLessThan(r.routes[0]!.priority);
+    expect(r.routes[1]!.priority).toBeCloseTo(r.routes[1]!.score * 0.75, 10);
+    expect(r.routes[0]!.priority).toBe(r.routes[0]!.score);
+  });
+  it("is held to the same floor as a current playbook: the prior moves the order, never the bar", () => {
+    const only = route("What does the capital approach require?", [b]);
+    expect(only.chosen?.playbook.id).toBe(b.id);
+    expect(only.chosen!.score).toBeCloseTo(route("What does the capital approach require?", [a]).chosen!.score, 10);
+    // A floor between the playbook's priority and its score: still chosen, because only the score is read against it.
+    const lifted = routePlaybooks({ question: "What does the capital approach require?", playbooks: [b], rankedProvisions: [], params: { floor: only.chosen!.score * 0.9 } });
+    expect(lifted.chosen?.playbook.id).toBe(b.id);
+    const high = routePlaybooks({ question: "What does the capital approach require?", playbooks: [b], rankedProvisions: [], params: { floor: only.chosen!.score * 1.01 } });
+    expect(high.chosen).toBeNull();
+  });
+  it("is chosen over a current playbook it clearly beats, and flagged ambiguous when it only just does", () => {
+    const weak = pb("same-c", "Unrelated approach to something else", { });
+    const r = route("What does the capital approach require?", [weak, b]);
+    expect(r.chosen?.playbook.id).toBe(b.id);
   });
   it("is still chosen when nothing else matches", () => {
     const r = route("What does the capital approach require?", [b]);

@@ -10,6 +10,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { adapters } from "../adapters.ts";
+import { applicabilityPrior, isHistorical } from "../applicability.ts";
 import { ROUTING, routePlaybooks, type Route } from "../brief.ts";
 import { citationOf, sourceFor } from "../citation-style.ts";
 import { playbookProvisions } from "../referrers.ts";
@@ -65,7 +66,7 @@ export function registerBriefTool(server: McpServer): void {
       const ranking = regulationRanking({ scope: "default", glossary });
       const ranked = rankingOf(found) ?? rankedSearch(found, question, regulationSearchFields(question), undefined, ranking);
       const excerptOf = new Map(ranked.map((m) => [m.record.id as string, m] as const));
-      const routing = routePlaybooks({ question, playbooks, rankedProvisions: found.slice(0, ROUTING.voteDepth).map((r) => r.id), glossary });
+      const routing = routePlaybooks({ question, playbooks, rankedProvisions: voteOrder(found, ranked).slice(0, ROUTING.voteDepth), glossary });
       const ctx = await servedPlaybookContext();
       const total = BUDGETS[budget];
       const cite = (r: Regulation): string => citationOf(r, sourceFor(r, ctx.sources));
@@ -91,14 +92,14 @@ export function registerBriefTool(server: McpServer): void {
         parts.push(rendered?.text ?? "");
         const renderedSecond = second === undefined ? null : renderPlaybook(second.playbook, ctx, { budget: Math.round(total * SECOND_SHARE) });
         if (renderedSecond !== null) parts.push(["## A close second", renderedSecond.text].join("\n"));
-        notes.push(...(await playbookNotes(chosen.playbook, ctx, { asOf: as_of })));
-        if (second !== undefined) notes.push(...(await playbookApplicabilityNotes(second.playbook, ctx, { asOf: as_of })));
+        notes.push(...(await playbookNotes(chosen.playbook, ctx)));
+        if (second !== undefined) notes.push(...(await playbookApplicabilityNotes(second.playbook, ctx)));
         if (as_of !== undefined) {
           notes.push({ type: "version", text: `This playbook is written from the current text of each source. It is not evidence of what applied on ${as_of}; open the provisions with their date to read that text.` });
         }
         if (extra.length > 0) parts.push(["## Also relevant (not in the playbook)", ...lines(extra)].join("\n"));
         const others = routing.neighbours.map((r) => r.playbook).filter((p) => p.id !== second?.playbook.id);
-        notes.push(...(await applicabilityNotesFor(others.map((p) => p.id), { asOf: as_of })));
+        notes.push(...(await applicabilityNotesFor(others.map((p) => p.id))));
         if (others.length > 0) {
           parts.push(["## Other playbooks", ...others.map((p) => `- ${p.title} (playbook "${slugOf(p.id)}")`)].join("\n"));
         }
@@ -118,8 +119,10 @@ export function registerBriefTool(server: McpServer): void {
       }
 
       for (const r of extra.slice(0, 3)) notes.push(...(await provisionNotes(r, { asOf: as_of })).filter((n) => n.type === "amendment" || n.type === "placeholder"));
-      // Every provision listed beside the answer that no longer applies or does not apply yet, not only the first few.
-      notes.push(...(await applicabilityNotesFor(extra.map((r) => r.id), { asOf: as_of })));
+      // Every provision listed beside the answer that no longer applies or does not apply yet, not only the first few. No
+      // `as_of`: a playbook is written from current text and the version note above already says so, and the listed
+      // provisions are current text too; the note says what the declaration says now and claims nothing about the date.
+      notes.push(...(await applicabilityNotesFor(extra.map((r) => r.id))));
       const merged = mergeNotes(notes);
       const text = [...parts, notesText(merged)].filter((t) => t !== "").join("\n\n");
 
@@ -140,6 +143,24 @@ export function registerBriefTool(server: McpServer): void {
       };
     },
   );
+}
+
+/**
+ * The provisions the question found, in the order the VOTE reads them: ranked as search ranks them, except that the prior
+ * on repealed text is taken back out. The vote is what a playbook's provisions say about it, and a repealed playbook's
+ * provisions are already ranked down by that prior; the router discounts the playbook itself once (`ROUTING.historicalPrior`),
+ * and discounting its vote as well would count the same fact twice. Unchanged, and not recomputed, when nothing found
+ * declares applicability, so a library that declares nothing routes exactly as before.
+ */
+export function voteOrder(found: Regulation[], ranked: ReturnType<typeof rankedSearch<Regulation>>): string[] {
+  const order = found.map((r) => r.id as string);
+  if (!found.some(isHistorical)) return order;
+  const sorted = [...ranked]
+    .map((m, i) => ({ m, i, score: m.score / applicabilityPrior(m.record) }))
+    .sort((x, y) => Number(y.m.coverage > 0) - Number(x.m.coverage > 0) || y.score - x.score || x.i - y.i)
+    .map((x) => x.m.record.id as string);
+  const placed = new Set(sorted);
+  return [...sorted, ...order.filter((id) => !placed.has(id))];
 }
 
 const round = (n: number): number => Math.round(n * 100) / 100;

@@ -2482,7 +2482,9 @@ export async function applicabilityIsNeverSilent(s: Session): Promise<InvariantR
     tests = demo.DEMO_RECORDS.tests as Entry[];
     playbooks = Object.values(demo.DEMO_PLAYBOOKS) as Entry[];
   }
-  const declaring = (xs: Entry[]): Entry[] => xs.filter((x) => x.applicability !== undefined).slice(0, 5);
+  // Every entry of each kind that declares it, up to a cap that keeps a real library's run bounded (about ten calls an entry).
+  const PROBE_CAP = 25;
+  const declaring = (xs: Entry[]): Entry[] => xs.filter((x) => x.applicability !== undefined).slice(0, PROBE_CAP);
   const plain = (xs: Entry[]): Entry[] => xs.filter((x) => x.applicability === undefined).slice(0, 2);
   const carriers = { regulation: declaring(regulation), check: declaring(checks), test: declaring(tests), playbook: declaring(playbooks) };
   if (carriers.regulation.length + carriers.check.length + carriers.test.length + carriers.playbook.length === 0) return { id, title, applicable: false, findings };
@@ -2496,22 +2498,37 @@ export async function applicabilityIsNeverSilent(s: Session): Promise<InvariantR
       : { type: "upcoming", says: (t) => (a.from === undefined ? /not yet fixed/i.test(t) : t.includes(a.from)), want: a.from === undefined ? "that the date is not yet fixed" : `the date ${a.from}` };
   };
   const noteOfType = (t: CallTrace, type: string): Note[] => notesOf(bodyOf(t)).filter((n) => n.type === type && typeof n.text === "string");
+  const day = (iso: string, delta: number): string => new Date(Date.parse(`${iso}T00:00:00Z`) + delta * 86_400_000).toISOString().slice(0, 10);
   let bound = 0;
 
-  /** The tool must carry a note of the entry's type, naming `label` when one is given, and giving the date. */
+  /**
+   * The tool must carry a note of the entry's type that gives the date and, when the entry has a label (its official
+   * citation, its name or its title), names it EXACTLY in `applies_to` and in the text: beside a current entry a note that
+   * says "this text" does not say which entry it means. A search page names at most a few rows in its text and counts the
+   * rest, so it may stand on its count for the date.
+   */
   const mustSay = (e: Entry, tool: string, t: CallTrace, label?: string): void => {
     const want = dated(e);
-    const notes = noteOfType(t, want.type).filter((n) => label === undefined || (n.applies_to ?? []).some((x) => x === label || x.includes(label) || label.includes(x)));
+    const notes = noteOfType(t, want.type).filter((n) => label === undefined || (n.applies_to ?? []).includes(label));
     if (t.isError || notes.length === 0) {
       findings.push({
         id: `I20/${tool}`,
         severity: "fatal",
-        summary: `${tool} served ${e.id}, which declares it is ${want.type}, and carried no ${want.type} note${label === undefined ? "" : ` naming it`}.`,
-        evidence: [`id ${e.id}`, `isError ${String(t.isError)}`, `notes: ${notesOf(bodyOf(t)).map((n) => n.type).join(", ") || "(none)"}`],
+        summary: `${tool} served ${e.id}, which declares it is ${want.type}, and carried no ${want.type} note${label === undefined ? "" : " naming it"}.`,
+        evidence: [`id ${e.id}`, `label ${label ?? "(none)"}`, `isError ${String(t.isError)}`, `notes: ${notesOf(bodyOf(t)).map((n) => `${n.type} ${JSON.stringify(n.applies_to ?? [])}`).join(", ") || "(none)"}`],
       });
       return;
     }
-    if (!notes.some((n) => want.says(n.text as string)) && tool !== "search" && tool !== "topics") {
+    if (label !== undefined && !notes.some((n) => (n.text as string).includes(label))) {
+      findings.push({
+        id: `I20/${tool}/named`,
+        severity: "fatal",
+        summary: `${tool}'s ${want.type} note does not name the entry in its text, so beside other entries it does not say which one it concerns.`,
+        evidence: [`id ${e.id}`, `label ${label}`, `note: ${(notes[0]!.text as string).slice(0, 240)}`],
+      });
+    }
+    const countsTheRest = (tool === "search" || tool === "topics") && notes.some((n) => /and \d+ more/.test(n.text as string));
+    if (!notes.some((n) => want.says(n.text as string)) && !countsTheRest) {
       findings.push({
         id: `I20/${tool}/note`,
         severity: "fatal",
@@ -2524,36 +2541,41 @@ export async function applicabilityIsNeverSilent(s: Session): Promise<InvariantR
   // Provisions.
   for (const e of carriers.regulation) {
     bound++;
+    const related = await s.call("related", { id: e.id });
+    const label = typeof asObject(related.json)?.["citation"] === "string" ? (asObject(related.json)?.["citation"] as string) : undefined;
+    mustSay(e, "related", related, label);
     const got = await s.call("get", { ids: e.id });
-    mustSay(e, "get", got);
+    mustSay(e, "get", got, label);
     const record = firstRecord(got.json);
     const citation = typeof record?.["citation"] === "string" ? (record["citation"] as string) : undefined;
-    mustSay(e, "related", await s.call("related", { id: e.id }));
     if (citation !== undefined) {
       const cite = await s.call("cite", { text: citation });
-      if (asObject(asObject(cite.json)?.["match"])?.["id"] === e.id) mustSay(e, "cite", cite);
+      if (asObject(asObject(cite.json)?.["match"])?.["id"] === e.id) mustSay(e, "cite", cite, typeof asObject(cite.json)?.["official_citation"] === "string" ? (asObject(cite.json)?.["official_citation"] as string) : label);
       const page = await s.call("search", { query: citation, limit: 100 });
       const row = searchRows(page.json).find((r) => r.id === e.id);
       if (row !== undefined) mustSay(e, "search", page, typeof row["citation"] === "string" ? (row["citation"] as string) : undefined);
     }
+    // The provisions `brief` lists beside its answer.
+    const asked = await s.call("brief", { question: citation ?? label ?? e.id, budget: "short" });
+    const listed = ((plainRecord(bodyOf(asked))?.["also_relevant"] ?? []) as Array<{ id?: string; citation?: string }>).find((x) => x.id === e.id);
+    if (listed !== undefined) mustSay(e, "brief", asked, listed.citation);
+
     const a = e.applicability as Declared;
+    // Under as_of the note says only what the declaration supports: never "applied on" a date the text may not yet have
+    // existed on, never "no longer applies" about a day it had not ceased, and "did not apply" after it ceased or before it began.
+    const asOfCheck = async (asOf: string, ok: (note: string) => boolean, expectation: string, type: "historical" | "upcoming"): Promise<void> => {
+      const t = await s.call("get", { ids: e.id, as_of: asOf });
+      if (t.isError || firstRecord(t.json) === null) return;
+      const note = noteOfType(t, type).map((n) => n.text as string).join(" ");
+      if (!note.includes(asOf) || /\bapplied on\b/i.test(note) || !ok(note)) {
+        findings.push({ id: "I20/get/as_of", severity: "fatal", summary: `get under an as_of for a ${type} provision did not say ${expectation}.`, evidence: [`id ${e.id}`, `as_of ${asOf}`, `note: ${note.slice(0, 240) || "(none)"}`] });
+      }
+    };
     if (a.status === "historical") {
-      // The day it last applied: it applied then, and a caller who asks about that day is not told it no longer applies.
-      const on = await s.call("get", { ids: e.id, as_of: a.until });
-      if (!on.isError && firstRecord(on.json) !== null) {
-        const note = noteOfType(on, "historical").map((n) => n.text as string).join(" ");
-        if (!note.includes(a.until) || /no longer applies/i.test(note)) {
-          findings.push({ id: "I20/get/as_of", severity: "fatal", summary: "get under an as_of on the last day a provision applied did not say that it applied on that date (or said it no longer applies, as though the date were today).", evidence: [`id ${e.id}`, `as_of ${a.until}`, `note: ${note.slice(0, 240) || "(none)"}`] });
-        }
-      }
-      const after = new Date(Date.parse(`${a.until}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
-      const later = await s.call("get", { ids: e.id, as_of: after });
-      if (!later.isError && firstRecord(later.json) !== null) {
-        const note = noteOfType(later, "historical").map((n) => n.text as string).join(" ");
-        if (!note.includes(after) || !/did not apply/i.test(note)) {
-          findings.push({ id: "I20/get/as_of", severity: "fatal", summary: "get under an as_of after the day a provision ceased to apply did not say that it did not apply on that date.", evidence: [`id ${e.id}`, `as_of ${after}`, `note: ${note.slice(0, 240) || "(none)"}`] });
-        }
-      }
+      await asOfCheck(a.until, (n) => /not yet ceased/i.test(n) && !/no longer applies/i.test(n), "that on that date the text had not yet ceased to apply", "historical");
+      await asOfCheck(day(a.until, 1), (n) => /did not apply/i.test(n), "that the text did not apply on that date", "historical");
+    } else {
+      await asOfCheck(a.from === undefined ? "2000-01-01" : day(a.from, -1), (n) => /did not apply/i.test(n), "that the text did not apply on that date", "upcoming");
     }
   }
 
@@ -2561,8 +2583,8 @@ export async function applicabilityIsNeverSilent(s: Session): Promise<InvariantR
   for (const [scope, list] of [["checks", carriers.check], ["tests", carriers.test]] as const) {
     for (const e of list) {
       bound++;
-      mustSay(e, "get", await s.call("get", { ids: e.id }));
-      mustSay(e, "related", await s.call("related", { id: e.id }));
+      mustSay(e, "get", await s.call("get", { ids: e.id }), e.name);
+      mustSay(e, "related", await s.call("related", { id: e.id }), e.name);
       const name = e.name;
       if (name !== undefined) {
         const page = await s.call("search", { query: name, scope, limit: 100 });
@@ -2582,7 +2604,7 @@ export async function applicabilityIsNeverSilent(s: Session): Promise<InvariantR
       if (!shown.isError && !text.startsWith("> ")) {
         findings.push({ id: "I20/playbook/banner", severity: "fatal", summary: "playbook rendered an entry that declares it does not apply (yet) without the banner that opens its text.", evidence: [`id ${e.id}`, `first line: ${text.split("\n")[0]?.slice(0, 160) ?? "(none)"}`] });
       }
-      mustSay(e, "related", await s.call("related", { id: e.id }));
+      mustSay(e, "related", await s.call("related", { id: e.id }), e.title);
       mustSay(e, "topics", listed, e.title);
       if (e.title !== undefined) {
         const page = await s.call("search", { query: e.title, scope: "playbooks", limit: 100 });

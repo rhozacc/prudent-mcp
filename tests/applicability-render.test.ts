@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import { DEMO_PLAYBOOKS, demoPlaybookContext } from "../examples/inmemory-demo.ts";
+import { verifyPlaybook } from "../src/playbook-verify.ts";
 import { renderPlaybook } from "../src/render.ts";
 import type { Applicability, Playbook } from "../src/schema.ts";
 import { bannedTermsIn, identifiersIn } from "../src/language.ts";
@@ -57,5 +58,23 @@ describe("playbook banner", () => {
       expect(bannedTermsIn(line)).toEqual([]);
       expect(identifiersIn(line)).toEqual([]);
     }
+  });
+
+  it("does not change from one day to the next: no countdown, only whether the date has passed", () => {
+    const soon = withApp({ status: "upcoming", from: "2026-09-01", reason: "Postponed." });
+    const a = renderPlaybook(soon, ctx, { today: "2026-08-26" })!.text;
+    expect(a).not.toMatch(/\(in \d+ days\)|tomorrow/);
+    expect(renderPlaybook(soon, ctx, { today: "2026-08-27" })!.text).toBe(a);
+    expect(renderPlaybook(soon, ctx, { today: "2026-08-31" })!.text).toBe(a);
+    // The notes on the same text may count the days; the render may not.
+    expect(a.split("\n")[0]).toContain("apply from 2026-09-01");
+  });
+
+  it("can be left out, and is left out of the verifier's budget: a line the server adds cannot push a playbook over V6", () => {
+    const long = withApp({ ...HIST, reason: "x ".repeat(40_000) });
+    expect(renderPlaybook(long, ctx, { today: TODAY, banner: false })!.text).toBe(renderPlaybook(demo, ctx, { today: TODAY })!.text);
+    const v = verifyPlaybook(long, ctx, {});
+    expect(v.errors.filter((e) => e.rule === "V6")).toEqual([]);
+    expect(verifyPlaybook(demo, ctx, {}).errors.filter((e) => e.rule === "V6")).toEqual([]);
   });
 });
