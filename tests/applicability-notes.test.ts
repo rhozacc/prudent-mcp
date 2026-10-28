@@ -264,7 +264,10 @@ describe("applicability notes", () => {
       const old = await call("playbook", { id: "old-approach" });
       expect(of(old.notes, "historical").map((n) => n.applies_to)).toEqual([["Old approach capital"]]);
       expect(of(old.notes, "historical")[0]!.text).toContain("requirements in this playbook no longer apply");
-      expect((await call("playbook", { id: "new-approach" })).notes).toEqual([]);
+      expect((old.body["text"] as string).startsWith("> ")).toBe(true); // the banner, above the title
+      const fresh = await call("playbook", { id: "new-approach" });
+      expect(fresh.notes).toEqual([]);
+      expect((fresh.body["text"] as string).startsWith("# ")).toBe(true);
     });
     it("playbook: a current playbook is told which of the provisions it rests on no longer apply", async () => {
       Object.assign(adapters, createFileAdapters(CorpusFileSchema.parse({
@@ -278,6 +281,7 @@ describe("applicability notes", () => {
       const r = await call("brief", { question: "What did the old approach require for capital?" });
       expect((r.body["playbook"] as { id: string }).id).toBe("playbook://old-approach");
       expect(of(r.notes, "historical").flatMap((n) => n.applies_to ?? [])).toContain("Old approach capital");
+      expect((r.body["text"] as string).startsWith("> ")).toBe(true);
     });
     it("brief: tells a listed provision that is repealed", async () => {
       const r = await call("brief", { question: "capital operational loss institutions" });

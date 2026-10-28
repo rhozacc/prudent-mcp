@@ -10352,11 +10352,12 @@ function pendingChangeWarnings(sources, now = /* @__PURE__ */ new Date()) {
 // src/applicability.ts
 var HISTORICAL_PRIOR = 0.5;
 var applicabilityPrior = (record2) => record2.applicability?.status === "historical" ? HISTORICAL_PRIOR : 1;
-var grammar = (subject) => subject === "playbook" ? { subject: "The requirements in this playbook", applies: "apply", it: "they", is: "are" } : { subject: subject === "provision" ? "This text" : subject === "check" ? "This check" : "This test", applies: "applies", it: "it", is: "is" };
+var grammar = (subject) => subject === "playbook" ? { subject: "The requirements in this playbook", applies: "apply", it: "they", is: "are", was: "were" } : { subject: subject === "provision" ? "This text" : subject === "check" ? "This check" : "This test", applies: "applies", it: "it", is: "is", was: "was" };
 var reasonSentence = (reason) => {
   const r = reason.trim();
   return /[.!?]$/.test(r) ? r : `${r}.`;
 };
+var cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 var list = (xs) => xs.join("; ");
 function applicabilityText(a, subject, words) {
   const g = grammar(subject);
@@ -10365,13 +10366,16 @@ function applicabilityText(a, subject, words) {
   if (a.status === "historical") {
     const over = a.until < today;
     const lead = asOf === void 0 ? over ? `${g.subject} no longer ${g.applies}: ${g.it} ceased to apply after ${a.until}.` : `${g.subject} ${g.is} recorded as ceasing to apply after ${a.until}.` : asOf <= a.until ? `${g.subject} applied on ${asOf}, the date asked about, ${over ? `but ${g.it} has since ceased to apply: ${g.it} applied until ${a.until}` : `and ${g.it} ${g.is} recorded as ceasing to apply after ${a.until}`}.` : `${g.subject} did not apply on ${asOf}, the date asked about: ${g.it} ceased to apply after ${a.until}.`;
-    const tail2 = replaced.length === 0 ? "" : ` ${over ? "It was" : "It is to be"} replaced by ${list(replaced)}.`;
+    const tail2 = replaced.length === 0 ? "" : ` ${cap(g.it)} ${over ? g.was : `${g.is} to be`} replaced by ${list(replaced)}.`;
     return `${lead} Reason: ${reasonSentence(a.reason)}${tail2}`;
   }
-  const notYet = asOf !== void 0 && (a.from === void 0 || asOf < a.from) ? ` ${subject === "playbook" ? "They" : "It"} did not apply on ${asOf}, the date asked about.` : "";
+  const notYet = asOf !== void 0 && (a.from === void 0 || asOf < a.from) ? ` ${cap(g.it)} did not apply on ${asOf}, the date asked about.` : "";
   if (a.from === void 0) return `${g.subject} ${g.is} not yet in application: the date from which ${g.it} ${g.applies} is not yet fixed.${notYet} Reason: ${reasonSentence(a.reason)}`;
   if (a.from > today) return `${g.subject} ${g.is} not yet in application: ${g.it} ${g.applies} from ${a.from}${whenPhrase(today, a.from)}.${notYet} Reason: ${reasonSentence(a.reason)}`;
   return `${g.subject} ${g.is} recorded as applying from ${a.from}, a date that has passed; whether ${g.it} now ${g.applies} is not confirmed here. Reason: ${reasonSentence(a.reason)}`;
+}
+function applicabilityBanner(a, words) {
+  return `> ${applicabilityText(a, "playbook", words).replace(/\s+/g, " ")}`;
 }
 var replacedByIds = (a) => a.status === "historical" ? a.replaced_by ?? [] : [];
 
@@ -17128,8 +17132,13 @@ function provisionQuotes(refs, ctx) {
     return reg === void 0 || r.quote === void 0 ? [] : [quoteLine(r.quote, citationOf(reg, sourceFor(reg, ctx.sources)))];
   });
 }
-function header(pb, ctx) {
-  const out = [`# ${pb.title}`, "", pb.summary, "", "## What it rests on", ""];
+function banner(pb, ctx, today) {
+  const a = pb.applicability;
+  if (a === void 0) return [];
+  return [applicabilityBanner(a, { today, replacedBy: citationsOf(replacedByIds(a), ctx) }), ""];
+}
+function header(pb, ctx, today) {
+  const out = [...banner(pb, ctx, today), `# ${pb.title}`, "", pb.summary, "", "## What it rests on", ""];
   for (const b of pb.basis) {
     const lead = b.provisions[0];
     const first = lead === void 0 ? void 0 : ctx.regulations.get(lead.id);
@@ -17193,10 +17202,10 @@ function cutAtBoundary(text, max) {
   const space = head.lastIndexOf(" ");
   return head.slice(0, space > 0 ? space : max);
 }
-function renderSection(pb, handle, ctx, budget) {
+function renderSection(pb, handle, ctx, budget, today) {
   const r = pb.requirements.find((x) => x.id === handle);
   if (r === void 0) return null;
-  const out = [`# ${r.id}. ${r.title}`, `From: ${pb.title}`, "", r.statement, ""];
+  const out = [...banner(pb, ctx, today), `# ${r.id}. ${r.title}`, `From: ${pb.title}`, "", r.statement, ""];
   if (r.evidence.length > 0) out.push(`A reviewer will ask to see: ${r.evidence.join("; ")}.`, "");
   const checks = r.checks.flatMap((id) => ctx.checks?.get(id) === void 0 ? [] : [ctx.checks.get(id)]);
   for (const c of checks) out.push(`Check: ${c.name}. ${c.expectation}`);
@@ -17221,9 +17230,10 @@ function renderSection(pb, handle, ctx, budget) {
   return { text, tokens: approxTokens(text), abridged };
 }
 function renderPlaybook(pb, ctx, opts = {}) {
-  if (opts.section !== void 0) return renderSection(pb, opts.section, ctx, opts.budget ?? SECTION_RENDER_BUDGET);
+  const today = opts.today ?? isoDay(/* @__PURE__ */ new Date());
+  if (opts.section !== void 0) return renderSection(pb, opts.section, ctx, opts.budget ?? SECTION_RENDER_BUDGET, today);
   const budget = opts.budget ?? FULL_RENDER_BUDGET;
-  const head = header(pb, ctx);
+  const head = header(pb, ctx, today);
   const foot = tail(pb, ctx);
   const handles = pb.requirements.map((r) => r.id);
   const compact = /* @__PURE__ */ new Set();

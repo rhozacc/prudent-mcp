@@ -37,12 +37,13 @@ interface Grammar {
   /** "it" / "they". */
   it: string;
   is: string;
+  was: string;
 }
 
 const grammar = (subject: ApplicabilitySubject): Grammar =>
   subject === "playbook"
-    ? { subject: "The requirements in this playbook", applies: "apply", it: "they", is: "are" }
-    : { subject: subject === "provision" ? "This text" : subject === "check" ? "This check" : "This test", applies: "applies", it: "it", is: "is" };
+    ? { subject: "The requirements in this playbook", applies: "apply", it: "they", is: "are", was: "were" }
+    : { subject: subject === "provision" ? "This text" : subject === "check" ? "This check" : "This test", applies: "applies", it: "it", is: "is", was: "was" };
 
 /** The corpus's reason as a sentence of its own. */
 const reasonSentence = (reason: string): string => {
@@ -59,6 +60,7 @@ export interface ApplicabilityWords {
   replacedBy?: readonly string[] | undefined;
 }
 
+const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 const list = (xs: readonly string[]): string => xs.join("; ");
 
 /**
@@ -85,10 +87,10 @@ export function applicabilityText(a: Applicability, subject: ApplicabilitySubjec
         : asOf <= a.until
           ? `${g.subject} applied on ${asOf}, the date asked about, ${over ? `but ${g.it} has since ceased to apply: ${g.it} applied until ${a.until}` : `and ${g.it} ${g.is} recorded as ceasing to apply after ${a.until}`}.`
           : `${g.subject} did not apply on ${asOf}, the date asked about: ${g.it} ceased to apply after ${a.until}.`;
-    const tail = replaced.length === 0 ? "" : ` ${over ? "It was" : "It is to be"} replaced by ${list(replaced)}.`;
+    const tail = replaced.length === 0 ? "" : ` ${cap(g.it)} ${over ? g.was : `${g.is} to be`} replaced by ${list(replaced)}.`;
     return `${lead} Reason: ${reasonSentence(a.reason)}${tail}`;
   }
-  const notYet = asOf !== undefined && (a.from === undefined || asOf < a.from) ? ` ${subject === "playbook" ? "They" : "It"} did not apply on ${asOf}, the date asked about.` : "";
+  const notYet = asOf !== undefined && (a.from === undefined || asOf < a.from) ? ` ${cap(g.it)} did not apply on ${asOf}, the date asked about.` : "";
   if (a.from === undefined) return `${g.subject} ${g.is} not yet in application: the date from which ${g.it} ${g.applies} is not yet fixed.${notYet} Reason: ${reasonSentence(a.reason)}`;
   if (a.from > today) return `${g.subject} ${g.is} not yet in application: ${g.it} ${g.applies} from ${a.from}${whenPhrase(today, a.from)}.${notYet} Reason: ${reasonSentence(a.reason)}`;
   return `${g.subject} ${g.is} recorded as applying from ${a.from}, a date that has passed; whether ${g.it} now ${g.applies} is not confirmed here. Reason: ${reasonSentence(a.reason)}`;
