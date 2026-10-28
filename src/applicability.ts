@@ -15,6 +15,7 @@
  * Pure: no I/O. Notes are answer-bearing text (language rule, `src/language.ts`): no identifier, none of the banned
  * terms. The `reason` is the corpus's own sentence and is repeated as it stands.
  */
+import { quoted } from "./language.ts";
 import { whenPhrase } from "./pending.ts";
 import type { Applicability, RegulationId } from "./schema.ts";
 
@@ -40,9 +41,6 @@ interface Grammar {
   was: string;
 }
 
-/** A name in a note is quoted: somebody else's words (a title, a check's name), and exempt from the language rule. */
-const quoted = (name: string): string => `“${name}”`;
-
 /**
  * The grammatical subject of a sentence. With a `label` the sentence names what it is about (a citation, a check's name,
  * a playbook's title): in a list of results a note that says "this text" beside a current entry does not say which entry
@@ -52,7 +50,7 @@ const grammar = (subject: ApplicabilitySubject, label: string | undefined): Gram
   if (subject === "playbook") {
     return { subject: label === undefined ? "The requirements in this playbook" : `The requirements in the playbook ${quoted(label)}`, applies: "apply", it: "they", is: "are", was: "were" };
   }
-  const named = label === undefined ? undefined : subject === "provision" ? label : `The ${subject} ${quoted(label)}`;
+  const named = label === undefined ? undefined : subject === "provision" ? quoted(label) : `The ${subject} ${quoted(label)}`;
   return { subject: named ?? (subject === "provision" ? "This text" : subject === "check" ? "This check" : "This test"), applies: "applies", it: "it", is: "is", was: "was" };
 };
 
@@ -62,7 +60,7 @@ const reasonSentence = (reason: string): string => {
   return /[.!?]$/.test(r) ? r : `${r}.`;
 };
 
-/** A subject placed after "On <date>, …": "This text" and "The check …" lose their capital, a citation keeps its own. */
+/** A subject placed after "On <date>, …": "This text" and "The check …" lose their capital, a quoted citation keeps its own. */
 const midSentence = (s: string): string => (/^(This|The) /.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s);
 
 const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
@@ -84,7 +82,7 @@ export interface ApplicabilityWords {
   relative?: boolean | undefined;
 }
 
-const list = (xs: readonly string[]): string => xs.join("; ");
+const list = (xs: readonly string[]): string => xs.map(quoted).join("; ");
 
 /**
  * What a declaration says about the text in front of the caller.

@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import { adapters } from "../adapters.ts";
 import { citationOf, sourceFor } from "../citation-style.ts";
+import { quoted } from "../language.ts";
 import { renderPlaybook } from "../render.ts";
 import { playbookProvisions } from "../referrers.ts";
 import type { Playbook } from "../schema.ts";
@@ -61,7 +62,7 @@ export async function playbookNotes(pb: Playbook, ctxSources?: Ctx, opts: { asOf
 /** Notes as the plain lines a model reads at the end of a text answer. */
 export function notesText(notes: readonly Note[]): string {
   if (notes.length === 0) return "";
-  return ["## Notes", ...notes.map((n) => `- ${n.text}${n.applies_to === undefined || n.applies_to.length === 0 ? "" : ` (${n.applies_to.join("; ")})`}`)].join("\n");
+  return ["## Notes", ...notes.map((n) => `- ${n.text}${n.applies_to === undefined || n.applies_to.length === 0 ? "" : ` (${n.applies_to.map(quoted).join("; ")})`}`)].join("\n");
 }
 
 export const slugOf = (id: string): string => id.replace(/^playbook:\/\//, "");

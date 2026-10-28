@@ -218,9 +218,9 @@ describe("an unknown regulation id", () => {
   const TOOLS = ["get", "related"] as const;
 
   const variants: Array<[string, string, RegExp, RegExp]> = [
-    ["partial", "regulation://alpha/art-99", /holds only part of Title of alpha-doc \(4 provisions\).*not among the parts held, and may still be in the law/s, /probably mistyped/],
-    ["undeclared", "regulation://gam-seg/art-99", /holds 2 provisions of Title of gamma-doc and does not declare that as the whole.*not finding a provision here does not show it does not exist/s, /holds only part|probably mistyped/],
-    ["declared full", "regulation://beta/art-99", /declares Title of beta-doc held in full \(1 provision\).*probably mistyped/s, /holds only part|does not declare/],
+    ["partial", "regulation://alpha/art-99", /holds only part of “Title of alpha-doc” \(4 provisions\).*not among the parts held, and may still be in the law/s, /probably mistyped/],
+    ["undeclared", "regulation://gam-seg/art-99", /holds 2 provisions of “Title of gamma-doc” and does not declare that as the whole.*not finding a provision here does not show it does not exist/s, /holds only part|probably mistyped/],
+    ["declared full", "regulation://beta/art-99", /declares “Title of beta-doc” held in full \(1 provision\).*probably mistyped/s, /holds only part|does not declare/],
     ["not held", "regulation://nowhere/art-1", /No document with the id prefix "nowhere" is in this library.*sources/s, /holds only part|probably mistyped|does not declare/],
   ];
 
@@ -241,7 +241,7 @@ describe("an unknown regulation id", () => {
 
   it("a conflicting-declaration document is treated as partial", async () => {
     const r = await client.callTool({ name: "get", arguments: { ids: "regulation://delta/art-9" } });
-    expect(text(r)).toMatch(/holds only part of Title of delta-doc/);
+    expect(text(r)).toMatch(/holds only part of “Title of delta-doc”/);
   });
 
   it("sources says for each document whether it is held whole, in part or undeclared", async () => {
@@ -268,7 +268,7 @@ describe("resolveCitationDetailed notes", () => {
     expect(r.match).toBeNull();
     expect(r.confidence).toBe("none");
     expect(r.coverage_note).toContain("Nothing in this library is numbered 99 in the document named.");
-    expect(r.coverage_note).toMatch(/holds only part of Title of alpha-doc \(4 provisions\).*may still be in the law/s);
+    expect(r.coverage_note).toMatch(/holds only part of “Title of alpha-doc” \(4 provisions\).*may still be in the law/s);
   });
 
   it("nothing numbered, document named and declared full or undeclared: no partial clause", () => {
@@ -279,7 +279,7 @@ describe("resolveCitationDetailed notes", () => {
   it("nothing numbered, no document named: names every partial document held", () => {
     const note = resolve("Article 99").coverage_note ?? "";
     expect(note).toContain("Nothing in this library is numbered 99.");
-    expect(note).toMatch(/holds only part of Title of alpha-doc; Title of delta-doc, so if the citation is to one of those/);
+    expect(note).toMatch(/holds only part of “Title of alpha-doc”; “Title of delta-doc”, so if the citation is to one of those/);
     expect(note).not.toContain("beta-doc");
   });
 
@@ -288,7 +288,7 @@ describe("resolveCitationDetailed notes", () => {
     expect(r.match).toBeNull();
     expect(r.confidence).toBe("none");
     expect(r.candidates.map((c) => c.id)).toEqual(["regulation://alpha/art-3-a", "regulation://alpha/art-3-b"]);
-    expect(r.coverage_note).toMatch(/narrower provision\(s\).*holds only part of Title of alpha-doc/s);
+    expect(r.coverage_note).toMatch(/narrower provision\(s\).*holds only part of “Title of alpha-doc”/s);
   });
 
   it("the container note carries no clause: the provision's text is held, inside the container", () => {
@@ -324,7 +324,7 @@ describe("resolveCitationDetailed notes", () => {
 
   it("MetaAdapter.resolveCitation passes the holdings", async () => {
     const r = await createFileAdapters(parsed).meta.resolveCitation("Alpha Article 99");
-    expect(r.coverage_note).toMatch(/only part of Title of alpha-doc/);
+    expect(r.coverage_note).toMatch(/only part of “Title of alpha-doc”/);
   });
 });
 

@@ -14,6 +14,7 @@
  *
  * Pure over the supplied arrays: no I/O, no adapter handles.
  */
+import { quoted } from "./language.ts";
 import type { DocumentHolding, Regulation, RegulationId, Source } from "./schema.ts";
 
 /**
@@ -76,7 +77,7 @@ export function computeHoldings(regulations: Regulation[], sources: Source[]): D
   });
 }
 
-const nameOf = (h: DocumentHolding): string => h.title ?? h.document_id;
+const nameOf = (h: DocumentHolding): string => quoted(h.title ?? h.document_id);
 const provisionsOf = (n: number): string => `${n} provision${n === 1 ? "" : "s"}`;
 
 /**

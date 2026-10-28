@@ -17,6 +17,7 @@
  * parameter (as `staleSourceIds` takes `now`), so a state is testable without a
  * clock.
  */
+import { quoted } from "./language.ts";
 import type {
   PendingChange,
   PendingChangeState,
@@ -143,13 +144,14 @@ export function whenPhrase(today: string, date: string): string {
   return "";
 }
 
+/** How a note names a change: its title (and reference), in quotation marks, since both are the registry's own words. */
 const labelOf = (c: PendingChange): string =>
-  c.reference !== undefined && !c.title.includes(c.reference) ? `${c.title} (${c.reference})` : c.title;
+  quoted(c.reference !== undefined && !c.title.includes(c.reference) ? `${c.title} (${c.reference})` : c.title);
 
 const affectsOf = (c: PendingChange): string =>
   c.affects === undefined || c.affects.length === 0
     ? ""
-    : ` Said to concern ${c.affects.slice(0, MAX_AFFECTS).join("; ")}${c.affects.length > MAX_AFFECTS ? "; ..." : ""}.`;
+    : ` Said to concern ${c.affects.slice(0, MAX_AFFECTS).map(quoted).join("; ")}${c.affects.length > MAX_AFFECTS ? "; ..." : ""}.`;
 
 /** What one open change says about the text being served. */
 export function sentenceFor(o: OpenPendingChange, today: string): string {
@@ -206,14 +208,14 @@ export function pendingSearchNotice(docs: { title: string; open: OpenPendingChan
   if (withOpen.length === 0) return undefined;
   const items = withOpen.slice(0, MAX_PENDING_NAMED).map((d) => {
     const first = d.open[0];
-    if (first === undefined) return d.title;
+    if (first === undefined) return quoted(d.title);
     const when =
       first.change.effective_from === undefined
         ? "no date recorded"
         : first.state === "in_force_not_ingested"
           ? `applied ${first.change.effective_from}`
           : `from ${first.change.effective_from}`;
-    return `${d.title} (${labelOf(first.change)}, ${when}${d.open.length > 1 ? `, +${d.open.length - 1} more` : ""})`;
+    return `${quoted(d.title)} (${labelOf(first.change)}, ${when}${d.open.length > 1 ? `, +${d.open.length - 1} more` : ""})`;
   });
   const rest = withOpen.length - items.length;
   return (

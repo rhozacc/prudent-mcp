@@ -9,6 +9,7 @@ import { textCarriesPoint } from "./points.ts";
 import { STRUCTURAL, arraysEqual, citationTokens, recordTokensOf, spineIsFaithful, spineOf, startsWithTokens, windowAt, withoutConnectives } from "./tokens.ts";
 import type { Regulation, DocumentHolding, CitationCandidate, CitationResolution } from "../schema.ts";
 import { citationPartialClause } from "../holdings.ts";
+import { quoted } from "../language.ts";
 
 /** How many candidates a declined resolution is allowed to carry. */
 const MAX_CANDIDATES = 10;
@@ -227,7 +228,7 @@ export function resolveCitationDetailed(
       coverage_note:
         hit === undefined
           ? undefined
-          : `Matched an alias. This provision's own citation is "${hit.citation}" — quote that, ` +
+          : `Matched an alias. This provision's own citation is ${quoted(hit.citation)} — quote that, ` +
             `not "${text}".`,
     };
   }
@@ -248,7 +249,7 @@ export function resolveCitationDetailed(
       ...none(),
       match: hit ?? null,
       confidence: "alias",
-      coverage_note: hit === undefined ? undefined : `Matched an alias. This provision's own citation is "${hit.citation}" — quote that, not "${text}".`,
+      coverage_note: hit === undefined ? undefined : `Matched an alias. This provision's own citation is ${quoted(hit.citation)} — quote that, not "${text}".`,
     };
   }
   if (coreAliasHits.length > 1) return ambiguousResolution(text, coreAliasHits);
@@ -355,7 +356,7 @@ export function resolveCitationDetailed(
     return frameworks.size === 1 && unheld.every((d) => frameworks.has(d.issuer ?? ""));
   })();
   if (unheld.length > 0 && placeable && !looselyDescribed) {
-    const quoted = unheld.map((d) => `"${d.quote}"`).join(" and ");
+    const mentioned = unheld.map((d) => `"${d.quote}"`).join(" and ");
     const identifiers = unheld.every((d) => d.identifier);
     const heldNames: string[] = [];
     if (instrumentName !== null) heldNames.push(instrumentName);
@@ -401,14 +402,14 @@ export function resolveCitationDetailed(
       coverage_note:
         heldNames.length === 0
           ? identifiers
-            ? `"${text}" names an instrument by an identifier (${quoted}), and this library holds no ` +
+            ? `"${text}" names an instrument by an identifier (${mentioned}), and this library holds no ` +
               "document identified as such. Nothing was matched, rather than sourcing a " +
               `same-numbered provision from another document. ${wayOut}`
-            : `"${text}" names an instrument by description (${quoted}), and this library holds no ` +
+            : `"${text}" names an instrument by description (${mentioned}), and this library holds no ` +
               "document identified as such. Nothing was matched, rather than sourcing a same-numbered " +
               `provision from another document.${issuerNote} ${wayOut}`
           : `"${text}" names ${heldList} ` +
-            `and also an instrument by ${how} (${quoted}) that it holds no document identified ` +
+            `and also an instrument by ${how} (${mentioned}) that it holds no document identified ` +
             "as, so which of the two the provision belongs to cannot be told. Nothing was matched, " +
             `rather than sourcing a same-numbered provision from either. Name one instrument per ` +
             `citation. ${wayOut}`,
@@ -578,7 +579,7 @@ export function resolveCitationDetailed(
     // does goes looking and quotes around the gap. Only a verified `yes` keeps
     // that sentence.
     const carries = textCarriesPoint(best.r.text, points);
-    const held = `It holds the provision containing it: "${best.r.citation}" (${best.r.id})`;
+    const held = `It holds the provision containing it: ${quoted(best.r.citation)} (${best.r.id})`;
     const tail =
       carries === "yes"
         ? `, whose text carries point ${inside}. Open it and quote the point from its text rather than citing this resolution.`

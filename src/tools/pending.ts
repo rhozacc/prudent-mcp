@@ -17,6 +17,7 @@ import {
   pendingSearchNotice,
   type OpenPendingChange,
 } from "../pending.ts";
+import { quoted } from "../language.ts";
 import type { Regulation, Source } from "../schema.ts";
 import type { Note } from "./note-types.ts";
 
@@ -102,7 +103,7 @@ export async function pendingPageNotice(
 /** The sentence for rows an open change names: their citations, not their document. */
 function namedNotice(citations: string[]): string | undefined {
   if (citations.length === 0) return undefined;
-  const shown = citations.slice(0, MAX_PENDING_NAMED).join("; ");
+  const shown = citations.slice(0, MAX_PENDING_NAMED).map(quoted).join("; ");
   const rest = citations.length - MAX_PENDING_NAMED;
   return (
     `${citations.length === 1 ? "One result is a provision" : "Some results are provisions"} that a recorded change affects: ` +

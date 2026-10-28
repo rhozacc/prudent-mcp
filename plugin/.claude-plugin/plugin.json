@@ -1,7 +1,7 @@
 {
   "name": "prudent",
   "displayName": "Prudent",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "EU regulation and supervisory practice for internal ratings-based (IRB) credit risk, as a read-only MCP server: provisions, tests, checks and a compiled playbook per topic. The server is open source; point it at a corpus file you are licensed to use, or it starts empty.",
   "author": {
     "name": "Econlab",

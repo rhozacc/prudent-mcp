@@ -118,14 +118,14 @@ describe("provisionPendingNote", () => {
 
   it("says what an upcoming replacement does, by whom, when, and what the new wording is", () => {
     expect(note(regs, sources, P(1))).toBe(
-      `Pending change to this provision: Amending Guidelines (Paragraph a-1) replaces this provision from ${iso(30)} (in 30 days); ` +
+      `Pending change to this provision: “Amending Guidelines” (“Paragraph a-1”) replaces this provision from ${iso(30)} (in 30 days); ` +
         "the text below is the version before it. New wording: “Paragraph 1 is replaced by the following: the new rule.”.",
     );
   });
 
   it("says a deletion in force leaves the text out of date, and that there is no new wording", () => {
     expect(note(regs, sources, P(2))).toBe(
-      `Text may be out of date: Amending Guidelines (Paragraph a-2) has deleted this provision since ${iso(-5)}; ` +
+      `Text may be out of date: “Amending Guidelines” (“Paragraph a-2”) has deleted this provision since ${iso(-5)}; ` +
         "the text below may no longer be the text in force. It is deleted, with no new wording.",
     );
   });
@@ -137,11 +137,11 @@ describe("provisionPendingNote", () => {
       amender(2, "Point (a) in paragraph 2 is deleted.", [{ target: P(2), op: "delete", effective_from: iso(-5), point: "(a)" }]),
     ];
     expect(note(pointed, sources, P(1))).toBe(
-      `Pending change to this provision: Amending Guidelines (Paragraph a-1) replaces point (d) of this provision from ${iso(30)} (in 30 days); ` +
+      `Pending change to this provision: “Amending Guidelines” (“Paragraph a-1”) replaces point (d) of this provision from ${iso(30)} (in 30 days); ` +
         "the text below is the version before it. New wording: “Point (d) in paragraph 1 is replaced by the following: (d) the new point.”.",
     );
     expect(note(pointed, sources, P(2))).toBe(
-      `Text may be out of date: Amending Guidelines (Paragraph a-2) has deleted point (a) of this provision since ${iso(-5)}; ` +
+      `Text may be out of date: “Amending Guidelines” (“Paragraph a-2”) has deleted point (a) of this provision since ${iso(-5)}; ` +
         "the text below may no longer be the text in force. That point is deleted, with no new wording.",
     );
     // and it never says the whole provision is deleted
@@ -158,7 +158,7 @@ describe("provisionPendingNote", () => {
 
   it("says an insertion adds a provision after this one, quoting it", () => {
     expect(note(regs, sources, P(3))).toBe(
-      `Pending change to this provision: Amending Guidelines (Paragraph a-3) inserts a new provision after this one from ${iso(30)} (in 30 days). ` +
+      `Pending change to this provision: “Amending Guidelines” (“Paragraph a-3”) inserts a new provision after this one from ${iso(30)} (in 30 days). ` +
         "New provision: “After paragraph 3 insert the following: an added provision.”.",
     );
   });
@@ -200,10 +200,10 @@ describe("provisionPendingNote", () => {
   });
 
   it("names the amending instrument by its short name, else its source's title, else its document id", () => {
-    expect(note(regs, sources, P(1))).toContain("Amending Guidelines (");
-    expect(note(regs, [sources[0]!], P(1))).toContain("amender-doc (Paragraph a-1)");
+    expect(note(regs, sources, P(1))).toContain("“Amending Guidelines” (");
+    expect(note(regs, [sources[0]!], P(1))).toContain("“amender-doc” (“Paragraph a-1”)");
     const named = { ...amenderSource, citation_style: { kind: "eba-gl" as const, short_name: "EBA/GL/2026/05" } };
-    expect(note(regs, [sources[0]!, named], P(1))).toContain("EBA/GL/2026/05 (Paragraph a-1) replaces");
+    expect(note(regs, [sources[0]!, named], P(1))).toContain("“EBA/GL/2026/05” (“Paragraph a-1”) replaces");
     expect(note(regs, [sources[0]!, named], P(1))).not.toContain("Amending Guidelines");
   });
 
@@ -224,7 +224,7 @@ describe("provisionPendingNote", () => {
   it("says a provision a change names by id, with no amending provision held, in the change's own words", () => {
     const named = [baseSource([change({ title: "Overdue act", effective_from: iso(-3), affects_ids: [P(4)] })])];
     expect(note(base, named, P(4))).toBe(
-      `Text may be out of date: Overdue act has applied since ${iso(-3)}; the text below may no longer be the text in force.`,
+      `Text may be out of date: “Overdue act” has applied since ${iso(-3)}; the text below may no longer be the text in force.`,
     );
     expect(note(base, named, P(1))).toBeUndefined();
   });
@@ -247,10 +247,10 @@ describe("provisionPendingNote", () => {
     const n = provisionPendingNote(many[0]!, many, sources, today)!;
     expect(n.startsWith("Text may be out of date: ")).toBe(true);
     const at = (s: string) => n.indexOf(s);
-    expect(at("(Paragraph a-3) has deleted")).toBeGreaterThan(-1);
-    expect(at("(Paragraph a-3)")).toBeLessThan(at("(Paragraph a-2)"));
-    expect(at("(Paragraph a-2)")).toBeLessThan(at("(Paragraph a-4)"));
-    expect(n).not.toContain("(Paragraph a-1)");
+    expect(at("(“Paragraph a-3”) has deleted")).toBeGreaterThan(-1);
+    expect(at("(“Paragraph a-3”)")).toBeLessThan(at("(“Paragraph a-2”)"));
+    expect(at("(“Paragraph a-2”)")).toBeLessThan(at("(“Paragraph a-4”)"));
+    expect(n).not.toContain("(“Paragraph a-1”)");
     expect(n.endsWith(" (1 more.)")).toBe(true);
   });
 });

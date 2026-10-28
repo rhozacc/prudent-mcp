@@ -12,6 +12,7 @@
 import { adapters } from "../adapters.ts";
 import { applicabilityText, replacedByIds, type ApplicabilitySubject } from "../applicability.ts";
 import { citationOf, sourceFor } from "../citation-style.ts";
+import { quoted } from "../language.ts";
 import { isoDay } from "../pending.ts";
 import { placeholderNotice, preAdoptionPlaceholders } from "../placeholders.ts";
 import type { Applicability, Regulation, Source } from "../schema.ts";
@@ -117,7 +118,7 @@ export function applicabilityPageNotice<T extends { id: string; applicability?: 
             : a.from > today
               ? `applies from ${a.from}`
               : `recorded as applying from ${a.from}`;
-      items[a.status].push({ label: labelOf(r), said: `${labelOf(r)} (${when})` });
+      items[a.status].push({ label: labelOf(r), said: `${quoted(labelOf(r))} (${when})` });
     }
     const notes: Note[] = [];
     const say = (kind: "historical" | "upcoming", one: string, many: string, tail: string): void => {
@@ -161,7 +162,7 @@ export async function provisionNotes(
   const found = preAdoptionPlaceholders(record.text);
   if (found !== null) {
     // The spans are quoted: a reader needs to know WHICH reference is unresolved, and a quotation is the author's words.
-    const named = found.spans.map((x) => `“${x}”`).join("; ");
+    const named = found.spans.map(quoted).join("; ");
     notes.push({ type: "placeholder", text: `${placeholderNotice(found)} The placeholder${found.spans.length > 1 ? "s are" : " is"}: ${named}.`, applies_to: [cite] });
   }
   return notes;

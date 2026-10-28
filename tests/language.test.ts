@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
 
-import { BANNED_TERMS, bannedTermsIn, identifiersIn } from "../src/language.ts";
+import { applicabilityPageNotice } from "../src/tools/notes.ts";
+import { applicabilityText } from "../src/applicability.ts";
+import { BANNED_TERMS, bannedTermsIn, identifiersIn, quoted } from "../src/language.ts";
 
 // src/language.ts is the one definition of what the server's own prose may not
 // say. I17 (evals) applies it to everything the server writes; these pin the
@@ -59,5 +61,51 @@ describe("identifiersIn", () => {
     expect(identifiersIn("Article 178(1)(a) of the CRR applies from 2026-10-19.")).toEqual([]);
     expect(identifiersIn("Open regulation://crr/article-181 for the text.")).toEqual([]);
     expect(identifiersIn("Pass offset 20 for the next page.")).toEqual([]);
+  });
+});
+
+describe("quoted: a label from the library's data inside a note", () => {
+  const label = "Exclusion of own debt instrument holdings from default-risk requirement";
+
+  it("wraps the label in the library's quotation marks, and the rule does not read inside them", () => {
+    expect(quoted(label)).toBe(`“${label}”`);
+    expect(bannedTermsIn(label)).toEqual(["holdings"]);
+    expect(bannedTermsIn(`Some results are not yet in application: ${quoted(label)} (applies from 2027-01-01).`)).toEqual([]);
+    expect(identifiersIn(`${quoted("a_snake_name.field")} applies.`)).toEqual([]);
+  });
+
+  it("cannot be ended early by a quotation mark inside the label", () => {
+    const q = quoted('Say "the corpus" or “the registry” here');
+    expect(q.startsWith("“") && q.endsWith("”")).toBe(true);
+    expect(q.slice(1, -1)).not.toMatch(/["“”]/);
+    expect(bannedTermsIn(`See ${q} now.`)).toEqual([]);
+  });
+
+  it("still reads everything the server itself writes around the label", () => {
+    expect(bannedTermsIn(`The holdings of ${quoted(label)} are served.`)).toEqual(["holdings", "served"]);
+    expect(bannedTermsIn(`${quoted(label)} is not in the corpus.`)).toEqual(["corpus"]);
+  });
+
+  it("a search page's applicability note quotes each row's label and passes the rule", () => {
+    const rows = [
+      { id: "check://a/one", name: label, applicability: { status: "upcoming" as const, from: "2999-01-01", reason: "Not yet." } },
+      { id: "check://a/two", name: "Plain name", applicability: { status: "historical" as const, until: "2001-01-01", reason: "Gone." } },
+    ];
+    const notes = applicabilityPageNotice(rows, (r) => r.name, new Date("2026-05-01T00:00:00Z"))(rows);
+    expect(notes.map((n) => n.type).sort()).toEqual(["historical", "upcoming"]);
+    for (const n of notes) {
+      expect(n.text).toContain(`“${n.applies_to![0]}”`);
+      expect(bannedTermsIn(n.text)).toEqual([]);
+      expect(identifiersIn(n.text)).toEqual([]);
+    }
+    expect(notes.find((n) => n.type === "upcoming")!.text).toContain(`“${label}” (applies from 2999-01-01)`);
+  });
+
+  it("an applicability sentence about a labelled entry quotes it, and a server word beside it still fails", () => {
+    const a = { status: "upcoming" as const, from: "2999-01-01", reason: "Not yet." };
+    const text = applicabilityText(a, "check", { today: "2026-05-01", label });
+    expect(text).toContain(`The check “${label}” is not yet in application`);
+    expect(bannedTermsIn(text)).toEqual([]);
+    expect(bannedTermsIn(`${text} Nothing is held in the corpus.`)).toEqual(["corpus"]);
   });
 });
