@@ -9,6 +9,12 @@ bun run evals -- --json                             # machine-readable
 bun run evals:call search '{"query":"...","scope":"checks"}'  # drive one tool by hand
 ```
 
+## The `--json` shape
+
+`bun run evals -- --json` prints one object: `corpus`, `surface_tokens`, `tools`, `calls`, `tokens_observed`, `by_invariant`, `results`. `calls` and `tokens_observed` are the whole suite's totals (every call any probe made, and the estimated tokens of those replies), as they have always been. `by_invariant` is an array in run order of `{ "id", "calls", "tokens_observed" }`: the calls THAT invariant's probes made and the tokens of their replies. The figures sum to the totals. An invariant that only reads the traces of earlier ones (I17) makes no calls and reads `0`.
+
+Why both: a ratchet that compares `tokens_observed` across the whole suite reads a new probe (I20 added a few hundred calls on a real corpus) as a regression in context cost, when nothing the server sends a model got bigger. Compare each invariant against its own earlier figure (a new invariant has none and is new, not a regression); the totals stay for the overall size of a run. The text report prints each invariant's figure beside its name.
+
 ## What is being measured
 
 Every invariant calls the eight tools (`brief`, `playbook`, `topics`, `search` with a `scope`, `get`, `cite`, `related`, `sources`) and reads their 1.0 replies as sent: the `notes` array by type (`amendment`, `version`, `outside_library`, `placeholder`, `weak_match`, `historical`, `upcoming`), `documents` and `changes` from `sources`, `records` from `get`. Nothing sits between the probe and the reply, so the traces below are exactly what the invariants judged. A finding id names the tool that was at fault (`I15/get/note`, `I12/cite`, `I13/search/checks`, `I4/search/provisions-monotonic`). The stand-in sessions the tests use to make each invariant fail speak the same shapes.

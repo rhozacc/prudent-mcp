@@ -6,7 +6,7 @@
  *   CORPUS_FILE=/path/to/corpus.json bun run evals # a real corpus
  *   bun run evals --json                           # machine-readable
  */
-import { openSession, type InvariantResult, type Session } from "./harness.ts";
+import { openSession, runInvariants, type Session } from "./harness.ts";
 import { ALL } from "./invariants.ts";
 
 const asJson = process.argv.includes("--json");
@@ -17,8 +17,7 @@ async function main(): Promise<void> {
     corpusFile === undefined ? {} : { corpusFile },
   );
 
-  const results: InvariantResult[] = [];
-  for (const invariant of ALL) results.push(await invariant(session));
+  const { results, costs } = await runInvariants(session, ALL);
 
   const totalCalls = session.traces.length;
   const totalTokens = session.traces.reduce((n, t) => n + t.tokens, 0);
@@ -37,6 +36,8 @@ async function main(): Promise<void> {
           tools: session.tools.length,
           calls: totalCalls,
           tokens_observed: totalTokens,
+          // calls and tokens observed by each invariant's own probes; they sum to `calls` and `tokens_observed`.
+          by_invariant: costs,
           results,
         },
         null,
@@ -51,11 +52,12 @@ async function main(): Promise<void> {
   console.log(`tools published: ${session.tools.length} · standing surface cost ~${session.surfaceTokens} tokens`);
   console.log(`observed: ${totalCalls} calls, ~${totalTokens} tokens\n`);
 
-  for (const r of results) {
+  for (const [i, r] of results.entries()) {
     const bad = r.findings.filter((f) => f.severity === "fatal").length;
     const meh = r.findings.filter((f) => f.severity === "warn").length;
     const mark = !r.applicable ? "n/a " : bad > 0 ? "FAIL" : meh > 0 ? "warn" : "pass";
-    console.log(`${mark}  ${r.id}  ${r.title}`);
+    const cost = costs[i];
+    console.log(`${mark}  ${r.id}  ${r.title}${cost === undefined || cost.calls === 0 ? "" : `  (${cost.calls} calls, ~${cost.tokens_observed} tokens)`}`);
     for (const f of r.findings) {
       const sev = f.severity === "fatal" ? "✗" : f.severity === "warn" ? "⚠" : "·";
       console.log(`      ${sev} ${f.summary}`);
