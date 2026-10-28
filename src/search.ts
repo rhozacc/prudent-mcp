@@ -59,6 +59,7 @@
  * behavior is defined once and reused by the file adapter, the in-memory
  * demo, and any external backend that wants parity.
  */
+import { applicabilityPrior } from "./applicability.ts";
 import type { Check, Playbook, Regulation, Test } from "./schema.ts";
 
 // --- Core -----------------------------------------------------------------
@@ -744,6 +745,8 @@ export type SearchScope = "default" | "all";
  * - A `section` is an outline node. It is a heading, not a requirement, so it
  *   ranks at about a third of an operative record that matches as well.
  * - A scope/definitions boilerplate record (`is_metadata_only`) at half.
+ * - Repealed text (`applicability: historical`) at half, so current law outranks it on the same words. It stays in the
+ *   results and in `total_matches`: "what did the repealed regime require" must be answerable.
  */
 export function regulationRanking(opts: {
   scope?: SearchScope | undefined;
@@ -752,7 +755,7 @@ export function regulationRanking(opts: {
   return {
     glossary: opts.glossary,
     exclude: opts.scope === "all" ? undefined : (r) => r.role === "background",
-    prior: (r) => (r.kind === "section" ? 0.35 : 1) * (r.is_metadata_only === true ? 0.5 : 1),
+    prior: (r) => (r.kind === "section" ? 0.35 : 1) * (r.is_metadata_only === true ? 0.5 : 1) * applicabilityPrior(r),
   };
 }
 

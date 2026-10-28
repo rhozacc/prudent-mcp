@@ -36,6 +36,10 @@ A response that carries an edge-of-the-library fact carries it as a `notes` entr
 | `outside_library` | The instrument asked about is not held, or the document is held only in part | `cite` |
 | `placeholder` | The text names an instrument by a pre-adoption number ("Regulation (EU) xx/xx"), which is not a citation | `get`, `related`, `brief` |
 | `weak_match` | The best match covers little of the question; the topic may not be in the library | `brief`, `search` |
+| `historical` | The text no longer applies: it ceased to apply after a date, with the reason and, when recorded, what replaced it (by citation). Under `as_of` on or before that date the note says only that the text had not yet ceased to apply then (it never says it applied, because the declaration does not say when the text started); after it, that it did not apply then. Each note names the entry it concerns | `get`, `related`, `cite` (a match), `brief`, `playbook`, `topics`, `search` (one note per page naming the rows) |
+| `upcoming` | The text is not yet in application: it applies from a date, or the date is not yet fixed, with the reason | same as `historical` |
+
+`historical` and `upcoming` come from the corpus's own `applicability` declaration ([Applicability](/corpus/#applicability)), on provisions, checks, tests and playbooks. A playbook about such text also opens with a one-line banner, and a playbook that is itself current but rests on provisions that no longer apply says so in a note naming them. `search` ranks historical text below current law on the same words and drops nothing; `brief` routes a historical playbook only when it clearly is the best match. Entries that declare nothing carry no such note.
 
 ## `brief`
 

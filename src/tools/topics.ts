@@ -8,6 +8,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { adapters } from "../adapters.ts";
+import { applicabilityNotesFor, notesShape, withNotes } from "./notes.ts";
 import { firstSentence, READ_ONLY_HINTS, ok } from "./shared.ts";
 
 const slug = (id: string): string => id.replace(/^playbook:\/\//, "");
@@ -21,7 +22,7 @@ export function registerTopicsTool(server: McpServer): void {
         "The areas the library covers and the playbook for each topic: id, title and a one-line scope. Use it to see what exists " +
         "or to pick a playbook by name; for a question, brief finds the playbook itself.",
       inputSchema: {},
-      outputSchema: z.object({ areas: z.array(z.object({ id: z.string(), title: z.string(), playbooks: z.array(z.object({ id: z.string(), title: z.string(), scope: z.string() }).passthrough()) }).passthrough()) }).passthrough(),
+      outputSchema: z.object({ areas: z.array(z.object({ id: z.string(), title: z.string(), playbooks: z.array(z.object({ id: z.string(), title: z.string(), scope: z.string() }).passthrough()) }).passthrough()), ...notesShape }).passthrough(),
       annotations: READ_ONLY_HINTS,
     },
     async () => {
@@ -49,7 +50,8 @@ export function registerTopicsTool(server: McpServer): void {
         }
         area.playbooks.push({ id: p.id, title: p.title, scope: firstSentence(p.summary) });
       }
-      return ok({ areas });
+      // A playbook listed here that is about text which no longer applies, or does not apply yet, says so beside the list.
+      return ok(withNotes({ areas }, await applicabilityNotesFor(areas.flatMap((a) => a.playbooks.map((p) => p.id)))));
     },
   );
 }

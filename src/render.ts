@@ -12,7 +12,9 @@
  *
  * Force is labelled on every basis line, and a method that is market practice says so in so many words.
  */
+import { applicabilityBanner, replacedByIds } from "./applicability.ts";
 import { citationOf, locatorOf, sourceFor } from "./citation-style.ts";
+import { isoDay } from "./pending.ts";
 import { approxTokens, type PlaybookContext } from "./playbook-context.ts";
 import type { Playbook, PlaybookForce, Regulation, RegulationId } from "./schema.ts";
 
@@ -28,6 +30,14 @@ export interface RenderOptions {
   budget?: number;
   /** A requirement handle ("R4"): that requirement, with the full text of its provisions. */
   section?: string;
+  /** The day a banner is read against (ISO); defaults to today. Only a playbook that declares applicability has one. */
+  today?: string;
+  /**
+   * Whether the banner of a historical or upcoming playbook is written (default true). The verifier turns it off: its
+   * budget (V6) measures what the compiler wrote, and a line the server adds from a declaration must not push a playbook
+   * over it.
+   */
+  banner?: boolean;
 }
 
 export interface Rendered {
@@ -92,8 +102,18 @@ function provisionQuotes(
   });
 }
 
-function header(pb: Playbook, ctx: PlaybookContext): string {
-  const out = [`# ${pb.title}`, "", pb.summary, "", "## What it rests on", ""];
+/**
+ * The one-line banner of a playbook about text that no longer applies, or does not apply yet; none for a playbook that
+ * declares nothing. It sits above everything else, so no part of the rendering can be read without it.
+ */
+function banner(pb: Playbook, ctx: PlaybookContext, today: string, on: boolean): string[] {
+  const a = pb.applicability;
+  if (a === undefined || !on) return [];
+  return [applicabilityBanner(a, { today, replacedBy: citationsOf(replacedByIds(a), ctx) }), ""];
+}
+
+function header(pb: Playbook, ctx: PlaybookContext, today: string, withBanner: boolean): string {
+  const out = [...banner(pb, ctx, today, withBanner), `# ${pb.title}`, "", pb.summary, "", "## What it rests on", ""];
   for (const b of pb.basis) {
     const lead = b.provisions[0];
     const first = lead === undefined ? undefined : ctx.regulations.get(lead.id);
@@ -162,10 +182,10 @@ function cutAtBoundary(text: string, max: number): string {
   return head.slice(0, space > 0 ? space : max);
 }
 
-function renderSection(pb: Playbook, handle: string, ctx: PlaybookContext, budget: number): Rendered | null {
+function renderSection(pb: Playbook, handle: string, ctx: PlaybookContext, budget: number, today: string, withBanner: boolean): Rendered | null {
   const r = pb.requirements.find((x) => x.id === handle);
   if (r === undefined) return null;
-  const out = [`# ${r.id}. ${r.title}`, `From: ${pb.title}`, "", r.statement, ""];
+  const out = [...banner(pb, ctx, today, withBanner), `# ${r.id}. ${r.title}`, `From: ${pb.title}`, "", r.statement, ""];
   if (r.evidence.length > 0) out.push(`A reviewer will ask to see: ${r.evidence.join("; ")}.`, "");
   const checks = r.checks.flatMap((id) => (ctx.checks?.get(id) === undefined ? [] : [ctx.checks.get(id)!]));
   for (const c of checks) out.push(`Check: ${c.name}. ${c.expectation}`);
@@ -197,9 +217,10 @@ function renderSection(pb: Playbook, handle: string, ctx: PlaybookContext, budge
  * shown in short form, each saying how to ask for it in full.
  */
 export function renderPlaybook(pb: Playbook, ctx: PlaybookContext, opts: RenderOptions = {}): Rendered | null {
-  if (opts.section !== undefined) return renderSection(pb, opts.section, ctx, opts.budget ?? SECTION_RENDER_BUDGET);
+  const today = opts.today ?? isoDay(new Date());
+  if (opts.section !== undefined) return renderSection(pb, opts.section, ctx, opts.budget ?? SECTION_RENDER_BUDGET, today, opts.banner !== false);
   const budget = opts.budget ?? FULL_RENDER_BUDGET;
-  const head = header(pb, ctx);
+  const head = header(pb, ctx, today, opts.banner !== false);
   const foot = tail(pb, ctx);
   const handles = pb.requirements.map((r) => r.id);
   const compact = new Set<string>();

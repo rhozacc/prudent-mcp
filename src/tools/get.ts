@@ -12,7 +12,7 @@ import { z } from "zod";
 import { adapters } from "../adapters.ts";
 import { computeHoldings, missingRecordClause } from "../holdings.ts";
 import type { Regulation, RegulationId } from "../schema.ts";
-import { mergeNotes, notesShape, provisionNotes, withNotes, type Note } from "./notes.ts";
+import { applicabilityNotesFor, mergeNotes, notesShape, provisionNotes, withNotes, type Note } from "./notes.ts";
 import { AS_OF_MISS_CONTEXT, RESPONSE_CHAR_BUDGET, READ_ONLY_HINTS, miss, ok, resolveRegulation, serialize, stripEdgeNoise } from "./shared.ts";
 
 const MAX_IDS = 20;
@@ -46,8 +46,8 @@ export function registerGetTool(server: McpServer): void {
       description:
         "Open entries by id: full provisions (verbatim text, commentary), checks, tests, sources. Up to 20 per call. " +
         "as_of (ISO date) gives a provision's text in force on that date; where the library holds no version for it the current text " +
-        "comes back with a version note and is not evidence of what applied then. Notes also flag a recorded amendment and a " +
-        "pre-adoption placeholder: repeat them with the text. Playbooks are opened with playbook.",
+        "comes back with a version note and is not evidence of what applied then. Notes also flag text that no longer applies or does not " +
+        "apply yet, a recorded amendment and a pre-adoption placeholder: repeat them with the text. Playbooks are opened with playbook.",
       inputSchema: {
         ids: idsInput,
         as_of: z.string().date().optional().describe("ISO date, e.g. 2019-03-01. Provisions only."),
@@ -87,11 +87,17 @@ export function registerGetTool(server: McpServer): void {
         } else if (id.startsWith("check://")) {
           const c = await adapters.check.get(id as never);
           if (c === null) missing.push({ id, why: await missingWhy(id) });
-          else records.push(c as unknown as Entry);
+          else {
+            records.push(c as unknown as Entry);
+            notes.push(...(await applicabilityNotesFor([c.id])));
+          }
         } else if (id.startsWith("test://")) {
           const t = await adapters.test.get(id as never);
           if (t === null) missing.push({ id, why: await missingWhy(id) });
-          else records.push(t as unknown as Entry);
+          else {
+            records.push(t as unknown as Entry);
+            notes.push(...(await applicabilityNotesFor([t.id])));
+          }
         } else if (id.startsWith("source://")) {
           const s = await adapters.source.get(id as never);
           if (s === null) missing.push({ id, why: await missingWhy(id) });

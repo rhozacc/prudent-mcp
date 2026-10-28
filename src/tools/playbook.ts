@@ -13,15 +13,42 @@ import { citationOf, sourceFor } from "../citation-style.ts";
 import { renderPlaybook } from "../render.ts";
 import { playbookProvisions } from "../referrers.ts";
 import type { Playbook } from "../schema.ts";
-import { mergeNotes, notesShape, type Note } from "./notes.ts";
+import { applicabilityNote, mergeNotes, notesShape, type Note } from "./notes.ts";
 import { pendingNoteFor } from "./pending.ts";
 import { servedPlaybookContext } from "./playbook-context.ts";
 import { READ_ONLY_HINTS, miss, stripEdgeNoise } from "./shared.ts";
 
-/** Amendment notes for the provisions a playbook cites (at most `limit` provisions are checked, each once). */
-export async function playbookNotes(pb: Playbook, ctxSources?: Awaited<ReturnType<typeof servedPlaybookContext>>): Promise<Note[]> {
-  const ctx = ctxSources ?? (await servedPlaybookContext());
+type Ctx = Awaited<ReturnType<typeof servedPlaybookContext>>;
+
+/**
+ * What a playbook says about whether it applies, and about the entries it rests on that do not: the playbook's own
+ * declaration, then each provision, check or test it cites that is itself repealed or not yet in application. When the
+ * playbook is itself historical, its repealed provisions are not told again: the note on the playbook already says it.
+ */
+export async function playbookApplicabilityNotes(pb: Playbook, ctx: Ctx, opts: { asOf?: string | undefined } = {}): Promise<Note[]> {
   const notes: Note[] = [];
+  const own = await applicabilityNote(pb.applicability, "playbook", pb.title, { ...opts, sources: ctx.sources });
+  if (own !== undefined) notes.push(own);
+  for (const id of playbookProvisions(pb)) {
+    const reg = ctx.regulations.get(id);
+    if (reg === undefined || (pb.applicability?.status === "historical" && reg.applicability?.status === "historical")) continue;
+    const n = await applicabilityNote(reg.applicability, "provision", citationOf(reg, sourceFor(reg, ctx.sources)), { ...opts, sources: ctx.sources });
+    if (n !== undefined) notes.push(n);
+  }
+  const cited = new Set(pb.requirements.flatMap((r) => [...r.checks, ...r.tests]));
+  for (const id of cited) {
+    const entry = id.startsWith("check://") ? ctx.checks?.get(id as never) : ctx.tests?.get(id as never);
+    if (entry === undefined) continue;
+    const n = await applicabilityNote(entry.applicability, id.startsWith("check://") ? "check" : "test", entry.name, { ...opts, sources: ctx.sources });
+    if (n !== undefined) notes.push(n);
+  }
+  return mergeNotes(notes);
+}
+
+/** The notes of a playbook: its own applicability, then an amendment note for each cited provision a recorded change names. */
+export async function playbookNotes(pb: Playbook, ctxSources?: Ctx, opts: { asOf?: string | undefined } = {}): Promise<Note[]> {
+  const ctx = ctxSources ?? (await servedPlaybookContext());
+  const notes: Note[] = await playbookApplicabilityNotes(pb, ctx, opts);
   for (const id of playbookProvisions(pb)) {
     const reg = ctx.regulations.get(id);
     if (reg === undefined) continue;
@@ -47,7 +74,8 @@ export function registerPlaybookTool(server: McpServer): void {
       description:
         "A whole playbook for one topic as text: what it rests on (law, EBA guideline, ECB supervisory expectation, each labelled), what has to be " +
         "shown, methods (market practice is labelled as such), pitfalls, and what the library does not hold. With section (R1, R2, …) one " +
-        "requirement with the full text of its provisions. Ids come from topics and brief.",
+        "requirement with the full text of its provisions. Ids come from topics and brief. A playbook on text that no longer applies, or does not " +
+        "apply yet, says so at the top and in a note: repeat it.",
       inputSchema: {
         id: z.string().describe("A playbook id from topics or brief (the full id or just the name after the scheme)."),
         section: z.string().regex(/^R\d+$/).optional().describe("A requirement handle: R1, R2, …"),

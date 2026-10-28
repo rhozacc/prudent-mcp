@@ -9,6 +9,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { adapters } from "../adapters.ts";
+import { applicabilityPrior } from "../applicability.ts";
 import { citationOf, sourceFor } from "../citation-style.ts";
 import {
   checkSearchFields,
@@ -17,6 +18,7 @@ import {
   regulationSearchFields,
   testSearchFields,
 } from "../search.ts";
+import { applicabilityPageNotice } from "./notes.ts";
 import { pendingPageNotice } from "./pending.ts";
 import { READ_ONLY_HINTS, firstSentence, rankedSearchResult, rowCoverageShape, searchGlossary, searchInputShape, searchOutputShape } from "./shared.ts";
 
@@ -56,7 +58,8 @@ export function registerSearchTool(server: McpServer): void {
           ...common,
           records,
           fields: checkSearchFields,
-          options: { glossary },
+          options: { glossary, prior: applicabilityPrior },
+          pageNotice: applicabilityPageNotice(records, (c) => c.name),
           concise: (c, m) => ({ id: c.id, name: c.name, expectation: firstSentence(c.expectation), ...(m?.matched.excerpt === undefined ? {} : { matched_excerpt: m.matched.excerpt }) }),
         });
       }
@@ -66,7 +69,8 @@ export function registerSearchTool(server: McpServer): void {
           ...common,
           records,
           fields: testSearchFields,
-          options: { glossary },
+          options: { glossary, prior: applicabilityPrior },
+          pageNotice: applicabilityPageNotice(records, (t) => t.name),
           concise: (t, m) => ({ id: t.id, name: t.name, purpose: firstSentence(t.purpose), ...(m?.matched.excerpt === undefined ? {} : { matched_excerpt: m.matched.excerpt }) }),
         });
       }
@@ -76,7 +80,8 @@ export function registerSearchTool(server: McpServer): void {
           ...common,
           records,
           fields: playbookSearchFields,
-          options: { glossary },
+          options: { glossary, prior: applicabilityPrior },
+          pageNotice: applicabilityPageNotice(records, (p) => p.title),
           concise: (p) => ({ id: p.id, title: p.title, summary: firstSentence(p.summary) }),
         });
       }
@@ -84,7 +89,9 @@ export function registerSearchTool(server: McpServer): void {
       const found = await adapters.regulation.search(query);
       const records = document === undefined ? found : found.filter((r) => r.document_id === document);
       const sources = await adapters.source.list();
-      const pageNotice = await pendingPageNotice(records);
+      const pending = await pendingPageNotice(records);
+      const applies = applicabilityPageNotice(records, (r) => citationOf(r, sourceFor(r, sources)));
+      const pageNotice = (rows: object[]) => [...pending(rows), ...applies(rows)];
       return rankedSearchResult({
         ...common,
         records,

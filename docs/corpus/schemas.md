@@ -198,6 +198,62 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
             ],
             "additionalProperties": false
           }
+        },
+        "applicability": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "historical"
+                },
+                "until": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "replaced_by": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^regulation:\\/\\/.+"
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "until",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "upcoming"
+                },
+                "from": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "status",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "required": [
@@ -272,6 +328,62 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
         "last_updated": {
           "type": "string",
           "format": "date"
+        },
+        "applicability": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "historical"
+                },
+                "until": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "replaced_by": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^regulation:\\/\\/.+"
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "until",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "upcoming"
+                },
+                "from": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "status",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "required": [
@@ -338,6 +450,62 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
         "last_updated": {
           "type": "string",
           "format": "date"
+        },
+        "applicability": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "historical"
+                },
+                "until": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "replaced_by": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^regulation:\\/\\/.+"
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "until",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "upcoming"
+                },
+                "from": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "status",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "required": [
@@ -648,6 +816,62 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
           },
           "default": []
         },
+        "applicability": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "historical"
+                },
+                "until": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "replaced_by": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^regulation:\\/\\/.+"
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "until",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "upcoming"
+                },
+                "from": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "status",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
         "provenance": {
           "type": "object",
           "properties": {
@@ -910,6 +1134,76 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
 </details>
 
 ## Supporting types
+
+<details>
+<summary><code>Applicability</code></summary>
+
+```json
+{
+  "$ref": "#/definitions/Applicability",
+  "definitions": {
+    "Applicability": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "historical"
+            },
+            "until": {
+              "type": "string",
+              "format": "date"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            },
+            "replaced_by": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^regulation:\\/\\/.+"
+              }
+            }
+          },
+          "required": [
+            "status",
+            "until",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "upcoming"
+            },
+            "from": {
+              "type": "string",
+              "format": "date"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "status",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}
+```
+
+</details>
 
 <details>
 <summary><code>Commentary</code></summary>
@@ -1381,6 +1675,62 @@ Each block is the JSON Schema (draft-07) for one corpus type. Expand to read the
                     ],
                     "additionalProperties": false
                   }
+                },
+                "applicability": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "const": "historical"
+                        },
+                        "until": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "replaced_by": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^regulation:\\/\\/.+"
+                          }
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "until",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "const": "upcoming"
+                        },
+                        "from": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               },
               "required": [

@@ -9,6 +9,7 @@ import type {
   SourceAdapter,
   TestAdapter,
 } from "./adapters.ts";
+import { applicabilityPrior } from "./applicability.ts";
 import { resolveCitationDetailed } from "./citation/resolve.ts";
 import { computeHoldings } from "./holdings.ts";
 import { pendingChangeSummaries } from "./pending.ts";
@@ -207,7 +208,7 @@ export function createFileAdapters(corpus: CorpusFile): {
 
   const test: TestAdapter = {
     async search(query) {
-      return rankedRecords(corpus.tests, query, testSearchFields, undefined, { glossary: corpus.glossary });
+      return rankedRecords(corpus.tests, query, testSearchFields, undefined, { glossary: corpus.glossary, prior: applicabilityPrior });
     },
     async get(id) { return testMap.get(id) ?? null; },
     async list() { return corpus.tests; },
@@ -215,7 +216,7 @@ export function createFileAdapters(corpus: CorpusFile): {
 
   const check: CheckAdapter = {
     async search(query) {
-      return rankedRecords(corpus.checks, query, checkSearchFields, undefined, { glossary: corpus.glossary });
+      return rankedRecords(corpus.checks, query, checkSearchFields, undefined, { glossary: corpus.glossary, prior: applicabilityPrior });
     },
     async get(id) { return checkMap.get(id) ?? null; },
     async list() { return corpus.checks; },
@@ -223,7 +224,7 @@ export function createFileAdapters(corpus: CorpusFile): {
 
   const playbook: PlaybookAdapter = {
     async search(query) {
-      return rankedRecords(corpus.playbooks, query, playbookSearchFields, undefined, { glossary: corpus.glossary });
+      return rankedRecords(corpus.playbooks, query, playbookSearchFields, undefined, { glossary: corpus.glossary, prior: applicabilityPrior });
     },
     async get(id) { return playbookMap.get(id) ?? null; },
     async list() { return corpus.playbooks; },

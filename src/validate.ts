@@ -38,6 +38,10 @@
  *   9. Pending-change provisions — every `affects_ids` entry of a source's
  *      pending change resolves, because the note rides only on the records it
  *      names and a dangling id would silently drop it.
+ *  10. Applicability — `historical` needs an ISO `until`, `upcoming`'s `from`
+ *      is ISO when present, `reason` is not blank, and every `replaced_by`
+ *      resolves. The schema enforces the shapes at load time; the linter
+ *      repeats them because it is also run over records built without a parse.
  *
  * Staleness (a current source whose `verified` is older than
  * STALE_AFTER_DAYS) is advisory, not fatal — see `corpusWarnings`.
@@ -47,6 +51,7 @@ import { isoDay, openPendingChanges, pendingChangeWarnings } from "./pending.ts"
 import { preAdoptionPlaceholders } from "./placeholders.ts";
 import { playbookProvisions } from "./referrers.ts";
 import type {
+  Applicability,
   Check,
   Playbook,
   Regulation,
@@ -367,7 +372,53 @@ export function validateCorpus(corpus: CorpusInput, now: Date = new Date()): str
     }
   }
 
+  // 10 — applicability is well formed and what it points at exists.
+  const isoDate = (v: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+  const applicable = (id: string, a: Applicability | undefined): void => {
+    if (a === undefined) return;
+    if (typeof a.reason !== "string" || a.reason.trim() === "") errors.push(`${id}: applicability.reason is empty; a reader is told why the text does not apply (applicability)`);
+    if (a.status === "historical") {
+      if (typeof a.until !== "string" || !isoDate(a.until)) errors.push(`${id}: applicability is historical but until ${String(a.until)} is not an ISO date (applicability)`);
+      for (const r of a.replaced_by ?? []) if (!regIds.has(r)) errors.push(`${id}: applicability.replaced_by ${r} does not resolve`);
+    } else if (a.from !== undefined && !isoDate(a.from)) {
+      errors.push(`${id}: applicability is upcoming but from ${a.from} is not an ISO date (applicability)`);
+    }
+  };
+  for (const reg of regs) applicable(reg.id, reg.applicability);
+  for (const c of checks) applicable(c.id, c.applicability);
+  for (const t of tests) applicable(t.id, t.applicability);
+  for (const p of playbooks) applicable(p.id, p.applicability);
+
   return [...new Set(errors)];
+}
+
+/**
+ * Advisory applicability findings. A historical `until` that has not come yet means the text still applies and the
+ * server would say it no longer does; an upcoming `from` that has passed means the text may now apply; and a playbook
+ * that is not itself historical but rests on historical provisions presents repealed law as its basis (a playbook may
+ * cite such provisions as history, in which case it is marked historical itself or says so in its own words).
+ */
+export function applicabilityWarnings(corpus: CorpusInput, now: Date = new Date()): string[] {
+  const today = isoDay(now);
+  const out: string[] = [];
+  const dated = (id: string, a: Applicability | undefined): void => {
+    if (a === undefined) return;
+    if (a.status === "historical" && a.until > today) out.push(`${id}: applicability is historical but until ${a.until} is still ahead; the text still applies until then`);
+    if (a.status === "upcoming" && a.from !== undefined && a.from <= today) out.push(`${id}: applicability is upcoming but from ${a.from} has passed; check whether the text now applies`);
+  };
+  for (const r of corpus.regulation) dated(r.id, r.applicability);
+  for (const c of corpus.checks) dated(c.id, c.applicability);
+  for (const t of corpus.tests) dated(t.id, t.applicability);
+  for (const p of corpus.playbooks) dated(p.id, p.applicability);
+  const historical = new Set(corpus.regulation.filter((r) => r.applicability?.status === "historical").map((r) => r.id as string));
+  if (historical.size > 0) {
+    for (const p of corpus.playbooks) {
+      if (p.applicability?.status === "historical") continue;
+      const cited = [...playbookProvisions(p)].filter((id) => historical.has(id));
+      if (cited.length > 0) out.push(`${p.id}: rests on ${cited.length} historical provision(s) (${cited.slice(0, 3).join(", ")}${cited.length > 3 ? ", ..." : ""}) but is not itself marked historical`);
+    }
+  }
+  return out;
 }
 
 /**
@@ -382,7 +433,7 @@ export function corpusWarnings(corpus: CorpusInput, now: Date = new Date()): str
     const s = byId.get(id)!;
     return `${id}: verified ${s.verified} is older than ${STALE_AFTER_DAYS} days (stale)`;
   });
-  return [...stale, ...holdingsWarnings(corpus.regulation, sources), ...pendingChangeWarnings(sources, now)];
+  return [...stale, ...holdingsWarnings(corpus.regulation, sources), ...pendingChangeWarnings(sources, now), ...applicabilityWarnings(corpus, now)];
 }
 
 /**

@@ -7,6 +7,7 @@
  * about which schemas exist or what options produce them.
  */
 import {
+  ApplicabilitySchema,
   CheckSchema,
   CitationResolutionSchema,
   ExternalCitationSchema,
@@ -30,6 +31,7 @@ export const surfaceSchemas = {
 } as const;
 
 export const supportingSchemas = {
+  Applicability: ApplicabilitySchema,
   Commentary: CommentarySchema,
   Milestone: MilestoneSchema,
   CorpusInfo: CorpusInfoSchema,

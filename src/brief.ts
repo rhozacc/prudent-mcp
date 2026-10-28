@@ -42,6 +42,16 @@ export const ROUTING = {
   margin: 0.12,
   /** A playbook within this fraction of the leader's score is offered as a neighbour. */
   neighbour: 0.5,
+  /**
+   * What a playbook on repealed text (`applicability: historical`) has its ORDER multiplied by (`Route.priority`), so it
+   * leads only when it is clearly the best match: current law wins a tie, and a question about the repealed regime still
+   * finds it. It moves the ordering, the margin and the neighbour test and nothing else: the floor is read against the
+   * playbook's own `score`, so a repealed playbook is not held to a higher bar than a current one, and the vote it
+   * reports is not discounted a second time (the provisions it cites are already ranked down by the search prior, which
+   * `tools/brief.ts` takes back out before the vote is read). Playbooks that declare nothing are untouched, which is why
+   * the bank tuning above does not move.
+   */
+  historicalPrior: 0.75,
 } as const;
 
 export interface Route {
@@ -50,7 +60,10 @@ export interface Route {
   text: number;
   /** Vote signal, 0-1 (reciprocal-rank vote against a fixed yardstick). */
   vote: number;
+  /** Text and vote combined, 0-1. The floor and the reported confidence are read against this. */
   score: number;
+  /** `score` times the historical prior: what routes are ordered by, and what the margin and the neighbour test compare. */
+  priority: number;
 }
 
 export interface Routing {
@@ -109,15 +122,17 @@ export function routePlaybooks(args: {
     .map((playbook) => {
       const text = textOf.get(playbook.id) ?? 0;
       const v = Math.min(1, (vote.get(playbook.id) ?? 0) / yardstick);
-      return { playbook, text, vote: v, score: R.textWeight * text + (1 - R.textWeight) * v };
+      const prior = playbook.applicability?.status === "historical" ? R.historicalPrior : 1;
+      const score = R.textWeight * text + (1 - R.textWeight) * v;
+      return { playbook, text, vote: v, score, priority: score * prior };
     })
     .filter((r) => r.score > 0)
-    .sort((a, b) => b.score - a.score || (a.playbook.id < b.playbook.id ? -1 : 1));
+    .sort((a, b) => b.priority - a.priority || (a.playbook.id < b.playbook.id ? -1 : 1));
 
   const lead = routes[0];
   if (lead === undefined) return { routes, chosen: null, ambiguous: false, reason: "no_match", neighbours: [] };
   if (lead.score < R.floor) return { routes, chosen: null, ambiguous: false, reason: "below_floor", neighbours: [] };
   const second = routes[1];
-  const ambiguous = second !== undefined && lead.score - second.score < R.margin * lead.score;
-  return { routes, chosen: lead, ambiguous, neighbours: routes.slice(1).filter((r) => r.score >= R.neighbour * lead.score).slice(0, 2) };
+  const ambiguous = second !== undefined && lead.priority - second.priority < R.margin * lead.priority;
+  return { routes, chosen: lead, ambiguous, neighbours: routes.slice(1).filter((r) => r.priority >= R.neighbour * lead.priority).slice(0, 2) };
 }

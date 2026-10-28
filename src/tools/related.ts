@@ -13,7 +13,7 @@ import { crossRefs } from "../crossrefs.ts";
 import { computeHoldings } from "../holdings.ts";
 import { playbookProvisions } from "../referrers.ts";
 import type { Playbook, Regulation, RegulationId } from "../schema.ts";
-import { notesShape, officialCitation, provisionNotes, withNotes } from "./notes.ts";
+import { applicabilityNotesFor, mergeNotes, notesShape, officialCitation, provisionNotes, withNotes } from "./notes.ts";
 import { READ_ONLY_HINTS, miss, ok, resolveRegulation, stripEdgeNoise, unknownRegulationMiss } from "./shared.ts";
 
 const MAX_SIBLINGS = 12;
@@ -95,7 +95,10 @@ export function registerRelatedTool(server: McpServer): void {
           tests: await named("test", tests),
           playbooks: citing.map((p) => ({ id: p.id, title: p.title, requirements: requirementsCiting(p, current.id) })),
         };
-        return ok(withNotes(body, await provisionNotes(current, { asOf: as_of })));
+        // The entry itself, and every entry listed beside it that declares it does not apply (or not yet).
+        const listed: (string | undefined)[] = [parent?.id, ...siblings.map((r) => r.id), ...body.cites.map((r) => r.id), ...body.cited_by.map((r) => r.id), ...body.checks.map((r) => r.id), ...body.tests.map((r) => r.id), ...body.playbooks.map((p) => p.id)];
+        const beside = await applicabilityNotesFor(listed.filter((x): x is string => x !== undefined && x !== current.id));
+        return ok(withNotes(body, mergeNotes([...(await provisionNotes(current, { asOf: as_of, existed: as_of === undefined || record !== null })), ...beside])));
       }
 
       if (id.startsWith("check://") || id.startsWith("test://")) {
@@ -106,12 +109,13 @@ export function registerRelatedTool(server: McpServer): void {
         const primary = (entry as { primary_basis?: RegulationId[] }).primary_basis;
         const regs = await Promise.all((primary !== undefined && primary.length > 0 ? primary : basis).slice(0, MAX_LINKS).map((x) => adapters.regulation.get(x)));
         const playbooks = (await adapters.playbook.list()).filter((p) => p.requirements.some((r) => (isCheck ? r.checks : r.tests).includes(id as never)));
-        return ok({
+        const body = {
           id,
           name: entry.name,
           rests_on: await Promise.all(regs.flatMap((r) => (r === null ? [] : [ref(r)]))),
           playbooks: playbooks.map((p) => ({ id: p.id, title: p.title })),
-        });
+        };
+        return ok(withNotes(body, await applicabilityNotesFor([id, ...body.rests_on.map((r) => r.id), ...body.playbooks.map((p) => p.id)])));
       }
 
       if (id.startsWith("playbook://")) {
@@ -119,7 +123,8 @@ export function registerRelatedTool(server: McpServer): void {
         if (p === null) return miss(`This library holds no playbook with the id ${id}. topics lists them.`);
         const all = await adapters.playbook.list();
         const titleOf = new Map(all.map((x) => [x.id as string, x.title] as const));
-        return ok({ id: p.id, title: p.title, related: p.related.filter((x) => titleOf.has(x)).map((x) => ({ id: x, title: titleOf.get(x) })) });
+        const body = { id: p.id, title: p.title, related: p.related.filter((x) => titleOf.has(x)).map((x) => ({ id: x, title: titleOf.get(x) })) };
+        return ok(withNotes(body, await applicabilityNotesFor([p.id, ...body.related.map((r) => r.id)])));
       }
 
       return miss(`'${raw}' is not an id this library uses. Pass a regulation://, check://, test:// or playbook:// id (search and brief return them).`);
