@@ -49,6 +49,62 @@
         "last_updated": {
           "type": "string",
           "format": "date"
+        },
+        "applicability": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "historical"
+                },
+                "until": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "replaced_by": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^regulation:\\/\\/.+"
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "until",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "upcoming"
+                },
+                "from": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "status",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "required": [

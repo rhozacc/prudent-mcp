@@ -11779,6 +11779,19 @@ var playbookIdSchema = external_exports.string().regex(/^playbook:\/\/.+/);
 var sourceIdSchema = external_exports.string().regex(/^source:\/\/.+/);
 var anyIdSchema = external_exports.union([regulationIdSchema, testIdSchema, checkIdSchema, playbookIdSchema]);
 var regulationChildIdSchema = external_exports.union([regulationIdSchema, testIdSchema, checkIdSchema]);
+var ApplicabilitySchema = external_exports.discriminatedUnion("status", [
+  external_exports.object({
+    status: external_exports.literal("historical"),
+    until: external_exports.string().date(),
+    reason: external_exports.string().min(1),
+    replaced_by: external_exports.array(regulationIdSchema).optional()
+  }),
+  external_exports.object({
+    status: external_exports.literal("upcoming"),
+    from: external_exports.string().date().optional(),
+    reason: external_exports.string().min(1)
+  })
+]);
 var CommentarySchema = external_exports.object({
   source: external_exports.string(),
   // e.g. "EBA Q&A 2018_3804"
@@ -11879,7 +11892,9 @@ var RegulationSchema = external_exports.object({
   heading_path: external_exports.array(external_exports.string()).optional(),
   role: ProvisionRoleSchema.optional(),
   // Present on a provision of an AMENDING instrument: what it changes.
-  amends: external_exports.array(AmendmentSchema).optional()
+  amends: external_exports.array(AmendmentSchema).optional(),
+  // Whether this text applies (historical or upcoming). ABSENT = the corpus declares nothing, which reads as applying.
+  applicability: ApplicabilitySchema.optional()
   // Future fields: supersedes, last_amended, effective_from, ...
 });
 var TestSchema = external_exports.object({
@@ -11897,7 +11912,9 @@ var TestSchema = external_exports.object({
   primary_basis: external_exports.array(regulationIdSchema).optional(),
   parent: regulationIdSchema.optional(),
   // set when this test hangs off a regulation as a child; must appear in regulatory_basis
-  last_updated: external_exports.string().date()
+  last_updated: external_exports.string().date(),
+  // Whether this test applies (historical or upcoming); absent = declares nothing.
+  applicability: ApplicabilitySchema.optional()
   // Future fields: inputs, outputs, applies_to, interpretation, ...
 });
 var CheckSchema = external_exports.object({
@@ -11920,7 +11937,9 @@ var CheckSchema = external_exports.object({
   // concrete bar in plain language
   expected_evidence: external_exports.array(external_exports.string()).default([]),
   // artifacts that evidence compliance
-  last_updated: external_exports.string().date()
+  last_updated: external_exports.string().date(),
+  // Whether this check applies (historical or upcoming); absent = declares nothing.
+  applicability: ApplicabilitySchema.optional()
   // Future fields: severity_when_failed, references, applies_to, ...
 });
 var provisionRefSchema = external_exports.object({
@@ -11986,6 +12005,9 @@ var PlaybookSchema = external_exports.object({
   outside_library: external_exports.array(external_exports.object({ name: external_exports.string(), why: external_exports.string() })).default([]),
   // Member provisions deliberately not cited.
   excluded: external_exports.array(external_exports.object({ id: regulationIdSchema, reason: external_exports.string() })).default([]),
+  // Whether the topic applies (historical or upcoming), copied from the topic by the factory and never written by the
+  // compiler. ABSENT = the corpus declares nothing.
+  applicability: ApplicabilitySchema.optional(),
   provenance: external_exports.object({
     status: PlaybookStatusSchema,
     compiled_at: external_exports.string(),

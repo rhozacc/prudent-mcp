@@ -44,6 +44,34 @@ const sourceIdSchema = z.string().regex(/^source:\/\/.+/) as z.ZodType<SourceId>
 const anyIdSchema = z.union([regulationIdSchema, testIdSchema, checkIdSchema, playbookIdSchema]);
 const regulationChildIdSchema = z.union([regulationIdSchema, testIdSchema, checkIdSchema]);
 
+// --- Applicability (does this text apply?) -------------------------------------
+
+// What a corpus declares about whether a provision, check, test or playbook APPLIES. ABSENT means the corpus
+// declares nothing and the text is treated as applying: never defaulted, never `current`, because a declared
+// "applies" would be a claim nobody made. Two states, both of which a reader must be told about every time they
+// are served (`src/applicability.ts` holds the words, `src/tools/notes.ts` attaches them):
+//
+//   historical - text that no longer applies (`until` is the LAST day it applied; `replaced_by` the provisions that
+//                took its place, which must resolve - linter);
+//   upcoming   - text about a regime that does not apply yet (`from` is the first day it applies; absent means the
+//                date is not yet fixed).
+//
+// `reason` is the corpus's own sentence for why, written to be repeated to a user.
+export const ApplicabilitySchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("historical"),
+    until: z.string().date(),
+    reason: z.string().min(1),
+    replaced_by: z.array(regulationIdSchema).optional(),
+  }),
+  z.object({
+    status: z.literal("upcoming"),
+    from: z.string().date().optional(),
+    reason: z.string().min(1),
+  }),
+]);
+export type Applicability = z.infer<typeof ApplicabilitySchema>;
+
 // --- Regulation surface (versioned per source document) ----------------------
 
 export const CommentarySchema = z.object({
@@ -171,6 +199,8 @@ export const RegulationSchema = z.object({
   role: ProvisionRoleSchema.optional(),
   // Present on a provision of an AMENDING instrument: what it changes.
   amends: z.array(AmendmentSchema).optional(),
+  // Whether this text applies (historical or upcoming). ABSENT = the corpus declares nothing, which reads as applying.
+  applicability: ApplicabilitySchema.optional(),
   // Future fields: supersedes, last_amended, effective_from, ...
 });
 export type Regulation = z.infer<typeof RegulationSchema>;
@@ -190,6 +220,8 @@ export const TestSchema = z.object({
   primary_basis: z.array(regulationIdSchema).optional(),
   parent: regulationIdSchema.optional(),                      // set when this test hangs off a regulation as a child; must appear in regulatory_basis
   last_updated: z.string().date(),
+  // Whether this test applies (historical or upcoming); absent = declares nothing.
+  applicability: ApplicabilitySchema.optional(),
   // Future fields: inputs, outputs, applies_to, interpretation, ...
 });
 export type Test = z.infer<typeof TestSchema>;
@@ -211,6 +243,8 @@ export const CheckSchema = z.object({
   expectation: z.string(),                                    // concrete bar in plain language
   expected_evidence: z.array(z.string()).default([]),         // artifacts that evidence compliance
   last_updated: z.string().date(),
+  // Whether this check applies (historical or upcoming); absent = declares nothing.
+  applicability: ApplicabilitySchema.optional(),
   // Future fields: severity_when_failed, references, applies_to, ...
 });
 export type Check = z.infer<typeof CheckSchema>;
@@ -292,6 +326,9 @@ export const PlaybookSchema = z.object({
   outside_library: z.array(z.object({ name: z.string(), why: z.string() })).default([]),
   // Member provisions deliberately not cited.
   excluded: z.array(z.object({ id: regulationIdSchema, reason: z.string() })).default([]),
+  // Whether the topic applies (historical or upcoming), copied from the topic by the factory and never written by the
+  // compiler. ABSENT = the corpus declares nothing.
+  applicability: ApplicabilitySchema.optional(),
   provenance: z.object({
     status: PlaybookStatusSchema,
     compiled_at: z.string(),                     // ISO datetime
